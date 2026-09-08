@@ -1,0 +1,60 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<title>在线留言_{{tag "hope_webname" .}}</title>
+<meta name="keywords" content="{{tag "hope_meta_keywords(12)" .}}" />
+<meta name="description" content="{{tag "hope_meta_description(12)" .}}" />
+<link href="/css/c.css" rel="stylesheet" type="text/css" />
+<script language="javascript" type="text/javascript" src="/js/ajaxrequest.js"></script><SCRIPT language="javascript">function add(){if(document.addform.name.value==""){alert("姓名不能为空!");document.addform.name.focus();return false;}
+if(document.addform.address.value==""){alert("地址不能为空!");document.addform.address.focus();return false;}if(document.addform.phone.value==""){alert("电话不能为空!")
+;document.addform.phone.focus();return false;}if(document.addform.email.value==""){alert("Email不能为空!");document.addform.email.focus();return false;}if(document.
+addform.Title.value==""){alert("主题不能为空!");document.addform.Title.focus();return false;}var ajax=new AJAXRequest;ajax.setcharset("UTF-8");ajax.postf(document.
+getElementById("addform"),function(obj) { if(obj.responseText=="true"){alert("留言成功")}; });}</SCRIPT>
+{{tag "bm_indextop" .}}
+<div id="page_main" class="clearfix">
+    <div class="page-right">
+      <div class="site-nav"><span>当前位置 : </span><a href="/index.html">公司主页</a> &gt;&gt; <a href="/msg.html" title="在线留言">在线留言</a> </div>
+	  <div class="page-products">
+      <ul class="clearfix"><table width="705" border="0" cellpadding="0" cellspacing="0"><tr><td width="567" valign="top">
+<form id="addform" name="addform" method="post" action="/ajaxcode/prodMsg.asp?action=msgadd"><DIV style="PADDING-TOP:8px"></DIV>
+<table width="98%" border="0" align="center" cellpadding="0" cellspacing="0"><tr><td width="13%" height="25">姓名：</td><td colspan="3"><input name="name" type="text"
+ id="name" /><span class="Font_FF0000_a">*</span></td></tr><tr><td height="25">地址：</td><td colspan="3"><input name="address" type="text" id="address" size="62" />
+ <span class="Font_FF0000_a">*</span></td></tr><tr><td height="25">电话：</td><td width="34%"><input name="phone" type="text" id="phone" /><span class="Font_FF0000_a">*
+ </span></td><td width="10%">手机：</td><td width="43%"><input name="mobile" type="text" id="mobile" /></td></tr><tr><td height="25">传真：</td><td><input name="fax" 
+ type="text" id="fax" /></td><td>Email：</td><td><input name="email" type="text" id="email" /><span class="Font_FF0000_a">*</span></td></tr><tr><td height="25">主题：
+ </td><td colspan="3"><input name="Title" type="text" id="Title" size="62" /><span class="Font_FF0000_a">*</span></td></tr><tr><td height="25">内容：</td><td colspan="3">
+ <textarea name="content" cols="60" rows="6" id="content"></textarea></td></tr><tr><td height="50" colspan="4" align="center"><input type="button" name="Submit" value="
+ 提交留言" onclick="add();" />&nbsp;<input type="reset" name="Submit2" value="重 写" /></td></tr></table></form></td><td width="138" align="center" valign="top" class="
+ Right_dashedl_line">{{tag "msgindex()" .}}</td></tr></table>
+</ul>
+<div class="page_list">
+  <div class="list_info"></div>
+</div>
+      </div>
+    </div>
+    <div class="page-left">
+      <div class="left-products">
+        <h2><span>产品展示</span></h2>
+        <div id="LeftMenu" class="ddsmoothmenu-v">
+          <ul>
+{{tag "hope_productscat()" .}}
+          </ul>
+        </div>
+      </div>
+      <div class="left-search">
+        <h2><span>站内搜索</span></h2>
+<form id="form2" name="form2" method="post" action="/Search.asp?action=search">
+          <p>
+            <input name="ProductsName" type="text" id="ProductsName" value="找找看" size="18"  class="Font_666666_a" onfocus="this.value='';" />
+            <input name="searchbutton" type="submit" id="searchbutton" value="" />
+          </p>
+        </form>
+      </div><div class="index-contact">
+
+</div></div>
+</div>
+    {{tag "bm_botten" .}}
+</div>
+</body>
+</html>

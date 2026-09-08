@@ -1,0 +1,17 @@
+/data/*.db
+/data/*.db-*
+/data/publish.json
+/data/publish.lock
+/bin/
+/.web-stage-*/
+/web.previous/
+
+# Published website (sources: backend/templates; resources served separately)
+/web/
+
+# Business-managed product and editorial images stay outside Git.
+/assets/images/*
+!/assets/images/.gitkeep
+
+# Local archive of the old ASP system
+/legacy/
