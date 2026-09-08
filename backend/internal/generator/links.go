@@ -86,6 +86,10 @@ func (c *content) normalizeLinks(assets, theme string) error {
 			if e != nil || u.Path == "" {
 				return attr
 			}
+			external := u.IsAbs() || u.Host != ""
+			if external && !strings.EqualFold(u.Hostname(), "www.bilvie.com") {
+				return attr
+			}
 			legacy := strings.HasPrefix(strings.ToLower(strings.TrimPrefix(strings.ReplaceAll(u.Path, `\`, "/"), "/")), "uploadfile/") ||
 				strings.HasPrefix(strings.ToLower(strings.TrimPrefix(strings.ReplaceAll(u.Path, `\`, "/"), "/")), "produppic/")
 			if legacy {
@@ -98,7 +102,7 @@ func (c *content) normalizeLinks(assets, theme string) error {
 				u.Path = "/images/" + filename
 				return m[1] + `="` + esc(u.String()) + `"`
 			}
-			if u.IsAbs() || u.Host != "" {
+			if external {
 				return attr
 			}
 			target := path.Clean(path.Join("/", path.Dir(name), u.Path))

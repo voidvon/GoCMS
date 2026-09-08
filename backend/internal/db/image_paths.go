@@ -4,31 +4,41 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
+	"path"
+	"regexp"
 	"strings"
 )
 
-var legacyImagePathReplacements = [][2]string{
-	{"http://www.bilvie.com/UploadFile/produppic/", "/images/"},
-	{"https://www.bilvie.com/UploadFile/produppic/", "/images/"},
-	{"http://www.bilvie.com/uploadfile/produppic/", "/images/"},
-	{"https://www.bilvie.com/uploadfile/produppic/", "/images/"},
-	{"/UploadFile/produppic/", "/images/"},
-	{"/uploadfile/produppic/", "/images/"},
-	{`\UploadFile\produppic\`, "/images/"},
-	{`\uploadfile\produppic\`, "/images/"},
-	{"UploadFile/produppic/", "/images/"},
-	{"uploadfile/produppic/", "/images/"},
-	{"http://www.bilvie.com/UploadFile/", "/images/"},
-	{"https://www.bilvie.com/UploadFile/", "/images/"},
-	{"http://www.bilvie.com/uploadfile/", "/images/"},
-	{"https://www.bilvie.com/uploadfile/", "/images/"},
-	{"/UploadFile/", "/images/"},
-	{"/uploadfile/", "/images/"},
-	{`\UploadFile\`, "/images/"},
-	{`\uploadfile\`, "/images/"},
-	{"UploadFile/", "/images/"},
-	{"uploadfile/", "/images/"},
-	{"/produppic/", "/images/"},
+var legacyImageToken = regexp.MustCompile(`(?i)(?:https?://[^"'\s<>\)]+|//[^"'\s<>\)]+|(?:[a-z]:)?[\\/]*(?:uploadfile|produppic)[^"'\s<>\)]+)`)
+
+func normalizeImageText(value string) string {
+	return legacyImageToken.ReplaceAllStringFunc(value, normalizeImageToken)
+}
+
+func normalizeImageToken(value string) string {
+	normalized := strings.ReplaceAll(value, `\`, "/")
+	u, err := url.Parse(normalized)
+	if err != nil || u.Path == "" {
+		return value
+	}
+	if u.Host != "" && !strings.EqualFold(u.Hostname(), "www.bilvie.com") {
+		return value
+	}
+	trimmed := strings.TrimPrefix(u.Path, "/")
+	lower := strings.ToLower(trimmed)
+	if !strings.HasPrefix(lower, "uploadfile/") && !strings.HasPrefix(lower, "produppic/") {
+		return value
+	}
+	filename := path.Base(trimmed)
+	if filename == "." || filename == "/" || filename == "" {
+		return value
+	}
+	u.Scheme, u.Host, u.Opaque = "", "", ""
+	u.User = nil
+	u.RawPath = ""
+	u.Path = "/images/" + filename
+	return u.String()
 }
 
 // NormalizeImagePaths migrates legacy upload URLs in every TEXT column to the
@@ -89,14 +99,42 @@ func NormalizeImagePaths(ctx context.Context, database *sql.DB) error {
 
 		for _, column := range textColumns {
 			quotedColumn := quoteIdentifier(column)
-			expression := quotedColumn
-			for _, replacement := range legacyImagePathReplacements {
-				expression = fmt.Sprintf("replace(%s, %s, %s)", expression, quoteSQLString(replacement[0]), quoteSQLString(replacement[1]))
+			query := `SELECT rowid, ` + quotedColumn + ` FROM ` + quoteIdentifier(table) +
+				` WHERE typeof(` + quotedColumn + `) = 'text' AND (instr(lower(` + quotedColumn + `), 'uploadfile') > 0 OR instr(lower(` + quotedColumn + `), 'produppic') > 0)`
+			rows, err := tx.QueryContext(ctx, query)
+			if err != nil {
+				return fmt.Errorf("inspect %s.%s values: %w", table, column, err)
 			}
-			query := `UPDATE ` + quoteIdentifier(table) + ` SET ` + quotedColumn + ` = ` + expression +
-				` WHERE instr(lower(` + quotedColumn + `), 'uploadfile') > 0 OR instr(lower(` + quotedColumn + `), 'produppic') > 0`
-			if _, err := tx.ExecContext(ctx, query); err != nil {
-				return fmt.Errorf("normalize %s.%s: %w", table, column, err)
+			updates := make([]struct {
+				rowID int64
+				value string
+			}, 0)
+			for rows.Next() {
+				var rowID int64
+				var value string
+				if err := rows.Scan(&rowID, &value); err != nil {
+					rows.Close()
+					return fmt.Errorf("read %s.%s value: %w", table, column, err)
+				}
+				normalized := normalizeImageText(value)
+				if normalized != value {
+					updates = append(updates, struct {
+						rowID int64
+						value string
+					}{rowID: rowID, value: normalized})
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return fmt.Errorf("read %s.%s values: %w", table, column, err)
+			}
+			if err := rows.Close(); err != nil {
+				return fmt.Errorf("close %s.%s values: %w", table, column, err)
+			}
+			for _, update := range updates {
+				if _, err := tx.ExecContext(ctx, `UPDATE `+quoteIdentifier(table)+` SET `+quotedColumn+` = ? WHERE rowid = ?`, update.value, update.rowID); err != nil {
+					return fmt.Errorf("normalize %s.%s: %w", table, column, err)
+				}
 			}
 		}
 	}
@@ -104,8 +142,4 @@ func NormalizeImagePaths(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("normalize default product image: %w", err)
 	}
 	return tx.Commit()
-}
-
-func quoteSQLString(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }

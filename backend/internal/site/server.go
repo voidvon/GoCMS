@@ -1,9 +1,7 @@
 package site
 
 import (
-	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -12,7 +10,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"bilvie/internal/auth"
@@ -26,9 +23,6 @@ type Server struct {
 	assetsRoot   string
 	themeRoot    string
 	publication  *publication
-
-	sessionsMu sync.RWMutex
-	sessions   map[string]string
 }
 
 type Product struct {
@@ -56,13 +50,25 @@ type SearchResult struct {
 
 var htmlTagPattern = regexp.MustCompile(`(?s)<[^>]*>`)
 
-func New(database *sql.DB, siteRoot string) *Server {
+func New(database *sql.DB, siteRoot string) (*Server, error) {
+	if database != nil {
+		if _, err := database.Exec(`
+			CREATE TABLE IF NOT EXISTS "bilvie_admin_session" (
+				"token" TEXT PRIMARY KEY,
+				"username" TEXT NOT NULL,
+				"expires_at" INTEGER NOT NULL
+			)`); err != nil {
+			return nil, fmt.Errorf("create admin session table: %w", err)
+		}
+		if _, err := database.Exec(`CREATE INDEX IF NOT EXISTS "idx_bilvie_admin_session_expiry" ON "bilvie_admin_session" ("expires_at")`); err != nil {
+			return nil, fmt.Errorf("create admin session index: %w", err)
+		}
+	}
 	return &Server{
 		database:  database,
 		siteRoot:  siteRoot,
 		fileServe: http.FileServer(http.Dir(siteRoot)),
-		sessions:  make(map[string]string),
-	}
+	}, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -95,6 +101,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminProducts(response, request)
 	case "/api/admin/news":
 		s.adminNews(response, request)
+	case "/api/admin/news-categories":
+		s.adminNewsCategories(response, request)
 	case "/api/admin/messages":
 		s.adminMessages(response, request)
 	case "/api/admin/categories":
@@ -121,8 +129,16 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 			s.adminProduct(response, request, cleanPath[len("/api/admin/products/"):])
 			return
 		}
+		if strings.HasPrefix(lowerPath, "/api/admin/news/") {
+			s.adminNewsItem(response, request, cleanPath[len("/api/admin/news/"):])
+			return
+		}
 		if strings.HasPrefix(lowerPath, "/api/admin/messages/") {
 			s.adminMessage(response, request, cleanPath[len("/api/admin/messages/"):])
+			return
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/categories/") {
+			s.adminCategory(response, request, cleanPath[len("/api/admin/categories/"):])
 			return
 		}
 		if strings.HasPrefix(strings.ToLower(cleanPath), "/api/products/") {
@@ -297,7 +313,12 @@ func (s *Server) searchHTML(response http.ResponseWriter, request *http.Request)
 		if image == "" {
 			image = "/images/index_NewsPic.jpg"
 		}
-		fmt.Fprintf(response, `<article class="item"><img src="%s" alt="%s"><div><h2><a href="/Product/%d.html">%s</a></h2><p>%s</p></div></article>`, html.EscapeString(image), html.EscapeString(item.Name), item.ID, html.EscapeString(item.Name), html.EscapeString(snippet(item.Remark, 150)))
+		productURL, err := s.productDetailURL(request.Context(), item.Category, item.ID)
+		if err != nil {
+			http.Error(response, "product route error", http.StatusInternalServerError)
+			return
+		}
+		fmt.Fprintf(response, `<article class="item"><img src="%s" alt="%s"><div><h2><a href="%s">%s</a></h2><p>%s</p></div></article>`, html.EscapeString(image), html.EscapeString(item.Name), html.EscapeString(productURL), html.EscapeString(item.Name), html.EscapeString(snippet(item.Remark, 150)))
 	}
 	fmt.Fprint(response, `</section><nav class="pages">`)
 	lastPage := (result.Total + int64(result.PageSize) - 1) / int64(result.PageSize)
@@ -370,16 +391,12 @@ func (s *Server) checkLogin(response http.ResponseWriter, request *http.Request)
 		http.Error(response, "用户名或密码不正确", http.StatusUnauthorized)
 		return
 	}
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
+	token, err := s.createSession(username)
+	if err != nil {
 		http.Error(response, "session error", http.StatusInternalServerError)
 		return
 	}
-	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
-	s.sessionsMu.Lock()
-	s.sessions[token] = username
-	s.sessionsMu.Unlock()
-	http.SetCookie(response, &http.Cookie{Name: "bilvie_admin", Value: token, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 86400})
+	http.SetCookie(response, sessionCookie(token, 86400))
 	_, _ = s.database.ExecContext(request.Context(), `UPDATE "benming_master" SET "LastLogin" = ?, "LastLoginIp" = ? WHERE "Id" = ?`, time.Now().Format("2006-01-02 15:04:05"), request.RemoteAddr, id)
 	http.Redirect(response, request, "/bil/index.asp", http.StatusSeeOther)
 }
@@ -398,13 +415,7 @@ func (s *Server) adminPage(response http.ResponseWriter, request *http.Request) 
 }
 
 func (s *Server) authenticated(request *http.Request) bool {
-	cookie, err := request.Cookie("bilvie_admin")
-	if err != nil || cookie.Value == "" {
-		return false
-	}
-	s.sessionsMu.RLock()
-	_, ok := s.sessions[cookie.Value]
-	s.sessionsMu.RUnlock()
+	_, ok := s.adminUsername(request)
 	return ok
 }
 

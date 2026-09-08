@@ -11,7 +11,7 @@
 {{tag "bm_indextop" .}}
 <div id="page_main" class="clearfix">
     <div class="page-right">
-      <div class="site-nav"><span>当前位置 : </span><a href="/index.html">公司主页</a> - <a href="/valve/">产品展示</a> - {{tag "hope_title" .}}</div>
+      <div class="site-nav"><span>当前位置 : </span><a href="/index.html">公司主页</a> - <a href="{{tag "hope_productcaturl" .}}">产品展示</a> - {{tag "hope_title" .}}</div>
       <table width="100%" border="0" cellpadding="0" cellspacing="0" class="in4">
 	    <tr><td width="19%" height="151" align="center" valign="top" class="in5"><img src="{{tag "hope_img" .}}" alt="{{tag "hope_title" .}}" width="160" height="134" /></td>
 <td width="41%" valign="top" class="in5"><table width="100%" height="151" border="0"">
@@ -32,13 +32,11 @@
 <td width="40%" valign="top">{{tag "hope_random" .}}</td>
 	  </tr></table>
       <div class="page-products">
-      <ul class="clearfix">
         <table width="100%" border="0"><tr>
 <td height="30" class="prod_bottom_dasheds">产品介绍</td>
 </tr><tr>
-  <td height="15" align="left" valign="top" class="prod_sp">{{tag "hope_body" .}}<br></td>
+  <td height="15" align="left" valign="top" class="prod_sp">{{tag "hope_body" .}}</td>
 </tr></table>
-      </ul>
       <div class="page_list">
   <div class="list_info"></div>
 </div>

@@ -46,6 +46,15 @@ export type NewsItem = {
   featured: number
 }
 
+export type NewsDetail = NewsItem & {
+  content: string
+  source: string
+  keywords: string
+  description: string
+}
+
+export type NewsInput = Omit<NewsDetail, "id">
+
 export type NewsPage = {
   query: string
   page: number
@@ -80,7 +89,14 @@ export type CategoryItem = {
   name: string
   parent_id: number
   order_id: number
+  product_count: number
+  list_path: string
+  list_file_pattern: string
+  detail_path: string
+  detail_file_pattern: string
 }
+
+export type CategoryInput = Omit<CategoryItem, "id" | "product_count">
 
 type SessionResponse = { user: AdminUser }
 
@@ -159,6 +175,26 @@ export function getCategories() {
   return request<CategoryItem[]>("/api/admin/categories")
 }
 
+export function createCategory(payload: CategoryInput, publish = false) {
+  return request<SaveResponse>(`/api/admin/categories${publish ? "?publish=1" : ""}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateCategory(id: number, payload: CategoryInput, publish = false) {
+  return request<SaveResponse>(`/api/admin/categories/${id}${publish ? "?publish=1" : ""}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteCategory(id: number, publish = false) {
+  return request<SaveResponse>(`/api/admin/categories/${id}${publish ? "?publish=1" : ""}`, {
+    method: "DELETE",
+  })
+}
+
 export function createProduct(payload: ProductInput, publish = false) {
   return request<SaveResponse>(`/api/admin/products${publish ? "?publish=1" : ""}`, {
     method: "POST",
@@ -179,10 +215,37 @@ export function archiveProduct(id: number) {
   })
 }
 
+export function deleteProduct(id: number) {
+  return request<SaveResponse>(`/api/admin/products/${id}?delete=1&publish=1`, {
+    method: "DELETE",
+  })
+}
+
 export function getNews(page: number, pageSize: number, search: string) {
   return request<NewsPage>(
     `/api/admin/news${query({ page, page_size: pageSize, q: search })}`,
   )
+}
+
+export function getNewsItem(id: number) {
+  return request<NewsDetail>(`/api/admin/news/${id}`)
+}
+
+export function getNewsCategories() {
+  return request<CategoryItem[]>("/api/admin/news-categories")
+}
+
+export function updateNews(id: number, payload: NewsInput, publish = false) {
+  return request<SaveResponse>(`/api/admin/news/${id}${publish ? "?publish=1" : ""}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteNews(id: number) {
+  return request<SaveResponse>(`/api/admin/news/${id}?publish=1`, {
+    method: "DELETE",
+  })
 }
 
 export function getMessages(page: number, pageSize: number) {
@@ -195,6 +258,12 @@ export function updateMessageState(id: number, state: number) {
   return request<{ ok: boolean }>(`/api/admin/messages/${id}`, {
     method: "PATCH",
     body: JSON.stringify({ state }),
+  })
+}
+
+export function deleteMessage(id: number) {
+  return request<{ ok: boolean }>(`/api/admin/messages/${id}`, {
+    method: "DELETE",
   })
 }
 

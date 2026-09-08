@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react"
-import { Check, Inbox, LoaderCircle, MailOpen } from "lucide-react"
+import { Check, Inbox, LoaderCircle, MailOpen, Trash2 } from "lucide-react"
 
-import { getMessages, updateMessageState, type MessageItem } from "@/lib/api"
+import { deleteMessage, getMessages, updateMessageState, type MessageItem } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { InlineAlert, TablePagination } from "@/components/app/app-ui"
+import { ConfirmDialog, IconButton, InlineAlert, TablePagination } from "@/components/app/app-ui"
 
 const pageSize = 12
 
@@ -23,6 +23,8 @@ export function MessagesPage() {
   const [error, setError] = useState("")
   const [selected, setSelected] = useState<MessageItem | null>(null)
   const [updating, setUpdating] = useState(false)
+  const [deleting, setDeleting] = useState<MessageItem | null>(null)
+  const [deleteSaving, setDeleteSaving] = useState(false)
 
   const load = useCallback(() => {
     getMessages(page, pageSize)
@@ -57,6 +59,27 @@ export function MessagesPage() {
     }
   }
 
+  function requestDelete(message: MessageItem) {
+    setSelected(null)
+    setDeleting(message)
+  }
+
+  async function confirmDelete() {
+    if (!deleting) return
+    setDeleteSaving(true)
+    try {
+      await deleteMessage(deleting.id)
+      setItems((current) => current.filter((item) => item.id !== deleting.id))
+      setTotal((current) => Math.max(0, current - 1))
+      if (items.length === 1 && page > 1) setPage(page - 1)
+      setDeleting(null)
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "删除失败")
+    } finally {
+      setDeleteSaving(false)
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   return (
@@ -78,7 +101,7 @@ export function MessagesPage() {
                 <TableHead>联系人</TableHead>
                 <TableHead>提交时间</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead className="pr-4 text-right">查看</TableHead>
+                <TableHead className="pr-4 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -95,7 +118,20 @@ export function MessagesPage() {
                   <TableCell><p>{item.name || "未填写"}</p><p className="text-xs text-muted-foreground">{item.phone}</p></TableCell>
                   <TableCell className="text-muted-foreground">{formatDate(item.created_at)}</TableCell>
                   <TableCell><Badge variant={item.state ? "outline" : "secondary"}>{item.state ? "已处理" : "待处理"}</Badge></TableCell>
-                  <TableCell className="pr-4 text-right"><Button variant="ghost" size="sm" onClick={() => setSelected(item)}><MailOpen />查看</Button></TableCell>
+                  <TableCell className="pr-4 text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => setSelected(item)}><MailOpen />查看</Button>
+                      <IconButton
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => requestDelete(item)}
+                        label={`删除${item.title}`}
+                      >
+                        <Trash2 />
+                      </IconButton>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -128,6 +164,15 @@ export function MessagesPage() {
               <div className="rounded-lg border p-3 leading-6 whitespace-pre-wrap">{selected.content || "无留言内容"}</div>
             </div>
             <DialogFooter>
+              <IconButton
+                variant="ghost"
+                size="icon"
+                className="mr-auto text-destructive hover:text-destructive"
+                onClick={() => requestDelete(selected)}
+                label={`删除${selected.title}`}
+              >
+                <Trash2 />
+              </IconButton>
               <Button onClick={() => markHandled(selected)} disabled={updating} variant={selected.state ? "outline" : "default"}>
                 {updating ? <LoaderCircle className="animate-spin" /> : <Check />}
                 {selected.state ? "标记为待处理" : "标记为已处理"}
@@ -136,6 +181,21 @@ export function MessagesPage() {
           </DialogContent>
         ) : null}
       </Dialog>
+      <ConfirmDialog
+        open={Boolean(deleting)}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null)
+        }}
+        title="删除留言"
+        description={
+          deleting
+            ? `确定删除“${deleting.title}”这条留言吗？删除后将无法恢复。`
+            : "确认删除这条留言吗？"
+        }
+        confirmLabel="确认删除"
+        pending={deleteSaving}
+        onConfirm={confirmDelete}
+      />
     </div>
   )
 }

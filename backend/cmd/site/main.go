@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net/http"
@@ -30,11 +31,17 @@ func main() {
 		log.Fatal(err)
 	}
 	defer database.Close()
+	if err := db.EnsureProductCategoryRoutes(context.Background(), database); err != nil {
+		log.Fatal(err)
+	}
 	if err := database.Ping(); err != nil {
 		log.Fatalf("cannot use SQLite database %s: %v; run cmd/migrate first", *databasePath, err)
 	}
 
-	server := site.New(database, filepath.Clean(*root))
+	server, err := site.New(database, filepath.Clean(*root))
+	if err != nil {
+		log.Fatal(err)
+	}
 	server.ConfigurePublishing(*templates, *data, *frontend, *assets, themeRoot)
 	log.Printf("Go site listening on http://%s", *address)
 	log.Fatal(http.ListenAndServe(*address, server.Handler()))

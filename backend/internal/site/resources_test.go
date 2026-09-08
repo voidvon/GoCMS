@@ -13,6 +13,7 @@ func TestCanonicalImageURL(t *testing.T) {
 	}{
 		{"/UploadFile/produppic/a.jpg", "/images/a.jpg"},
 		{"http://www.bilvie.com/UploadFile/a.jpg?size=small", "/images/a.jpg?size=small"},
+		{"https://img05.jdzj.com/oledit/UploadFile/news2015a/a.jpg", "https://img05.jdzj.com/oledit/UploadFile/news2015a/a.jpg"},
 		{"/images/a.jpg", "/images/a.jpg"},
 	} {
 		if actual := canonicalImageURL(test.input); actual != test.expected {
@@ -38,7 +39,10 @@ func TestSeparateResources(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dir, "secret.txt"), filepath.Join(assets, "escape.txt")); err != nil {
 		t.Fatal(err)
 	}
-	s := New(nil, web)
+	s, err := New(nil, web)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s.assetsRoot = assets
 	s.themeRoot = theme
 	for _, tc := range []struct {

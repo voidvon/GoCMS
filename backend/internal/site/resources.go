@@ -18,6 +18,9 @@ func canonicalImageURL(value string) string {
 	if err != nil || u.Path == "" {
 		return value
 	}
+	if u.Host != "" && !strings.EqualFold(u.Hostname(), "www.bilvie.com") {
+		return value
+	}
 	normalized := strings.ReplaceAll(u.Path, `\`, "/")
 	trimmed := strings.TrimPrefix(normalized, "/")
 	lower := strings.ToLower(trimmed)

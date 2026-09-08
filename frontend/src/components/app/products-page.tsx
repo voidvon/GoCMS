@@ -6,11 +6,13 @@ import {
   Pencil,
   Plus,
   Search,
+  Trash2,
 } from "lucide-react"
 
 import {
   archiveProduct,
   createProduct,
+  deleteProduct,
   getCategories,
   getProducts,
   type CategoryItem,
@@ -35,6 +37,8 @@ import {
   SearchField,
   TablePagination,
 } from "@/components/app/app-ui"
+import { RichTextEditor } from "@/components/app/rich-text-editor"
+import { flattenCategoryTree } from "@/lib/category-tree"
 
 const pageSize = 12
 
@@ -96,9 +100,9 @@ function ProductEditor({
             <SelectTrigger className="w-full"><SelectValue placeholder="选择分类" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="0">未分类</SelectItem>
-              {categories.map((category) => (
+              {flattenCategoryTree(categories).map((category) => (
                 <SelectItem key={category.id} value={String(category.id)}>
-                  {category.parent_id ? `　${category.name}` : category.name}
+                  <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -114,7 +118,11 @@ function ProductEditor({
         </div>
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="product-content">产品详情</Label>
-          <Textarea id="product-content" value={form.content} onChange={(event) => update("content", event.target.value)} className="min-h-36 font-mono text-xs" />
+          <RichTextEditor
+            id="product-content"
+            value={form.content}
+            onChange={(value) => update("content", value)}
+          />
         </div>
         <div className="space-y-2">
           <Label htmlFor="product-small-pic">缩略图地址</Label>
@@ -170,6 +178,8 @@ export function ProductsPage() {
   const [notice,setNotice] = useState("")
   const [archiving, setArchiving] = useState<Product | null>(null)
   const [archiveSaving, setArchiveSaving] = useState(false)
+  const [deleting, setDeleting] = useState<Product | null>(null)
+  const [deleteSaving, setDeleteSaving] = useState(false)
 
   useEffect(() => {
     getCategories().then(setCategories).catch(() => setCategories([]))
@@ -275,6 +285,23 @@ export function ProductsPage() {
     }
   }
 
+  async function confirmDelete() {
+    if (!deleting) return
+    setDeleteSaving(true)
+    try {
+      const result = await deleteProduct(deleting.id)
+      setProducts((current) => current.filter((item) => item.id !== deleting.id))
+      setTotal((current) => Math.max(0, current - 1))
+      if (products.length === 1 && page > 1) setPage(page - 1)
+      setNotice(result.publish_started ? "产品已删除，正在发布；完成后会移除公开详情页。" : "产品已删除并加入发布队列。")
+      setDeleting(null)
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "删除失败")
+    } finally {
+      setDeleteSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
@@ -302,7 +329,7 @@ export function ProductsPage() {
                 <TableHead className="pl-4">产品</TableHead>
                 <TableHead>分类</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead className="w-24 pr-4 text-right">操作</TableHead>
+                <TableHead className="w-32 pr-4 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -340,6 +367,15 @@ export function ProductsPage() {
                           <Archive />
                         </IconButton>
                       ) : null}
+                      <IconButton
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => setDeleting(product)}
+                        label={`删除${product.name}`}
+                      >
+                        <Trash2 />
+                      </IconButton>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -358,8 +394,8 @@ export function ProductsPage() {
       </Card>
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] sm:max-w-3xl overflow-y-auto">
-          <ProductEditor product={formProduct} categories={categories} onSave={save} onCancel={() => setEditorOpen(false)} saving={saving} />
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-5xl">
+          <ProductEditor key={editing?.id ?? "new"} product={formProduct} categories={categories} onSave={save} onCancel={() => setEditorOpen(false)} saving={saving} />
         </DialogContent>
       </Dialog>
       <ConfirmDialog
@@ -376,6 +412,21 @@ export function ProductsPage() {
         confirmLabel="确认隐藏"
         pending={archiveSaving}
         onConfirm={confirmArchive}
+      />
+      <ConfirmDialog
+        open={Boolean(deleting)}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null)
+        }}
+        title="删除产品"
+        description={
+          deleting
+            ? `确定删除“${deleting.name}”吗？删除后产品内容和公开详情页都将移除。`
+            : "确认删除这个产品吗？"
+        }
+        confirmLabel="确认删除"
+        pending={deleteSaving}
+        onConfirm={confirmDelete}
       />
     </div>
   )

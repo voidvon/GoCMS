@@ -16,6 +16,8 @@ import (
 	"text/template"
 	"time"
 	"unicode/utf8"
+
+	"bilvie/internal/routing"
 )
 
 type Row map[string]string
@@ -287,7 +289,85 @@ func (c *content) newsURL(r Row) string {
 	}
 	return fmt.Sprintf("/%s/detail/%s.html", dir, r["newsid"])
 }
-func (c *content) prodURL(r Row) string { return "/Product/" + r["id"] + ".html" }
+
+func (c *content) categoryListDir(r Row) string {
+	dir := strings.TrimSpace(r["listpath"])
+	if dir == "" {
+		dir = routing.DefaultListPath(int64(r.n("root")))
+	}
+	if normalized, err := routing.NormalizeDirectory(dir); err == nil {
+		return normalized
+	}
+	return routing.DefaultListPath(int64(r.n("root")))
+}
+
+func (c *content) categoryListPattern(r Row) string {
+	pattern := strings.TrimSpace(r["listfilepattern"])
+	if pattern == "" {
+		pattern = routing.DefaultListPattern
+	}
+	if normalized, err := routing.NormalizeFilePattern(pattern, false); err == nil {
+		return normalized
+	}
+	return routing.DefaultListPattern
+}
+
+func (c *content) categoryDetailDir(r Row) string {
+	dir := strings.TrimSpace(r["detailpath"])
+	if dir == "" {
+		dir = routing.DefaultDetailPath
+	}
+	if normalized, err := routing.NormalizeDirectory(dir); err == nil {
+		return normalized
+	}
+	return routing.DefaultDetailPath
+}
+
+func (c *content) categoryDetailPattern(r Row) string {
+	pattern := strings.TrimSpace(r["detailfilepattern"])
+	if pattern == "" {
+		pattern = routing.DefaultDetailPattern
+	}
+	if normalized, err := routing.NormalizeFilePattern(pattern, false); err == nil {
+		return normalized
+	}
+	return routing.DefaultDetailPattern
+}
+
+func (c *content) categoryListURL(r Row, page int) string {
+	filename, err := routing.RenderListFilename(c.categoryListPattern(r), int64(r.n("id")), page)
+	if err != nil {
+		filename = fmt.Sprintf("%d.html", r.n("id"))
+	}
+	return "/" + strings.Trim(c.categoryListDir(r)+"/"+filename, "/")
+}
+
+func (c *content) categoryListPagePath(r Row, page int) string {
+	filename, err := routing.RenderListPageFilename(c.categoryListPattern(r), int64(r.n("id")), page)
+	if err != nil {
+		filename = fmt.Sprintf("%d-%d.html", r.n("id"), page)
+	}
+	return strings.Trim(c.categoryListDir(r)+"/"+filename, "/")
+}
+
+func (c *content) productRootURL() string {
+	for _, category := range c.tables["benming_ch_prodcat"] {
+		if category.n("root") == 0 {
+			return "/" + c.categoryListDir(category) + "/"
+		}
+	}
+	return "/" + routing.DefaultRootListPath + "/"
+}
+
+func (c *content) prodURL(r Row) string {
+	cat := c.cat(r.n("catid"), false)
+	filename, err := routing.RenderDetailFilename(c.categoryDetailPattern(cat), int64(r.n("id")))
+	if err != nil {
+		filename = r["id"] + ".html"
+	}
+	return "/" + strings.Trim(c.categoryDetailDir(cat)+"/"+filename, "/")
+}
+
 func (c *content) cats(root int, news bool, plain bool) string {
 	var b strings.Builder
 	table := "benming_ch_prodcat"
@@ -298,17 +378,16 @@ func (c *content) cats(root int, news bool, plain bool) string {
 		if r.n("root") != root {
 			continue
 		}
-		dir := "Products"
-		if root == 0 {
-			dir = "valve"
-		}
+		a := ""
 		if news {
-			dir = "news"
+			dir := "news"
 			if root == 12 {
 				dir = "service"
 			}
+			a = link("/"+dir+"/"+r["id"]+".html", r["catname"])
+		} else {
+			a = link(c.categoryListURL(r, 1), r["catname"])
 		}
-		a := link("/"+dir+"/"+r["id"]+".html", r["catname"])
 		if plain {
 			b.WriteString(a + " | ")
 		} else {
@@ -451,18 +530,32 @@ func (c *content) tag(k string, r Row, depth int) (string, error) {
 	}
 	return "", fmt.Errorf("未实现的模板标签: %s", k)
 }
-func pagination(dir, id string, page, pages, total int) string {
+func (c *content) pagination(category Row, page, pages, total int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `<nav aria-label="分页">共 %d 条，第 %d / %d 页 `, total, page, pages)
 	for i := 1; i <= pages; i++ {
-		url := fmt.Sprintf("/%s/%s-%d.html", dir, id, i)
-		b.WriteString(link(url, strconv.Itoa(i)) + " ")
+		b.WriteString(link(c.categoryListURL(category, i), strconv.Itoa(i)) + " ")
 	}
 	b.WriteString("</nav>")
 	return b.String()
 }
+
+func fixedPagination(dir, id string, page, pages, total int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `<nav aria-label="分页">共 %d 条，第 %d / %d 页 `, total, page, pages)
+	for i := 1; i <= pages; i++ {
+		filename := id + ".html"
+		if i > 1 {
+			filename = fmt.Sprintf("%s-%d.html", id, i)
+		}
+		b.WriteString(link("/"+dir+"/"+filename, strconv.Itoa(i)) + " ")
+	}
+	b.WriteString("</nav>")
+	return b.String()
+}
+
 func (c *content) build() error {
-	if e := c.page("index.html", "index", Row{}); e != nil {
+	if e := c.page("index.html", "index", Row{"hope_productrooturl": c.productRootURL()}); e != nil {
 		return e
 	}
 	products := []Row{}
@@ -478,15 +571,16 @@ func (c *content) build() error {
 		if v["hope_img"] == "" {
 			v["hope_img"] = defaultProductImage
 		}
-		if e := c.page("Product/"+r["id"]+".html", "produts_detail", v); e != nil {
+		v["hope_productcaturl"] = c.categoryListURL(c.cat(r.n("catid"), false), 1)
+		if e := c.page(strings.TrimPrefix(c.prodURL(r), "/"), "produts_detail", v); e != nil {
 			return e
 		}
 	}
 	for _, cat := range c.tables["benming_ch_prodcat"] {
-		dir, tpl := "Products", "produts_sort2"
 		root := cat.n("root")
+		tpl := "produts_sort2"
 		if root == 0 {
-			dir, tpl = "valve", "produts_sort"
+			tpl = "produts_sort"
 		}
 		rs := []Row{}
 		for _, p := range products {
@@ -498,23 +592,25 @@ func (c *content) build() error {
 		for page := 1; page <= pages; page++ {
 			start := min((page-1)*14, len(rs))
 			end := min(start+14, len(rs))
-			v := Row{"hope_title": esc(cat["catname"]), "hope_catname": esc(cat["catname"]), "hope_smallname": esc(cat["catname"]), "hope_bigid": esc(cat["root"]), "hope_bigname": esc(c.cat(root, false)["catname"]), "hope_productssmallcat": c.cats(root, false, true), "hope_prodkeywords": esc(cat["key"]), "hope_body": c.productList(rs[start:end]) + pagination(dir, cat["id"], page, pages, len(rs))}
+			v := Row{"hope_title": esc(cat["catname"]), "hope_catname": esc(cat["catname"]), "hope_smallname": esc(cat["catname"]), "hope_bigid": esc(cat["root"]), "hope_bigname": esc(c.cat(root, false)["catname"]), "hope_bigurl": c.categoryListURL(c.cat(root, false), 1), "hope_productrooturl": c.productRootURL(), "hope_productssmallcat": c.cats(root, false, true), "hope_prodkeywords": esc(cat["key"]), "hope_body": c.productList(rs[start:end]) + c.pagination(cat, page, pages, len(rs))}
 			if root == 0 {
 				v["hope_productssmallcat"] = c.cats(cat.n("id"), false, true)
 			}
-			path := fmt.Sprintf("%s/%s-%d.html", dir, cat["id"], page)
-			if e := c.page(path, tpl, v); e != nil {
+			pagePath := c.categoryListPagePath(cat, page)
+			if e := c.page(pagePath, tpl, v); e != nil {
 				return e
 			}
 			if page == 1 {
-				c.pages[dir+"/"+cat["id"]+".html"] = c.pages[path]
+				alias := strings.TrimPrefix(c.categoryListURL(cat, 1), "/")
+				c.pages[alias] = c.pages[pagePath]
+				dir := c.categoryListDir(cat)
 				if _, ok := c.pages[dir+"/index.html"]; !ok {
-					c.pages[dir+"/index.html"] = c.pages[path]
+					c.pages[dir+"/index.html"] = c.pages[pagePath]
 				}
 			}
 		}
 	}
-	for _, dir := range []string{"Products", "valve"} {
+	for _, dir := range []string{routing.DefaultChildListPath, routing.DefaultRootListPath} {
 		if _, ok := c.pages[dir+"/index.html"]; !ok {
 			c.pages[dir+"/index.html"] = []byte(`<!doctype html><meta charset="utf-8"><p>暂无产品</p>`)
 		}
@@ -563,7 +659,7 @@ func (c *content) build() error {
 		for page := 1; page <= pages; page++ {
 			start := min((page-1)*6, len(rs))
 			end := min(start+6, len(rs))
-			v := Row{"hope_title": esc(cat["catname"]), "hope_catid": esc(cat["id"]), "hope_body": c.newsList(rs[start:end]) + pagination(dir, cat["id"], page, pages, len(rs))}
+			v := Row{"hope_title": esc(cat["catname"]), "hope_catid": esc(cat["id"]), "hope_body": c.newsList(rs[start:end]) + fixedPagination(dir, cat["id"], page, pages, len(rs))}
 			path := fmt.Sprintf("%s/%s-%d.html", dir, cat["id"], page)
 			if e := c.page(path, tpl, v); e != nil {
 				return e

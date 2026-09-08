@@ -70,6 +70,9 @@ func ImportAccess(ctx context.Context, accessPath, sqlitePath string, force bool
 		report.Tables[table.Name] = count
 		report.Total += count
 	}
+	if err := EnsureProductCategoryRoutes(ctx, database); err != nil {
+		return ImportReport{}, fmt.Errorf("initialize product category routes: %w", err)
+	}
 	if err := NormalizeImagePaths(ctx, database); err != nil {
 		return ImportReport{}, fmt.Errorf("normalize image paths: %w", err)
 	}

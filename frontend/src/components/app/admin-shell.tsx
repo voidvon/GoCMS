@@ -4,6 +4,7 @@ import {
   BookOpenText,
   ChevronsUpDown,
   ClipboardList,
+  FolderTree,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -33,15 +34,15 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
+import { useAdminRoute, type AdminView } from "@/lib/admin-router"
 
 import { DashboardPage } from "@/components/app/dashboard-page"
+import { CategoriesPage } from "@/components/app/categories-page"
 import { MessagesPage } from "@/components/app/messages-page"
 import { NewsPage } from "@/components/app/news-page"
 import { ProductsPage } from "@/components/app/products-page"
 
 import { PublishPage } from "@/components/app/publish-page"
-
-export type AdminView = "overview" | "products" | "news" | "messages" | "publish"
 
 type AdminShellProps = {
   user: AdminUser
@@ -64,6 +65,7 @@ const navigationItems: NavigationItem[] = [
  { id: "publish", label: "网站发布", icon: Globe },
   { id: "overview", label: "总览", icon: LayoutDashboard },
   { id: "products", label: "产品目录", icon: Package },
+  { id: "categories", label: "产品分类", icon: FolderTree },
   { id: "news", label: "新闻内容", icon: BookOpenText },
   { id: "messages", label: "客户留言", icon: ClipboardList },
 ]
@@ -79,6 +81,7 @@ function Navigation({ activeView, onNavigate, onClose }: NavigationProps) {
             key={item.id}
             variant={active ? "secondary" : "ghost"}
             className={cn("w-full justify-start gap-3", active && "font-medium")}
+            aria-current={active ? "page" : undefined}
             onClick={() => {
               onNavigate(item.id)
               onClose?.()
@@ -130,6 +133,8 @@ function viewMeta(view: AdminView) {
  case "publish": return {title:"网站发布",description:"生成并发布公开站点"}
     case "products":
       return { title: "产品目录", description: "维护公开产品、分类和展示状态" }
+    case "categories":
+      return { title: "产品分类", description: "维护产品分类树和目录层级" }
     case "news":
       return { title: "新闻内容", description: "查看新闻发布记录和首页推荐状态" }
     case "messages":
@@ -144,6 +149,8 @@ function ViewContent({ view }: { view: AdminView }) {
  case "publish": return <PublishPage />
     case "products":
       return <ProductsPage />
+    case "categories":
+      return <CategoriesPage />
     case "news":
       return <NewsPage />
     case "messages":
@@ -154,7 +161,7 @@ function ViewContent({ view }: { view: AdminView }) {
 }
 
 export function AdminShell({ user, onLogout }: AdminShellProps) {
-  const [activeView, setActiveView] = useState<AdminView>("overview")
+  const { view: activeView, navigate } = useAdminRoute()
   const [mobileOpen, setMobileOpen] = useState(false)
   const meta = viewMeta(activeView)
   const initials = user.username.slice(0, 1).toUpperCase()
@@ -167,14 +174,14 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
   const mobileNavigation = (
     <Navigation
       activeView={activeView}
-      onNavigate={setActiveView}
+      onNavigate={navigate}
       onClose={() => setMobileOpen(false)}
     />
   )
 
   return (
     <div className="flex min-h-svh bg-background">
-      <Sidebar activeView={activeView} onNavigate={setActiveView} />
+      <Sidebar activeView={activeView} onNavigate={navigate} />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur sm:px-6">
           <div className="flex items-center gap-3">

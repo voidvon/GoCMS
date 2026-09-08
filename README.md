@@ -36,8 +36,7 @@ make test      # Go 测试/vet + 前端构建
 | --- | --- | --- |
 | 站点配置、SEO、自定义片段、推荐产品和新闻 | index | `/index.html` |
 | 公开产品 (`show=1`) | produts_detail | `/Product/{id}.html` |
-| 父产品分类，包含后代产品 | produts_sort | `/valve/{id}.html` |
-| 子产品分类，包含后代产品 | produts_sort2 | `/Products/{id}.html` |
+| 产品分类，包含后代产品 | produts_sort / produts_sort2 | 由分类路由配置决定，现有默认分别为 `/valve/{id}.html` 和 `/Products/{id}.html` |
 | 新闻分类 (`root=4`) | news_sort / news_news | `/news/{id}.html`、`/news/detail/{newsid}.html` |
 | 技术文章分类 (`root=12`) | service_sort / service_service | `/service/{id}.html`、`/service/detail/{newsid}.html` |
 | 公司介绍 (`root=32`) | corporation | `/about/About-{id}.html` |
@@ -46,6 +45,8 @@ make test      # Go 测试/vet + 前端构建
 | 已生成页面 | 内置 | `/Sitemap.xml`、`/sitemap.html` |
 
 产品每页 14 条，新闻每页 6 条，第一页同时生成 `{id}.html` 和 `{id}-1.html`，后续为 `{id}-{page}.html`。栏目首页沿用排序第一分类的第一页。首页轮播取最新 8 个推荐公开产品，文字推荐取 32 个；网站地图从实际生成的地址产生。
+
+产品分类保存自己的静态路由规则，产品详情目录和文件名由产品所属分类决定。分类编辑中的列表目录、列表文件名规则、详情目录和详情文件名规则默认分别为 `valve`/`Products`、`{id}.html`、`Product`、`{id}.html`，因此现有线上地址不会改变。产品内容只保存 `CatId`，发布器会按该分类解析详情页路径；SQLite 启动时会自动补充并初始化这些路由字段，旧 Access 导入的列结构不受影响。
 
 生成使用一致的 SQLite 读事务快照。先完成所有模板渲染和 UTF-8 检查，再向临时目录写入新 HTML 和站点地图，最后切换 `web/`。新目录只包含本次生成结果，因此隐藏/删除内容及过期分页会清理；独立资源目录不被修改。未知模板标签或模板错误会终止发布，保持旧站点。发布锁用于防止 CLI/API 并发写入。
 

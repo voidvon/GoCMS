@@ -26,7 +26,7 @@ func TestPublishLifecycle(t *testing.T) {
 		`INSERT INTO benming_ch_prod (id,prodName,CatId,show,itemize,smallpic,tjhome) VALUES (1,'阀门 & 新产品',10,1,'<p>正文</p><img src="/UploadFile/produppic/product.jpg">','/UploadFile/produppic/product.jpg',1)`,
 		`INSERT INTO benming_ch_ProdCat (id,CatName,Root) VALUES (2,'总类',0),(10,'子类',2)`,
 		`INSERT INTO benming_ch_NewsCat (id,CatName,Root) VALUES (4,'新闻',0),(6,'公司新闻',4)`,
-		`INSERT INTO benming_ch_news (newsid,Title,Content,Typeid) VALUES (9,'测试新闻','<p>新闻内容</p>',6)`,
+		`INSERT INTO benming_ch_news (newsid,Title,Content,Typeid) VALUES (9,'测试新闻','<p>新闻内容</p><img src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg">',6)`,
 	} {
 		if _, e = d.Exec(q); e != nil {
 			t.Fatal(e)
@@ -67,6 +67,28 @@ func TestPublishLifecycle(t *testing.T) {
 	body, _ := os.ReadFile(filepath.Join(web, "Product/1.html"))
 	if !strings.Contains(string(body), "阀门 &amp; 新产品") || !strings.Contains(string(body), "<p>正文</p>") || !strings.Contains(string(body), `src="/images/product.jpg"`) {
 		t.Fatal("escaping or body rendering failed")
+	}
+	newsBody, _ := os.ReadFile(filepath.Join(web, "news/detail/9.html"))
+	if !strings.Contains(string(newsBody), `src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg"`) {
+		t.Fatal("third-party image URL was rewritten")
+	}
+	if _, e = d.Exec(`UPDATE benming_ch_ProdCat SET ListPath='custom-products', ListFilePattern='{id}.htm', DetailPath='custom-detail', DetailFilePattern='{id}-detail.html' WHERE id=10`); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = p.Generate(ctx); e != nil {
+		t.Fatal(e)
+	}
+	for _, n := range []string{"custom-products/10.htm", "custom-products/10-1.htm", "custom-detail/1-detail.html"} {
+		if _, e = os.Stat(filepath.Join(web, n)); e != nil {
+			t.Fatal(n, e)
+		}
+	}
+	customBody, _ := os.ReadFile(filepath.Join(web, "custom-products/10.htm"))
+	if !strings.Contains(string(customBody), `href="/custom-detail/1-detail.html"`) {
+		t.Fatal("custom detail route was not used in product list")
+	}
+	if _, e = os.Stat(filepath.Join(web, "Product/1.html")); !os.IsNotExist(e) {
+		t.Fatal("old product route survived custom publication")
 	}
 	if _, e = d.Exec(`UPDATE benming_ch_prod SET show=0 WHERE id=1`); e != nil {
 		t.Fatal(e)

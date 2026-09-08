@@ -16,7 +16,7 @@ func TestNormalizeImagePaths(t *testing.T) {
 	}
 	_, err = database.Exec(`
 		INSERT INTO "benming_ch_prod" ("id", "smallpic", "bigpic", "itemize")
-		VALUES (1, '/UploadFile/produppic/example.jpg', '/skin/dfpic.gif', '<img src="http://www.bilvie.com/UploadFile/body.png">')`)
+		VALUES (1, '/UploadFile/produppic/example.jpg', '/skin/dfpic.gif', '<img src="http://www.bilvie.com/UploadFile/body.png"><img src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg">')`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestNormalizeImagePaths(t *testing.T) {
 	if err := database.QueryRow(`SELECT "smallpic", "bigpic", "itemize" FROM "benming_ch_prod" WHERE "id" = 1`).Scan(&small, &big, &content); err != nil {
 		t.Fatal(err)
 	}
-	if small != "/images/example.jpg" || big != "" || content != `<img src="/images/body.png">` {
+	if small != "/images/example.jpg" || big != "" || content != `<img src="/images/body.png"><img src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg">` {
 		t.Fatalf("unexpected normalized paths: %q %q %q", small, big, content)
 	}
 }

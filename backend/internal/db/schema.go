@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"bilvie/internal/routing"
 )
 
 type ColumnType int
@@ -221,6 +223,56 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create index: %w", err)
 		}
+	}
+	return EnsureProductCategoryRoutes(ctx, database)
+}
+
+// EnsureProductCategoryRoutes adds the SQLite-only route settings without
+// changing the legacy Access import column list. Existing categories receive
+// the paths used by the published site before route customization was added.
+func EnsureProductCategoryRoutes(ctx context.Context, database *sql.DB) error {
+	columns := map[string]string{
+		"ListPath":          "TEXT",
+		"ListFilePattern":   "TEXT",
+		"DetailPath":        "TEXT",
+		"DetailFilePattern": "TEXT",
+	}
+	for name, columnType := range columns {
+		var exists int
+		if err := database.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM pragma_table_info('benming_ch_ProdCat') WHERE name = ?`, name).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect product category route column %s: %w", name, err)
+		}
+		if exists > 0 {
+			continue
+		}
+		if _, err := database.ExecContext(ctx, `ALTER TABLE "benming_ch_ProdCat" ADD COLUMN "`+name+`" `+columnType); err != nil {
+			return fmt.Errorf("add product category route column %s: %w", name, err)
+		}
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE "benming_ch_ProdCat"
+		SET "ListPath" = CASE WHEN COALESCE("Root", 0) = 0 THEN ? ELSE ? END
+		WHERE TRIM(COALESCE("ListPath", '')) = ''`, routing.DefaultRootListPath, routing.DefaultChildListPath); err != nil {
+		return fmt.Errorf("initialize product category list paths: %w", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE "benming_ch_ProdCat"
+		SET "ListFilePattern" = ?
+		WHERE TRIM(COALESCE("ListFilePattern", '')) = ''`, routing.DefaultListPattern); err != nil {
+		return fmt.Errorf("initialize product category list file patterns: %w", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE "benming_ch_ProdCat"
+		SET "DetailPath" = ?
+		WHERE TRIM(COALESCE("DetailPath", '')) = ''`, routing.DefaultDetailPath); err != nil {
+		return fmt.Errorf("initialize product category detail paths: %w", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE "benming_ch_ProdCat"
+		SET "DetailFilePattern" = ?
+		WHERE TRIM(COALESCE("DetailFilePattern", '')) = ''`, routing.DefaultDetailPattern); err != nil {
+		return fmt.Errorf("initialize product category detail file patterns: %w", err)
 	}
 	return nil
 }
