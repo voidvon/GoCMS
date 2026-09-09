@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io/fs"
 	"net/http"
 	"path"
 	"regexp"
@@ -24,6 +25,7 @@ type Server struct {
 	siteRoot     string
 	fileServe    http.Handler
 	frontendRoot string
+	frontendFS   fs.FS
 	assetsRoot   string
 	themeRoot    string
 	templateRoot string
@@ -69,7 +71,7 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 	if cleanPath != "/" {
 		cleanPath = strings.TrimSuffix(cleanPath, "/")
 	}
-	if s.frontendRoot != "" && (cleanPath == "/admin" || strings.HasPrefix(cleanPath, "/admin/")) {
+	if (s.frontendRoot != "" || s.frontendFS != nil) && (cleanPath == "/admin" || strings.HasPrefix(cleanPath, "/admin/")) {
 		s.serveAdminApp(response, request)
 		return
 	}
@@ -253,6 +255,11 @@ func (s *Server) authenticated(request *http.Request) bool {
 
 func (s *Server) staticFile(response http.ResponseWriter, request *http.Request) {
 	lowerPath := strings.ToLower(request.URL.Path)
+	privatePath := path.Clean("/" + strings.ReplaceAll(lowerPath, `\`, "/"))
+	if privatePath == "/assets/theme" || strings.HasPrefix(privatePath, "/assets/theme/") {
+		http.NotFound(response, request)
+		return
+	}
 	for _, blocked := range []string{"/database", "/data", "/cmd", "/internal", "/.git", "/conn", "/inc", "/manage", "/bil/cn", "/bil/system", "/uploadfile"} {
 		if strings.HasPrefix(lowerPath, blocked) {
 			http.NotFound(response, request)

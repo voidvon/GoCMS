@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process"
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { dirname, join, resolve } from "node:path"
@@ -144,28 +144,14 @@ function createReleaseAssets(tag) {
   const backendRoot = resolve(root, "backend")
 
   for (const [goos, goarch] of releaseTargets) {
-    const stageRoot = join(temporaryRoot, `${goos}-${goarch}`)
-    const binaryName = goos === "windows" ? "site.exe" : "site"
-    const binaryPath = join(stageRoot, "bin", binaryName)
-    mkdirSync(join(stageRoot, "bin"), { recursive: true })
+    const binarySuffix = goos === "windows" ? ".exe" : ""
+    const binaryName = `gocms-${tag}-${goos}-${goarch}${binarySuffix}`
+    const binaryPath = join(temporaryRoot, binaryName)
     run("go", ["build", "-trimpath", "-ldflags", "-s -w", "-o", binaryPath, "./cmd/site"], {
       cwd: backendRoot,
       env: { ...process.env, CGO_ENABLED: "0", GOOS: goos, GOARCH: goarch },
     })
-    cpSync(resolve(root, "frontend/dist"), join(stageRoot, "frontend", "dist"), { recursive: true })
-    cpSync(resolve(root, "backend/templates"), join(stageRoot, "backend", "templates"), { recursive: true })
-
-    const assetPath = join(temporaryRoot, `gocms-${tag}-${goos}-${goarch}.tar.gz`)
-    run("tar", [
-      "-czf",
-      assetPath,
-      "-C",
-      stageRoot,
-      "bin",
-      "frontend/dist",
-      "backend/templates",
-    ])
-    assets.push(assetPath)
+    assets.push(binaryPath)
   }
 
   return { assets, temporaryRoot }

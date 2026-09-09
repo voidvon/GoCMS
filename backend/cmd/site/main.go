@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"flag"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 
 	"gocms/internal/db"
+	"gocms/internal/embedded"
 	"gocms/internal/site"
 )
 
@@ -20,15 +22,31 @@ func main() {
 		return
 	}
 
-	root := flag.String("root", "../web", "published public root")
-	databasePath := flag.String("db", "../data/site.db", "SQLite database path")
+	defaults := runtimeDefaults()
+	root := flag.String("root", defaults.root, "published public root")
+	databasePath := flag.String("db", defaults.database, "SQLite database path")
 	address := flag.String("addr", ":8080", "HTTP listen address")
-	templates := flag.String("templates", "templates", "Go template directory")
-	data := flag.String("data", "../data", "publication state directory")
-	frontend := flag.String("frontend", "../frontend/dist", "built admin SPA")
-	assets := flag.String("assets", "../assets", "public resource directory")
+	templates := flag.String("templates", defaults.templates, "Go template directory")
+	data := flag.String("data", defaults.data, "publication state directory")
+	frontend := flag.String("frontend", defaults.frontend, "built admin SPA; empty uses the embedded SPA")
+	assets := flag.String("assets", defaults.assets, "public resource directory")
 	theme := flag.String("theme", "", "active theme resource directory")
 	flag.Parse()
+
+	if *templates == "" {
+		log.Fatal("template directory is empty")
+	}
+	if err := embedded.EnsureTemplates(filepath.Clean(*templates)); err != nil {
+		log.Fatal(err)
+	}
+	var embeddedFrontend fs.FS
+	if *frontend == "" {
+		prepared, err := embedded.FrontendFS()
+		if err != nil {
+			log.Fatal(err)
+		}
+		embeddedFrontend = prepared
+	}
 	themeRoot := *theme
 	if themeRoot == "" {
 		themeRoot = filepath.Join(*assets, "theme", "blue")
@@ -60,6 +78,51 @@ func main() {
 		log.Fatal(err)
 	}
 	server.ConfigurePublishing(*templates, *data, *frontend, *assets, themeRoot)
+	if embeddedFrontend != nil {
+		server.ConfigureEmbeddedFrontend(embeddedFrontend)
+	}
 	log.Printf("Go site listening on http://%s", *address)
 	log.Fatal(http.ListenAndServe(*address, server.Handler()))
+}
+
+type runtimePathDefaults struct {
+	root, database, templates, data, frontend, assets string
+}
+
+func runtimeDefaults() runtimePathDefaults {
+	workingDirectory, err := os.Getwd()
+	if err == nil && isDirectory(filepath.Join(workingDirectory, "templates")) &&
+		isDirectory(filepath.Join(workingDirectory, "..", "assets")) {
+		return runtimePathDefaults{
+			root:      filepath.Join("..", "web"),
+			database:  filepath.Join("..", "data", "site.db"),
+			templates: "templates",
+			data:      filepath.Join("..", "data"),
+			frontend:  filepath.Join("..", "frontend", "dist"),
+			assets:    filepath.Join("..", "assets"),
+		}
+	}
+
+	installRoot := workingDirectory
+	if executable, err := os.Executable(); err == nil {
+		executableDirectory := filepath.Dir(executable)
+		if filepath.Base(executableDirectory) == "bin" {
+			installRoot = filepath.Dir(executableDirectory)
+		} else {
+			installRoot = executableDirectory
+		}
+	}
+	return runtimePathDefaults{
+		root:      filepath.Join(installRoot, "web"),
+		database:  filepath.Join(installRoot, "data", "site.db"),
+		templates: filepath.Join(installRoot, "templates"),
+		data:      filepath.Join(installRoot, "data"),
+		frontend:  "",
+		assets:    filepath.Join(installRoot, "assets"),
+	}
+}
+
+func isDirectory(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }

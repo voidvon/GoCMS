@@ -1,0 +1,1 @@
+This placeholder keeps the package buildable before generated assets are prepared.

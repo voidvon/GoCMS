@@ -5,9 +5,9 @@ Go + SQLite 内容服务、React 管理后台、Go 模板静态发布。
 ## 目录
 
 - `backend/`：Go 模块，`cmd/site` 服务、`cmd/generate` 发布、`cmd/migrate` 导入、`cmd/reset-password` 密码重置。
-- `backend/templates/`：从原 blue 模板转换的 Go 模板；页面布局在这里维护。`tag` 函数解析数据库字段与自定义片段，不执行 ASP。
+- `backend/templates/`：从原 blue 模板转换的 Go 模板；页面布局在这里维护。发布版会把默认模板编入可执行文件，并在首次运行时初始化到外部目录，之后保留外部修改。
 - `frontend/`：Vite + React 管理后台，shadcn Base UI Nova；官方组件保持原样，业务封装放 `src/components/app/`。
-- `assets/theme/blue/`：当前主题的 CSS、JS、skin 和固定图片，属于代码资源并纳入 Git。
+- `assets/theme/blue/`：当前主题的 CSS、JS、skin 和固定图片，属于可更改的外部资源；升级程序不会覆盖它。
 - `assets/images/`：内容封面、正文和详情介绍图，属于运行时业务资源，不纳入 Git；服务直接读取，不参与发布复制。
 - `web/`：生成的 HTML 和 Sitemap.xml，不纳入 Git；发布只替换此目录。
 - `data/`：SQLite 数据库、发布状态及发布锁；不可作为静态网站根目录。
@@ -32,9 +32,9 @@ make release-dry-run  # 查看下一次 Release 版本，不修改仓库
 make release          # 更新版本、创建 tag 并发布 GitHub Release
 ```
 
-版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub。Release 会同时上传各平台的更新包；可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
+版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub。Release 每个平台只上传一个单文件可执行文件；可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
 
-后台“关于 GoCMS”中的“检查更新”会读取 GitHub 最新 Release。服务使用 `make build` 生成并从 `bin/site` 启动时，检测到对应平台的更新包后可以直接下载、替换程序并自动重启；`go run` 启动的开发进程不执行自更新。
+后台“关于 GoCMS”中的“检查更新”会读取 GitHub 最新 Release。服务检测到对应平台的新版本后会直接下载单文件可执行文件、替换当前程序并自动重启；主题、模板、业务图片、数据库和已发布网站目录都不会被更新流程覆盖。
 
 ## 发布规则
 
@@ -66,9 +66,9 @@ cd backend
 ../bin/site -addr 127.0.0.1:18080
 ```
 
-Go 同时提供 `/admin/`（`frontend/dist`）、`/api/` 和公开静态站点。`/images/` 依次映射到 `assets/images/` 和 `assets/theme/blue/images/`，`/css/`、`/js/`、`/skin/` 映射到 `assets/theme/blue/` 下对应目录，网站页面读取 `web/`。发布不复制图片，也不创建符号链接。旧的 `/uploadfile/` 和 `/UploadFile/` 地址不再提供服务。Nginx 可直接反向代理 Go；如果由 Nginx 提供静态文件，应按相同顺序配置这些资源目录，页面映射到 `web/`。外网部署由反向代理提供 HTTPS。
+Go 同时提供 `/admin/`（发布版内置前端）、`/api/` 和公开静态站点。`/images/` 依次映射到 `assets/images/` 和 `assets/theme/blue/images/`，`/css/`、`/js/`、`/skin/` 映射到 `assets/theme/blue/` 下对应目录，网站页面读取 `web/`。发布不复制图片，也不创建符号链接。旧的 `/uploadfile/` 和 `/UploadFile/` 地址不再提供服务。Nginx 可直接反向代理 Go；如果由 Nginx 提供静态文件，应按相同顺序配置这些资源目录，页面映射到 `web/`。外网部署由反向代理提供 HTTPS。
 
-命令行发布和 Go 服务支持 `-assets` 指定资源根目录，并支持 `-theme` 指定主题目录；默认主题是 `../assets/theme/blue`（从 `backend/` 启动）。资源更新直接生效，不随 HTML 发布回滚。备份应包括 `data/site.db` 和运行时的 `assets/images/`；主题资源由 Git 管理。
+命令行发布和 Go 服务支持 `-assets` 指定资源根目录，并支持 `-theme` 指定主题目录；默认主题是 `../assets/theme/blue`（从 `backend/` 启动）。发布版可执行文件会把管理后台和默认 Go 模板编入自身，模板首次运行时写入外部 `templates/`；Release 单文件不包含主题目录，部署时需要在外部 `assets/theme/blue/` 提供主题资源，修改后直接生效。备份应包括 `data/site.db`、运行时的 `assets/images/`、`assets/theme/blue/` 和 `templates/`。
 
 登录仅接受 Argon2id。新导入 Access 后必须重新设置管理员密码：
 

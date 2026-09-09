@@ -31,7 +31,7 @@ func TestSeparateResources(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for p, body := range map[string]string{filepath.Join(assets, "images/product.jpg"): "product", filepath.Join(theme, "images/logo.svg"): "logo", filepath.Join(theme, "css/site.css"): "css", filepath.Join(theme, "skin/css.css"): "skin", filepath.Join(web, "index.html"): "home", filepath.Join(dir, "secret.txt"): "secret"} {
+	for p, body := range map[string]string{filepath.Join(assets, "images/product.jpg"): "product", filepath.Join(theme, "images/logo.svg"): "logo", filepath.Join(theme, "css/site.css"): "css", filepath.Join(theme, "skin/css.css"): "skin", filepath.Join(theme, "secret.txt"): "private", filepath.Join(web, "index.html"): "home", filepath.Join(dir, "secret.txt"): "secret"} {
 		if err := os.WriteFile(p, []byte(body), 0644); err != nil {
 			t.Fatal(err)
 		}
@@ -51,7 +51,7 @@ func TestSeparateResources(t *testing.T) {
 		body   string
 	}{
 		{"/", 200, "home"}, {"/images/logo.svg", 200, "logo"}, {"/images/product.jpg", 200, "product"}, {"/css/site.css", 200, "css"}, {"/skin/css.css", 200, "skin"},
-		{"/images/", 404, ""}, {"/uploadfile/product.jpg", 404, ""}, {"/UploadFile/product.jpg", 404, ""},
+		{"/images/", 404, ""}, {"/assets/theme", 404, ""}, {"/assets/theme/blue/css/site.css", 404, ""}, {"/assets/theme/blue/secret.txt", 404, ""}, {"/uploadfile/product.jpg", 404, ""}, {"/UploadFile/product.jpg", 404, ""},
 		{"/images/../secret.txt", 404, ""}, {"/escape.txt", 404, ""}, {"/data/site.db", 404, ""},
 	} {
 		t.Run(tc.path, func(t *testing.T) {

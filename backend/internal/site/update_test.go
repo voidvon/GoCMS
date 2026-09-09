@@ -1,10 +1,9 @@
 package site
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -25,58 +24,62 @@ func TestUpdateVersionComparison(t *testing.T) {
 	}
 }
 
-func TestExtractUpdateArchive(t *testing.T) {
-	archivePath := createTestUpdateArchive(t, map[string]string{
-		filepath.ToSlash(filepath.Join("bin", currentBinaryName())): "binary",
-		"frontend/dist/index.html":                                  "admin",
-		"backend/templates/index.html":                              "template",
-	})
-	destination := t.TempDir()
-	if err := extractUpdateArchive(archivePath, destination); err != nil {
+func TestUpdateAssetNameIsSingleBinary(t *testing.T) {
+	name := updateAssetName("v0.1.0")
+	wantSuffix := ""
+	if runtime.GOOS == "windows" {
+		wantSuffix = ".exe"
+	}
+	want := "gocms-v0.1.0-" + runtime.GOOS + "-" + runtime.GOARCH + wantSuffix
+	if name != want {
+		t.Fatalf("asset name = %q, want %q", name, want)
+	}
+}
+
+func TestApplyStagedUpdateReplacesOnlyBinary(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "gocms")
+	staging := filepath.Join(root, "downloaded-binary")
+	themeFile := filepath.Join(root, "assets", "theme", "blue", "css", "site.css")
+	if err := os.MkdirAll(filepath.Dir(themeFile), 0755); err != nil {
 		t.Fatal(err)
 	}
-	content, err := os.ReadFile(filepath.Join(destination, "bin", currentBinaryName()))
+	if err := os.WriteFile(target, []byte("old binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staging, []byte("new binary"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(themeFile, []byte("administrator theme"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyStagedUpdate(staging, target); err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(content) != "binary" {
+	if string(content) != "new binary" {
 		t.Fatalf("binary content = %q", content)
 	}
-}
-
-func TestExtractUpdateArchiveRejectsTraversal(t *testing.T) {
-	archivePath := createTestUpdateArchive(t, map[string]string{"../outside": "blocked"})
-	if err := extractUpdateArchive(archivePath, t.TempDir()); err == nil {
-		t.Fatal("expected path traversal to be rejected")
-	}
-}
-
-func createTestUpdateArchive(t *testing.T, files map[string]string) string {
-	t.Helper()
-	archivePath := filepath.Join(t.TempDir(), "update.tar.gz")
-	file, err := os.Create(archivePath)
+	theme, err := os.ReadFile(themeFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	compressed := gzip.NewWriter(file)
-	archive := tar.NewWriter(compressed)
-	for name, content := range files {
-		data := []byte(content)
-		if err := archive.WriteHeader(&tar.Header{Name: name, Mode: 0755, Size: int64(len(data))}); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := archive.Write(data); err != nil {
-			t.Fatal(err)
-		}
+	if string(theme) != "administrator theme" {
+		t.Fatalf("theme content = %q", theme)
 	}
-	if err := archive.Close(); err != nil {
+}
+
+func TestApplyStagedUpdateRejectsDirectory(t *testing.T) {
+	root := t.TempDir()
+	staging := filepath.Join(root, "downloaded-directory")
+	if err := os.Mkdir(staging, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := compressed.Close(); err != nil {
-		t.Fatal(err)
+	if err := applyStagedUpdate(staging, filepath.Join(root, "gocms")); err == nil {
+		t.Fatal("expected directory update to be rejected")
 	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return archivePath
 }

@@ -1,8 +1,6 @@
 package site
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -22,8 +19,8 @@ import (
 )
 
 const (
-	updateRepository      = "voidvon/GoCMS"
-	maxUpdateArchiveBytes = 512 << 20
+	updateRepository     = "voidvon/GoCMS"
+	maxUpdateBinaryBytes = 512 << 20
 )
 
 var errNoPublishedRelease = errors.New("暂无已发布的 GitHub Release")
@@ -129,7 +126,7 @@ func (s *Server) adminUpdate(response http.ResponseWriter, request *http.Request
 	s.updateActive = true
 	s.updateMu.Unlock()
 
-	staging, err := downloadAndExtractUpdate(request.Context(), release, check.AssetName)
+	staging, err := downloadUpdate(request.Context(), release, check.AssetName)
 	if err != nil {
 		s.resetUpdateState()
 		writeJSON(response, http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("下载更新失败：%v", err)})
@@ -224,7 +221,11 @@ func fetchLatestRelease(ctx context.Context) (githubRelease, error) {
 }
 
 func updateAssetName(tag string) string {
-	return fmt.Sprintf("gocms-%s-%s-%s.tar.gz", tag, runtime.GOOS, runtime.GOARCH)
+	suffix := ""
+	if runtime.GOOS == "windows" {
+		suffix = ".exe"
+	}
+	return fmt.Sprintf("gocms-%s-%s-%s%s", tag, runtime.GOOS, runtime.GOARCH, suffix)
 }
 
 func releaseAsset(release githubRelease, name string) (githubReleaseAsset, bool) {
@@ -254,7 +255,7 @@ func buildUpdateCheck(current string, release githubRelease) updateCheckResponse
 	}
 }
 
-func downloadAndExtractUpdate(ctx context.Context, release githubRelease, assetName string) (string, error) {
+func downloadUpdate(ctx context.Context, release githubRelease, assetName string) (string, error) {
 	asset, ok := releaseAsset(release, assetName)
 	if !ok {
 		return "", fmt.Errorf("没有找到 %s", assetName)
@@ -271,7 +272,7 @@ func downloadAndExtractUpdate(ctx context.Context, release githubRelease, assetN
 	if err != nil {
 		return "", err
 	}
-	archivePath := filepath.Join(temporaryRoot, assetName)
+	binaryPath := filepath.Join(temporaryRoot, filepath.Base(assetName))
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.BrowserDownloadURL, nil)
 	if err != nil {
 		_ = os.RemoveAll(temporaryRoot)
@@ -290,17 +291,17 @@ func downloadAndExtractUpdate(ctx context.Context, release githubRelease, assetN
 		_ = os.RemoveAll(temporaryRoot)
 		return "", fmt.Errorf("下载更新返回 HTTP %d", response.StatusCode)
 	}
-	if response.ContentLength > maxUpdateArchiveBytes {
+	if response.ContentLength > maxUpdateBinaryBytes {
 		_ = os.RemoveAll(temporaryRoot)
-		return "", errors.New("更新包超过大小限制")
+		return "", errors.New("更新文件超过大小限制")
 	}
-	archive, err := os.OpenFile(archivePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	binary, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		_ = os.RemoveAll(temporaryRoot)
 		return "", err
 	}
-	written, copyErr := io.Copy(archive, io.LimitReader(response.Body, maxUpdateArchiveBytes+1))
-	closeErr := archive.Close()
+	written, copyErr := io.Copy(binary, io.LimitReader(response.Body, maxUpdateBinaryBytes+1))
+	closeErr := binary.Close()
 	if copyErr != nil {
 		_ = os.RemoveAll(temporaryRoot)
 		return "", copyErr
@@ -309,135 +310,24 @@ func downloadAndExtractUpdate(ctx context.Context, release githubRelease, assetN
 		_ = os.RemoveAll(temporaryRoot)
 		return "", closeErr
 	}
-	if written > maxUpdateArchiveBytes {
+	if written == 0 {
 		_ = os.RemoveAll(temporaryRoot)
-		return "", errors.New("更新包超过大小限制")
+		return "", errors.New("更新文件为空")
 	}
-
-	staging := filepath.Join(temporaryRoot, "stage")
-	if err := os.Mkdir(staging, 0700); err != nil {
+	if written > maxUpdateBinaryBytes {
 		_ = os.RemoveAll(temporaryRoot)
-		return "", err
+		return "", errors.New("更新文件超过大小限制")
 	}
-	if err := extractUpdateArchive(archivePath, staging); err != nil {
-		_ = os.RemoveAll(temporaryRoot)
-		return "", err
-	}
-	if err := validateStagedUpdate(staging); err != nil {
-		_ = os.RemoveAll(temporaryRoot)
-		return "", err
-	}
-	return staging, nil
-}
-
-func currentBinaryName() string {
-	if runtime.GOOS == "windows" {
-		return "site.exe"
-	}
-	return "site"
-}
-
-func isAllowedUpdatePath(name string) bool {
-	if name == "bin" || name == filepath.ToSlash(filepath.Join("bin", currentBinaryName())) {
-		return true
-	}
-	for _, directory := range []string{"frontend", "backend"} {
-		if name == directory {
-			return true
-		}
-	}
-	for _, prefix := range []string{"frontend/dist", "backend/templates"} {
-		if name == prefix || strings.HasPrefix(name, prefix+"/") {
-			return true
-		}
-	}
-	return false
-}
-
-func extractUpdateArchive(archivePath, destinationRoot string) error {
-	archiveFile, err := os.Open(archivePath)
+	info, err := os.Stat(binaryPath)
 	if err != nil {
-		return err
+		_ = os.RemoveAll(temporaryRoot)
+		return "", err
 	}
-	defer archiveFile.Close()
-	compressed, err := gzip.NewReader(archiveFile)
-	if err != nil {
-		return err
+	if !info.Mode().IsRegular() {
+		_ = os.RemoveAll(temporaryRoot)
+		return "", errors.New("下载的更新文件不是普通文件")
 	}
-	defer compressed.Close()
-	reader := tar.NewReader(compressed)
-	seen := make(map[string]bool)
-	for {
-		header, err := reader.Next()
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			return err
-		}
-		name := header.Name
-		if name == "" || strings.Contains(name, "\\") {
-			return errors.New("更新包包含无效路径")
-		}
-		cleanName := path.Clean(name)
-		if cleanName != name || strings.HasPrefix(cleanName, "/") || cleanName == ".." || strings.HasPrefix(cleanName, "../") {
-			return errors.New("更新包包含路径穿越")
-		}
-		if !isAllowedUpdatePath(cleanName) {
-			return fmt.Errorf("更新包包含不允许的文件：%s", name)
-		}
-		if seen[cleanName] {
-			return fmt.Errorf("更新包包含重复文件：%s", cleanName)
-		}
-		seen[cleanName] = true
-		destination := filepath.Join(destinationRoot, filepath.FromSlash(cleanName))
-		if header.Typeflag == tar.TypeDir {
-			if err := os.MkdirAll(destination, 0700); err != nil {
-				return err
-			}
-			continue
-		}
-		if header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
-			return fmt.Errorf("更新包包含不支持的文件类型：%s", cleanName)
-		}
-		if err := os.MkdirAll(filepath.Dir(destination), 0700); err != nil {
-			return err
-		}
-		file, err := os.OpenFile(destination, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-		if err != nil {
-			return err
-		}
-		_, copyErr := io.Copy(file, reader)
-		closeErr := file.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-		if err := os.Chmod(destination, header.FileInfo().Mode().Perm()); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateStagedUpdate(staging string) error {
-	paths := []string{
-		filepath.Join(staging, "bin", currentBinaryName()),
-		filepath.Join(staging, "frontend", "dist", "index.html"),
-		filepath.Join(staging, "backend", "templates", "index.html"),
-	}
-	for _, candidate := range paths {
-		info, err := os.Stat(candidate)
-		if err != nil {
-			return fmt.Errorf("更新包缺少 %s", candidate)
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("更新包中的 %s 不是普通文件", candidate)
-		}
-	}
-	return nil
+	return binaryPath, nil
 }
 
 func resolveExecutable() (string, error) {
@@ -456,9 +346,6 @@ func launchUpdate(staging string) error {
 	executable, err := resolveExecutable()
 	if err != nil {
 		return err
-	}
-	if filepath.Base(filepath.Dir(executable)) != "bin" {
-		return errors.New("当前程序不是从 bin/site 启动，无法自动更新")
 	}
 	arguments := []string{"__apply-update", "--parent-pid", strconv.Itoa(os.Getpid()), "--target", executable, "--staging", staging, "--"}
 	arguments = append(arguments, os.Args[1:]...)
@@ -482,7 +369,7 @@ func ApplyUpdate(arguments []string) error {
 	flags.SetOutput(io.Discard)
 	parentPID := flags.Int("parent-pid", 0, "旧进程 PID")
 	target := flags.String("target", "", "程序路径")
-	staging := flags.String("staging", "", "更新暂存目录")
+	staging := flags.String("staging", "", "下载的更新文件")
 	if err := flags.Parse(arguments); err != nil {
 		return err
 	}
@@ -505,20 +392,14 @@ func ApplyUpdate(arguments []string) error {
 }
 
 func applyStagedUpdate(staging, target string) error {
-	if filepath.Base(filepath.Dir(target)) != "bin" {
-		return errors.New("目标程序不是 bin/site")
+	info, err := os.Stat(staging)
+	if err != nil {
+		return err
 	}
-	installRoot := filepath.Dir(filepath.Dir(target))
-	for _, directory := range []string{
-		filepath.Join("frontend", "dist"),
-		filepath.Join("backend", "templates"),
-		filepath.Join("assets", "theme", "blue"),
-	} {
-		if err := replaceUpdateDirectory(filepath.Join(staging, directory), filepath.Join(installRoot, directory)); err != nil {
-			return err
-		}
+	if !info.Mode().IsRegular() {
+		return errors.New("更新文件不是普通文件")
 	}
-	return replaceUpdateFile(filepath.Join(staging, "bin", currentBinaryName()), target, 0755)
+	return replaceUpdateFile(staging, target, 0755)
 }
 
 func copyUpdateFile(source, destination string, mode os.FileMode) error {
@@ -553,65 +434,6 @@ func replaceUpdateFile(source, destination string, mode os.FileMode) error {
 	if err := os.Rename(temporary, destination); err != nil {
 		_ = os.Remove(temporary)
 		return err
-	}
-	return nil
-}
-
-func copyUpdateDirectory(source, destination string) error {
-	return filepath.Walk(source, func(current string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		relative, err := filepath.Rel(source, current)
-		if err != nil {
-			return err
-		}
-		target := destination
-		if relative != "." {
-			target = filepath.Join(destination, relative)
-		}
-		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode().Perm())
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("更新文件不是普通文件：%s", current)
-		}
-		return copyUpdateFile(current, target, info.Mode().Perm())
-	})
-}
-
-func replaceUpdateDirectory(source, destination string) error {
-	if _, err := os.Stat(source); err != nil {
-		return err
-	}
-	temporary := fmt.Sprintf("%s.update-%d", destination, os.Getpid())
-	backup := fmt.Sprintf("%s.previous-%d", destination, os.Getpid())
-	_ = os.RemoveAll(temporary)
-	_ = os.RemoveAll(backup)
-	if err := copyUpdateDirectory(source, temporary); err != nil {
-		_ = os.RemoveAll(temporary)
-		return err
-	}
-	moved := false
-	if _, err := os.Stat(destination); err == nil {
-		if err := os.Rename(destination, backup); err != nil {
-			_ = os.RemoveAll(temporary)
-			return err
-		}
-		moved = true
-	} else if !errors.Is(err, os.ErrNotExist) {
-		_ = os.RemoveAll(temporary)
-		return err
-	}
-	if err := os.Rename(temporary, destination); err != nil {
-		if moved {
-			_ = os.Rename(backup, destination)
-		}
-		_ = os.RemoveAll(temporary)
-		return err
-	}
-	if moved {
-		_ = os.RemoveAll(backup)
 	}
 	return nil
 }
