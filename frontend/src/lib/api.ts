@@ -114,6 +114,18 @@ export type ThemeFileContent = ThemeFile & {
   content: string
 }
 
+export type UpdateCheck = {
+  current_version: string
+  latest_version: string
+  latest_tag: string
+  update_available: boolean
+  can_update: boolean
+  release_available: boolean
+  asset_name: string
+  release_url: string
+  release_notes: string
+}
+
 type SessionResponse = { user: AdminUser }
 
 const apiBase = (import.meta.env.VITE_API_BASE ?? "").replace(/\/$/, "")
@@ -268,5 +280,16 @@ export function updateThemeAssignment(key: string, templatePath: string) {
   return request<{ ok: boolean; key: string; template_path: string }>(`/api/admin/theme/assignments/${encodeURIComponent(key)}`, {
     method: "PUT",
     body: JSON.stringify({ template_path: templatePath }),
+  })
+}
+
+export function checkForUpdate(currentVersion: string) {
+  return request<UpdateCheck>(`/api/admin/update/check${query({ current_version: currentVersion })}`)
+}
+
+export function installUpdate(currentVersion: string) {
+  return request<{ ok: boolean; version: string; message: string }>("/api/admin/update", {
+    method: "POST",
+    body: JSON.stringify({ current_version: currentVersion }),
   })
 }

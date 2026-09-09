@@ -32,7 +32,9 @@ make release-dry-run  # 查看下一次 Release 版本，不修改仓库
 make release          # 更新版本、创建 tag 并发布 GitHub Release
 ```
 
-版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub。可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
+版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub。Release 会同时上传各平台的更新包；可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
+
+后台“关于 GoCMS”中的“检查更新”会读取 GitHub 最新 Release。服务使用 `make build` 生成并从 `bin/site` 启动时，检测到对应平台的更新包后可以直接下载、替换程序并自动重启；`go run` 启动的开发进程不执行自更新。
 
 ## 发布规则
 

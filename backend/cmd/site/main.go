@@ -5,6 +5,7 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"gocms/internal/db"
@@ -12,6 +13,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "__apply-update" {
+		if err := site.ApplyUpdate(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
 	root := flag.String("root", "../web", "published public root")
 	databasePath := flag.String("db", "../data/site.db", "SQLite database path")
 	address := flag.String("addr", ":8080", "HTTP listen address")

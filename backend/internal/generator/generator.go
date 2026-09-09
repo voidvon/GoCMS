@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"text/template"
 	"time"
 	"unicode/utf8"
@@ -100,10 +99,11 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		return report, e
 	}
 	defer lock.Close()
-	if e = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
+	unlock, e := acquirePublishLock(lock)
+	if e != nil {
 		return report, fmt.Errorf("已有发布任务正在运行")
 	}
-	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	defer unlock()
 	defer func() {
 		report.Finished = time.Now()
 		report.State = "success"

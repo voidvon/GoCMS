@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gocms/internal/auth"
@@ -28,6 +29,8 @@ type Server struct {
 	templateRoot string
 	publicHost   string
 	publication  *publication
+	updateMu     sync.Mutex
+	updateActive bool
 }
 
 var htmlTagPattern = regexp.MustCompile(`(?s)<[^>]*>`)
@@ -71,6 +74,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		return
 	}
 	switch strings.ToLower(cleanPath) {
+	case "/api/admin/update/check":
+		s.adminUpdateCheck(response, request)
+	case "/api/admin/update":
+		s.adminUpdate(response, request)
 	case "/api/admin/publish":
 		s.adminPublish(response, request)
 	case "/api/health":

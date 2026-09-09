@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process"
-import { readFileSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
-import { dirname, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const packagePath = resolve(root, "frontend/package.json")
@@ -18,8 +19,9 @@ function fail(message) {
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
-    cwd: root,
+    cwd: options.cwd ?? root,
     encoding: "utf8",
+    env: options.env,
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
   })
 
@@ -128,6 +130,47 @@ function updateVersion(version) {
   writeJson(lockPath, packageLock)
 }
 
+const releaseTargets = [
+  ["darwin", "arm64"],
+  ["darwin", "amd64"],
+  ["linux", "amd64"],
+  ["linux", "arm64"],
+  ["windows", "amd64"],
+]
+
+function createReleaseAssets(tag) {
+  const temporaryRoot = mkdtempSync(join(tmpdir(), "gocms-release-"))
+  const assets = []
+  const backendRoot = resolve(root, "backend")
+
+  for (const [goos, goarch] of releaseTargets) {
+    const stageRoot = join(temporaryRoot, `${goos}-${goarch}`)
+    const binaryName = goos === "windows" ? "site.exe" : "site"
+    const binaryPath = join(stageRoot, "bin", binaryName)
+    mkdirSync(join(stageRoot, "bin"), { recursive: true })
+    run("go", ["build", "-trimpath", "-ldflags", "-s -w", "-o", binaryPath, "./cmd/site"], {
+      cwd: backendRoot,
+      env: { ...process.env, CGO_ENABLED: "0", GOOS: goos, GOARCH: goarch },
+    })
+    cpSync(resolve(root, "frontend/dist"), join(stageRoot, "frontend", "dist"), { recursive: true })
+    cpSync(resolve(root, "backend/templates"), join(stageRoot, "backend", "templates"), { recursive: true })
+
+    const assetPath = join(temporaryRoot, `gocms-${tag}-${goos}-${goarch}.tar.gz`)
+    run("tar", [
+      "-czf",
+      assetPath,
+      "-C",
+      stageRoot,
+      "bin",
+      "frontend/dist",
+      "backend/templates",
+    ])
+    assets.push(assetPath)
+  }
+
+  return { assets, temporaryRoot }
+}
+
 const packageJson = readJson(packagePath)
 const currentVersion = parseVersion(packageJson.version)
 const currentTag = `v${formatVersion(currentVersion)}`
@@ -172,6 +215,8 @@ if (versionChanged) {
 
 run("make", ["test"])
 
+const releaseAssets = createReleaseAssets(releaseTag)
+
 if (versionChanged) {
   run("git", ["add", "frontend/package.json", "frontend/package-lock.json"])
   run("git", ["commit", "-m", `chore(release): ${releaseTag}`])
@@ -185,5 +230,6 @@ if (!branch) {
 run("git", ["tag", "-a", releaseTag, "-m", `Release ${releaseTag}`])
 run("git", ["push", remote, branch])
 run("git", ["push", remote, releaseTag])
-run("gh", ["release", "create", releaseTag, "--verify-tag", "--generate-notes", "--title", releaseTag])
+run("gh", ["release", "create", releaseTag, "--verify-tag", "--generate-notes", "--title", releaseTag, ...releaseAssets.assets])
+rmSync(releaseAssets.temporaryRoot, { recursive: true, force: true })
 console.log(`已发布 GitHub Release ${releaseTag}`)
