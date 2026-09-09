@@ -7,8 +7,8 @@ import (
 	"log"
 	"strings"
 
-	"bilvie/internal/auth"
-	"bilvie/internal/db"
+	"gocms/internal/auth"
+	"gocms/internal/db"
 )
 
 func main() {

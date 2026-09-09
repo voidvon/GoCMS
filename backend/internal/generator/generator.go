@@ -18,8 +18,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"bilvie/internal/routing"
-	"bilvie/internal/templateconfig"
+	"gocms/internal/routing"
+	"gocms/internal/templateconfig"
 )
 
 type Row map[string]string
@@ -46,6 +46,7 @@ type content struct {
 	templates   map[string]*template.Template
 	assignments map[string]string
 	pages       map[string][]byte
+	publicHost  string
 }
 
 var oldTag = regexp.MustCompile(`#[A-Za-z_][A-Za-z_0-9]*(?:\([^#]*?\))?#`)
@@ -119,7 +120,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		return report, e
 	}
 	defer tx.Rollback()
-	names := []string{"benming_ch_config", "benming_ch_cuslabel", "benming_ch_MetaType", "bilvie_content", "bilvie_category", "benming_ch_Cocat", "benming_ch_Contact", "benming_ch_job"}
+	names := []string{"benming_ch_config", "benming_ch_cuslabel", "benming_ch_MetaType", "gocms_content", "gocms_category", "benming_ch_Cocat", "benming_ch_Contact", "benming_ch_job"}
 	for _, n := range names {
 		rs, e := readTable(ctx, tx, n)
 		if e != nil {
@@ -127,6 +128,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		}
 		c.tables[strings.ToLower(n)] = rs
 	}
+	c.publicHost = configuredPublicHost(c.tables["benming_ch_config"])
 	assignments, e := templateconfig.Load(ctx, tx)
 	if e != nil {
 		return report, e
@@ -138,7 +140,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	for _, r := range c.tables["benming_ch_cuslabel"] {
 		c.labels[strings.ToLower(strings.Trim(r["lname"], "#"))] = r["lcontent"]
 	}
-	for _, n := range []string{"bilvie_content", "bilvie_category", "benming_ch_cocat", "benming_ch_job"} {
+	for _, n := range []string{"gocms_content", "gocms_category", "benming_ch_cocat", "benming_ch_job"} {
 		sort.SliceStable(c.tables[n], func(i, j int) bool {
 			a, b := c.tables[n][i], c.tables[n][j]
 			if a.n("orderid") == b.n("orderid") {
@@ -185,7 +187,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	if e = c.build(); e != nil {
 		return report, e
 	}
-	for _, r := range c.tables["bilvie_content"] {
+	for _, r := range c.tables["gocms_content"] {
 		if r.n("visible") == 1 {
 			report.Contents++
 		}
@@ -290,7 +292,7 @@ func (c *content) pageTemplate(path, templatePath string, r Row) error {
 	return nil
 }
 func (c *content) cat(id int) Row {
-	for _, r := range c.tables["bilvie_category"] {
+	for _, r := range c.tables["gocms_category"] {
 		if r.n("id") == id {
 			return r
 		}
@@ -377,7 +379,7 @@ func (c *content) categoryListPagePath(r Row, page int) string {
 }
 
 func (c *content) rootCategoryURL() string {
-	for _, category := range c.tables["bilvie_category"] {
+	for _, category := range c.tables["gocms_category"] {
 		if category.n("parent_id") == 0 {
 			return "/" + c.categoryListDir(category) + "/"
 		}
@@ -396,7 +398,7 @@ func (c *content) contentURL(r Row) string {
 
 func (c *content) cats(root int, plain bool) string {
 	var b strings.Builder
-	for _, r := range c.tables["bilvie_category"] {
+	for _, r := range c.tables["gocms_category"] {
 		if r.n("parent_id") != root {
 			continue
 		}
@@ -544,8 +546,8 @@ func callLimit(value, name string, fallback int) (int, bool) {
 }
 
 func (c *content) featuredContent(limit int) string {
-	items := make([]Row, 0, len(c.tables["bilvie_content"]))
-	for _, item := range c.tables["bilvie_content"] {
+	items := make([]Row, 0, len(c.tables["gocms_content"]))
+	for _, item := range c.tables["gocms_content"] {
 		if item.n("visible") == 1 && item.n("featured") == 1 {
 			items = append(items, item)
 		}
@@ -581,8 +583,8 @@ func (c *content) build() error {
 		return e
 	}
 
-	visible := make([]Row, 0, len(c.tables["bilvie_content"]))
-	for _, item := range c.tables["bilvie_content"] {
+	visible := make([]Row, 0, len(c.tables["gocms_content"]))
+	for _, item := range c.tables["gocms_content"] {
 		if item.n("visible") == 1 {
 			visible = append(visible, item)
 		}
@@ -620,7 +622,7 @@ func (c *content) build() error {
 		}
 	}
 
-	for _, category := range c.tables["bilvie_category"] {
+	for _, category := range c.tables["gocms_category"] {
 		items := make([]Row, 0)
 		for _, item := range visible {
 			if c.under(item.n("category_id"), category.n("id")) {

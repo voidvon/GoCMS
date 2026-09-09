@@ -14,9 +14,12 @@ func TestNormalizeImagePaths(t *testing.T) {
 	if err := CreateSchema(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.Exec(`INSERT INTO "benming_ch_config" ("id", "WebUrl") VALUES (1, 'http://www.example.com/')`); err != nil {
+		t.Fatal(err)
+	}
 	_, err = database.Exec(`
 		INSERT INTO "benming_ch_prod" ("id", "smallpic", "bigpic", "itemize")
-		VALUES (1, '/UploadFile/produppic/example.jpg', '/skin/dfpic.gif', '<img src="http://www.bilvie.com/UploadFile/body.png"><img src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg">')`)
+		VALUES (1, '/UploadFile/produppic/example.jpg', '/skin/dfpic.gif', '<img src="http://www.example.com/UploadFile/body.png"><img src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg">')`)
 	if err != nil {
 		t.Fatal(err)
 	}

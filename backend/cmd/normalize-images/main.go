@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"log"
 
-	"bilvie/internal/db"
+	"gocms/internal/db"
 )
 
 func main() {

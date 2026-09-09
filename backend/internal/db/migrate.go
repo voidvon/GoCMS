@@ -36,7 +36,7 @@ func ImportAccess(ctx context.Context, accessPath, sqlitePath string, force bool
 	if err := os.MkdirAll(databaseDir, 0o755); err != nil {
 		return ImportReport{}, fmt.Errorf("create sqlite directory: %w", err)
 	}
-	temporary, err := os.CreateTemp(databaseDir, ".bilvie-import-*.db")
+	temporary, err := os.CreateTemp(databaseDir, ".gocms-import-*.db")
 	if err != nil {
 		return ImportReport{}, fmt.Errorf("create temporary sqlite database: %w", err)
 	}

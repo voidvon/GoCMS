@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"bilvie/internal/generator"
+	"gocms/internal/generator"
 )
 
 type publication struct {

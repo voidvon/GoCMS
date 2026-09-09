@@ -7,9 +7,11 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"gocms/internal/sitehost"
 )
 
-func canonicalImageURL(value string) string {
+func canonicalImageURL(value, publicHost string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return value
@@ -18,7 +20,7 @@ func canonicalImageURL(value string) string {
 	if err != nil || u.Path == "" {
 		return value
 	}
-	if u.Host != "" && !strings.EqualFold(u.Hostname(), "www.bilvie.com") {
+	if u.Host != "" && !sitehost.Matches(u.Hostname(), publicHost) {
 		return value
 	}
 	normalized := strings.ReplaceAll(u.Path, `\`, "/")

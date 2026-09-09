@@ -47,7 +47,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
               <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                 <ShieldCheck className="size-4" />
               </span>
-              彪维流体设备
+              GoCMS
             </div>
             <p className="max-w-sm text-3xl font-semibold tracking-tight text-foreground">
               内容管理工作台

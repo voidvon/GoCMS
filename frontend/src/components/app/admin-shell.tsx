@@ -10,8 +10,6 @@ import {
   FileText,
   Globe,
   Palette,
-  Settings2,
-  UsersRound,
 } from "lucide-react"
 
 import { logout, type AdminUser } from "@/lib/api"
@@ -43,6 +41,7 @@ import { ContentPage } from "@/components/app/content-page"
 import { ThemePage } from "@/components/app/theme-page"
 
 import { PublishPage } from "@/components/app/publish-page"
+import { SettingsDialog } from "@/components/app/settings-dialog"
 
 type AdminShellProps = {
   user: AdminUser
@@ -96,7 +95,52 @@ function Navigation({ activeView, onNavigate, onClose }: NavigationProps) {
   )
 }
 
-function Sidebar({ activeView, onNavigate }: NavigationProps) {
+type UserMenuProps = {
+  user: AdminUser
+  onLogout: () => void
+  className?: string
+}
+
+function UserMenu({ user, onLogout, className }: UserMenuProps) {
+  const initials = user.username.slice(0, 1).toUpperCase()
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            className={cn("min-w-0 justify-start gap-2 px-2", className)}
+          >
+            <Avatar size="sm">
+              <AvatarFallback>{initials}</AvatarFallback>
+            </Avatar>
+            <span className="min-w-0 flex-1 truncate text-left text-sm">{user.username}</span>
+            <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent side="top" align="start" className="w-48">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>
+            <p>{user.username}</p>
+            <p className="font-normal text-muted-foreground">管理员账号</p>
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={onLogout} variant="destructive">
+          <LogOut />
+          退出登录
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+type SidebarProps = Pick<NavigationProps, "activeView" | "onNavigate"> &
+  Pick<AdminShellProps, "user" | "onLogout">
+
+function Sidebar({ activeView, onNavigate, user, onLogout }: SidebarProps) {
   return (
     <aside className="hidden w-60 shrink-0 border-r bg-muted/20 lg:block">
       <div className="sticky top-0 flex h-svh flex-col p-4">
@@ -105,7 +149,7 @@ function Sidebar({ activeView, onNavigate }: NavigationProps) {
             <BarChart3 className="size-4" />
           </span>
           <div>
-            <p className="text-sm font-semibold tracking-tight">彪维后台</p>
+            <p className="text-sm font-semibold tracking-tight">GoCMS 后台</p>
             <p className="text-xs text-muted-foreground">内容管理</p>
           </div>
         </div>
@@ -113,15 +157,11 @@ function Sidebar({ activeView, onNavigate }: NavigationProps) {
           工作区
         </div>
         <Navigation activeView={activeView} onNavigate={onNavigate} />
-        <div className="mt-auto space-y-1">
-          <Button variant="ghost" className="w-full justify-start gap-3" disabled>
-            <UsersRound />
-            管理员
-          </Button>
-          <Button variant="ghost" className="w-full justify-start gap-3" disabled>
-            <Settings2 />
-            设置
-          </Button>
+        <div className="mt-auto border-t pt-4">
+          <div className="flex items-center gap-1">
+            <UserMenu user={user} onLogout={onLogout} className="flex-1" />
+            <SettingsDialog />
+          </div>
         </div>
       </div>
     </aside>
@@ -163,7 +203,6 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
   const { view: activeView, navigate } = useAdminRoute()
   const [mobileOpen, setMobileOpen] = useState(false)
   const meta = viewMeta(activeView)
-  const initials = user.username.slice(0, 1).toUpperCase()
 
   async function handleLogout() {
     await logout().catch(() => undefined)
@@ -180,7 +219,7 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
 
   return (
     <div className="flex min-h-svh bg-background">
-      <Sidebar activeView={activeView} onNavigate={navigate} />
+      <Sidebar activeView={activeView} onNavigate={navigate} user={user} onLogout={handleLogout} />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur sm:px-6">
           <div className="flex items-center gap-3">
@@ -198,16 +237,22 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
               >
                 <Menu />
               </SheetTrigger>
-              <SheetContent side="left" className="w-72 p-4">
+              <SheetContent side="left" className="flex w-72 flex-col p-4">
                 <SheetHeader className="px-2">
                   <SheetTitle className="flex items-center gap-3">
                     <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                       <BarChart3 className="size-4" />
                     </span>
-                    彪维后台
+                    GoCMS 后台
                   </SheetTitle>
                 </SheetHeader>
-                <div className="mt-6">{mobileNavigation}</div>
+                <div className="mt-6 flex-1 overflow-y-auto">{mobileNavigation}</div>
+                <div className="mt-6 border-t pt-4">
+                  <div className="flex items-center gap-1">
+                    <UserMenu user={user} onLogout={handleLogout} className="flex-1" />
+                    <SettingsDialog />
+                  </div>
+                </div>
               </SheetContent>
             </Sheet>
             <div>
@@ -215,30 +260,6 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
               <p className="hidden text-xs text-muted-foreground sm:block">{meta.description}</p>
             </div>
           </div>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" className="gap-2 px-1.5 sm:px-2">
-                  <Avatar size="sm">
-                    <AvatarFallback>{initials}</AvatarFallback>
-                  </Avatar>
-                  <span className="hidden max-w-28 truncate text-sm sm:inline">{user.username}</span>
-                  <ChevronsUpDown className="hidden size-3.5 text-muted-foreground sm:block" />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuGroup><DropdownMenuLabel>
-                <p>{user.username}</p>
-                <p className="font-normal text-muted-foreground">管理员账号</p>
-              </DropdownMenuLabel></DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout} variant="destructive">
-                <LogOut />
-                退出登录
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </header>
         <main className="flex-1 p-4 sm:p-6">
           <div className="mx-auto w-full max-w-screen-2xl">

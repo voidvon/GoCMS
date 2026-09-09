@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"bilvie/internal/routing"
-	"bilvie/internal/templateconfig"
+	"gocms/internal/routing"
+	"gocms/internal/templateconfig"
 )
 
 type ColumnType int
@@ -242,7 +242,7 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 
 // EnsureLegacyCategoryRouteColumns adds route settings to the imported source
 // table. This is used only while importing the old Access database; the
-// publisher reads bilvie_category exclusively.
+// publisher reads gocms_category exclusively.
 func EnsureLegacyCategoryRouteColumns(ctx context.Context, database *sql.DB) error {
 	columns := map[string]string{
 		"ListPath":          "TEXT",

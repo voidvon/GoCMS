@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"bilvie/internal/templateconfig"
+	"gocms/internal/templateconfig"
 )
 
 const maxThemeFileSize = 8 << 20

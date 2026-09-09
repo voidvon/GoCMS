@@ -1,4 +1,4 @@
-# 彪维静态 CMS
+# GoCMS 静态 CMS
 
 Go + SQLite 内容服务、React 管理后台、Go 模板静态发布。
 
@@ -28,7 +28,11 @@ make frontend
 ```sh
 make generate  # 命令行全站生成
 make test      # Go 测试/vet + 前端构建
+make release-dry-run  # 查看下一次 Release 版本，不修改仓库
+make release          # 更新版本、创建 tag 并发布 GitHub Release
 ```
+
+版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub。可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
 
 ## 发布规则
 
@@ -44,7 +48,7 @@ make test      # Go 测试/vet + 前端构建
 
 每个分类可以单独设置每页数量；第一页同时生成 `{id}.html` 和 `{id}-1.html`，后续为 `{id}-{page}.html`。首页读取统一的推荐内容标签；网站地图从实际生成的地址产生。
 
-所有内容统一使用 `bilvie_content`，所有栏目统一使用 `bilvie_category`，留言统一使用 `bilvie_message`。每个分类保存自己的列表模板、详情模板、静态目录和文件名规则；内容只保存所属分类 ID，发布器按分类解析路径。现有数据库中的 `/valve`、`/Products`、`/Product`、`/news`、`/service` 等线上目录作为分类配置保留，新建分类使用 `category`、`content` 等通用默认值。旧 Access 表只在 `cmd/migrate` 的一次性导入阶段读取，服务启动和发布过程不会读取旧内容表或旧留言表。
+所有内容统一使用 `gocms_content`，所有栏目统一使用 `gocms_category`，留言统一使用 `gocms_message`。每个分类保存自己的列表模板、详情模板、静态目录和文件名规则；内容只保存所属分类 ID，发布器按分类解析路径。现有数据库中的 `/valve`、`/Products`、`/Product`、`/news`、`/service` 等线上目录作为分类配置保留，新建分类使用 `category`、`content` 等通用默认值。旧 Access 表只在 `cmd/migrate` 的一次性导入阶段读取，服务启动和发布过程不会读取旧内容表或旧留言表。
 
 生成使用一致的 SQLite 读事务快照。先完成所有模板渲染和 UTF-8 检查，再向临时目录写入新 HTML 和站点地图，最后切换 `web/`。新目录只包含本次生成结果，因此隐藏/删除内容及过期分页会清理；独立资源目录不被修改。未知模板标签或模板错误会终止发布，保持旧站点。发布锁用于防止 CLI/API 并发写入。
 
@@ -68,7 +72,7 @@ Go 同时提供 `/admin/`（`frontend/dist`）、`/api/` 和公开静态站点�
 
 ```sh
 cd backend
-go run ./cmd/reset-password -username bilvie -password '新的密码'
+go run ./cmd/reset-password -username gocms -password '新的密码'
 ```
 
 后台的分类页面统一维护栏目树，内容编辑从统一分类树中选择所属栏目，发布器读取统一内容、分类和 SEO 字段生成页面。新增业务图片应保存到 `assets/images/`，主题图片应保存到 `assets/theme/blue/images/`，数据库字段统一使用 `/images/文件名`。

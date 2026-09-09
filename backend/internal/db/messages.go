@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const unifiedMessageTable = "bilvie_message"
+const unifiedMessageTable = "gocms_message"
 
 // EnsureMessages creates the runtime message model. Historical message rows
 // are imported once by MigrateLegacyMessages and are not read by the server.
@@ -29,8 +29,8 @@ func EnsureMessages(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("create unified message table: %w", err)
 	}
 	for _, statement := range []string{
-		`CREATE INDEX IF NOT EXISTS idx_bilvie_message_state ON "bilvie_message" ("state", "id")`,
-		`CREATE INDEX IF NOT EXISTS idx_bilvie_message_content ON "bilvie_message" ("content_id", "id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_message_state ON "gocms_message" ("state", "id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_message_content ON "gocms_message" ("content_id", "id")`,
 	} {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create unified message index: %w", err)
@@ -45,7 +45,7 @@ func MigrateLegacyMessages(ctx context.Context, database *sql.DB) error {
 		return err
 	}
 	_, err := database.ExecContext(ctx, `
-		INSERT OR IGNORE INTO "bilvie_message"
+		INSERT OR IGNORE INTO "gocms_message"
 		("id", "title", "name", "phone", "mobile", "fax", "email", "address", "content", "created_at", "state", "content_id")
 		SELECT "id", COALESCE("Title", ''), COALESCE("linkren", ''), COALESCE("phone", ''),
 		       COALESCE("mobile", ''), COALESCE("fax", ''), COALESCE("email", ''), COALESCE("address", ''),

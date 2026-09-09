@@ -1,4 +1,4 @@
-.PHONY: backend frontend build generate normalize-images test
+.PHONY: backend frontend build generate normalize-images test release release-dry-run
 backend:
 	cd backend && go run ./cmd/site -addr 127.0.0.1:18080
 frontend:
@@ -13,3 +13,7 @@ normalize-images:
 test:
 	cd backend && go test ./... && go vet ./...
 	cd frontend && npm run build
+release:
+	node scripts/release.mjs
+release-dry-run:
+	node scripts/release.mjs --dry-run

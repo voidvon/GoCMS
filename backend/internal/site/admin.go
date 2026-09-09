@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"bilvie/internal/auth"
-	"bilvie/internal/routing"
-	"bilvie/internal/templateconfig"
+	"gocms/internal/auth"
+	"gocms/internal/routing"
+	"gocms/internal/templateconfig"
 )
 
 type adminCredentials struct {
@@ -112,8 +112,8 @@ func (s *Server) adminLogout(response http.ResponseWriter, request *http.Request
 		methodNotAllowed(response)
 		return
 	}
-	if cookie, err := request.Cookie("bilvie_admin"); err == nil {
-		_, _ = s.database.ExecContext(request.Context(), `DELETE FROM "bilvie_admin_session" WHERE "token" = ?`, cookie.Value)
+	if cookie, err := request.Cookie("gocms_admin"); err == nil {
+		_, _ = s.database.ExecContext(request.Context(), `DELETE FROM "gocms_admin_session" WHERE "token" = ?`, cookie.Value)
 	}
 	http.SetCookie(response, sessionCookie("", -1))
 	writeJSON(response, http.StatusOK, map[string]bool{"ok": true})
@@ -149,10 +149,10 @@ func (s *Server) adminStats(response http.ResponseWriter, request *http.Request)
 		destination *int64
 		query       string
 	}{
-		{&stats.Contents, `SELECT COUNT(*) FROM "bilvie_content"`},
-		{&stats.VisibleContents, `SELECT COUNT(*) FROM "bilvie_content" WHERE "visible" = 1`},
-		{&stats.Messages, `SELECT COUNT(*) FROM "bilvie_message"`},
-		{&stats.PendingMessages, `SELECT COUNT(*) FROM "bilvie_message" WHERE COALESCE("state", 0) = 0`},
+		{&stats.Contents, `SELECT COUNT(*) FROM "gocms_content"`},
+		{&stats.VisibleContents, `SELECT COUNT(*) FROM "gocms_content" WHERE "visible" = 1`},
+		{&stats.Messages, `SELECT COUNT(*) FROM "gocms_message"`},
+		{&stats.PendingMessages, `SELECT COUNT(*) FROM "gocms_message" WHERE COALESCE("state", 0) = 0`},
 	}
 	for _, item := range queries {
 		if err := s.database.QueryRowContext(request.Context(), item.query).Scan(item.destination); err != nil {
@@ -173,7 +173,7 @@ func (s *Server) adminMessages(response http.ResponseWriter, request *http.Reque
 		pageSize = 100
 	}
 	var total int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "bilvie_message"`).Scan(&total); err != nil {
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_message"`).Scan(&total); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -181,7 +181,7 @@ func (s *Server) adminMessages(response http.ResponseWriter, request *http.Reque
 		SELECT "id", COALESCE("title", ''), COALESCE("name", ''), COALESCE("phone", ''), COALESCE("mobile", ''),
 		       COALESCE("email", ''), COALESCE("address", ''), COALESCE("content", ''), COALESCE("created_at", ''),
 		       COALESCE("state", 0), COALESCE("content_id", 0)
-		FROM "bilvie_message" ORDER BY "id" DESC LIMIT ? OFFSET ?`, pageSize, (page-1)*pageSize)
+		FROM "gocms_message" ORDER BY "id" DESC LIMIT ? OFFSET ?`, pageSize, (page-1)*pageSize)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -213,7 +213,7 @@ func (s *Server) adminMessage(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	if request.Method == http.MethodDelete {
-		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "bilvie_message" WHERE "id" = ?`, id)
+		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "gocms_message" WHERE "id" = ?`, id)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -241,7 +241,7 @@ func (s *Server) adminMessage(response http.ResponseWriter, request *http.Reques
 		http.Error(response, "state must be 0 or 1", http.StatusBadRequest)
 		return
 	}
-	_, err = s.database.ExecContext(request.Context(), `UPDATE "bilvie_message" SET "state" = ? WHERE "id" = ?`, payload.State, id)
+	_, err = s.database.ExecContext(request.Context(), `UPDATE "gocms_message" SET "state" = ? WHERE "id" = ?`, payload.State, id)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -263,10 +263,10 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 	}
 	rows, err := s.database.QueryContext(request.Context(), `
 		SELECT c."id", c."name", c."parent_id", c."order_id", c."list_page_size", c."route_id",
-		       (SELECT COUNT(*) FROM "bilvie_content" content WHERE content."category_id" = c."id"),
+		       (SELECT COUNT(*) FROM "gocms_content" content WHERE content."category_id" = c."id"),
 		       c."list_path", c."list_file_pattern", c."list_template", c."detail_path",
 		       c."detail_file_pattern", c."detail_template"
-		FROM "bilvie_category" c
+		FROM "gocms_category" c
 		ORDER BY c."parent_id", c."order_id", c."id"`)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
@@ -342,7 +342,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			return
 		}
 		result, err := s.database.ExecContext(request.Context(), `
-			INSERT INTO "bilvie_category"
+			INSERT INTO "gocms_category"
 			("name", "parent_id", "order_id", "list_page_size", "route_id", "list_path", "list_file_pattern", "list_template", "detail_path", "detail_file_pattern", "detail_template")
 			VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
 			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate)
@@ -355,13 +355,13 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
-		if _, err := s.database.ExecContext(request.Context(), `UPDATE "bilvie_category" SET "route_id" = ? WHERE "id" = ?`, newID, newID); err != nil {
+		if _, err := s.database.ExecContext(request.Context(), `UPDATE "gocms_category" SET "route_id" = ? WHERE "id" = ?`, newID, newID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
 	} else {
 		result, err := s.database.ExecContext(request.Context(), `
-			UPDATE "bilvie_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "list_page_size" = ?,
+			UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "list_page_size" = ?,
 			"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ? WHERE "id" = ?`,
 			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, id)
 		if err != nil {
@@ -386,7 +386,7 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	if id > 0 {
 		err := s.database.QueryRowContext(ctx, `
 			SELECT "list_page_size", "list_path", "list_file_pattern", "list_template", "detail_path", "detail_file_pattern", "detail_template"
-			FROM "bilvie_category" WHERE "id" = ?`, id).
+			FROM "gocms_category" WHERE "id" = ?`, id).
 			Scan(&current.ListPageSize, &current.ListPath, &current.ListFilePattern, &current.ListTemplate, &current.DetailPath, &current.DetailFilePattern, &current.DetailTemplate)
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("分类不存在")
@@ -426,7 +426,7 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 		payload.ListPath = routing.DefaultListPath(payload.ParentID)
 		if payload.ParentID > 0 {
 			var parentPath string
-			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("list_path", '') FROM "bilvie_category" WHERE "id" = ?`, payload.ParentID).Scan(&parentPath); err == nil && parentPath != "" {
+			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("list_path", '') FROM "gocms_category" WHERE "id" = ?`, payload.ParentID).Scan(&parentPath); err == nil && parentPath != "" {
 				payload.ListPath = parentPath
 			}
 		}
@@ -440,7 +440,7 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	if payload.DetailPath == "" {
 		if payload.ParentID > 0 {
 			var parentPath string
-			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("detail_path", '') FROM "bilvie_category" WHERE "id" = ?`, payload.ParentID).Scan(&parentPath); err == nil && parentPath != "" {
+			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("detail_path", '') FROM "gocms_category" WHERE "id" = ?`, payload.ParentID).Scan(&parentPath); err == nil && parentPath != "" {
 				payload.DetailPath = parentPath
 			}
 		}
@@ -485,7 +485,7 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 
 func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Request, id int64) {
 	var exists, children, content int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "bilvie_category" WHERE "id" = ?`, id).Scan(&exists); err != nil {
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_category" WHERE "id" = ?`, id).Scan(&exists); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -493,7 +493,7 @@ func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Requ
 		http.Error(response, "category not found", http.StatusNotFound)
 		return
 	}
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "bilvie_category" WHERE "parent_id" = ?`, id).Scan(&children); err != nil {
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_category" WHERE "parent_id" = ?`, id).Scan(&children); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -502,7 +502,7 @@ func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	if err := s.database.QueryRowContext(request.Context(), `
-		SELECT COUNT(*) FROM "bilvie_content" WHERE "category_id" = ?`, id).Scan(&content); err != nil {
+		SELECT COUNT(*) FROM "gocms_content" WHERE "category_id" = ?`, id).Scan(&content); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -510,7 +510,7 @@ func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Requ
 		http.Error(response, "栏目下还有内容，请先调整内容所属栏目", http.StatusConflict)
 		return
 	}
-	if _, err := s.database.ExecContext(request.Context(), `DELETE FROM "bilvie_category" WHERE "id" = ?`, id); err != nil {
+	if _, err := s.database.ExecContext(request.Context(), `DELETE FROM "gocms_category" WHERE "id" = ?`, id); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -522,7 +522,7 @@ func (s *Server) nextCategoryOrder(ctx context.Context, parentID int64, orderID 
 		return nil
 	}
 	var maxOrder sql.NullInt64
-	if err := s.database.QueryRowContext(ctx, `SELECT MAX("order_id") FROM "bilvie_category" WHERE "parent_id" = ?`, parentID).Scan(&maxOrder); err != nil {
+	if err := s.database.QueryRowContext(ctx, `SELECT MAX("order_id") FROM "gocms_category" WHERE "parent_id" = ?`, parentID).Scan(&maxOrder); err != nil {
 		return err
 	}
 	if maxOrder.Valid {
@@ -545,7 +545,7 @@ func (s *Server) validateCategoryParent(ctx context.Context, id, parentID int64)
 		}
 		seen[current] = true
 		var parent int64
-		if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("parent_id", 0) FROM "bilvie_category" WHERE "id" = ?`, current).Scan(&parent); err != nil {
+		if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("parent_id", 0) FROM "gocms_category" WHERE "id" = ?`, current).Scan(&parent); err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("父分类不存在")
 			}
@@ -561,7 +561,7 @@ func (s *Server) validateContentCategory(ctx context.Context, id int64) error {
 		return nil
 	}
 	var exists int64
-	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "bilvie_category" WHERE "id" = ?`, id).Scan(&exists); err != nil {
+	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "gocms_category" WHERE "id" = ?`, id).Scan(&exists); err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("栏目不存在")
 		}
@@ -582,13 +582,13 @@ func (s *Server) requireAdmin(response http.ResponseWriter, request *http.Reques
 }
 
 func (s *Server) adminUsername(request *http.Request) (string, bool) {
-	cookie, err := request.Cookie("bilvie_admin")
+	cookie, err := request.Cookie("gocms_admin")
 	if err != nil || cookie.Value == "" || s.database == nil {
 		return "", false
 	}
 	var username string
 	err = s.database.QueryRowContext(request.Context(), `
-		SELECT "username" FROM "bilvie_admin_session"
+		SELECT "username" FROM "gocms_admin_session"
 		WHERE "token" = ? AND "expires_at" > ?`, cookie.Value, time.Now().Unix()).Scan(&username)
 	if err != nil {
 		return "", false
@@ -607,18 +607,18 @@ func (s *Server) createSession(username string) (string, error) {
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
 	expiresAt := time.Now().Add(24 * time.Hour).Unix()
 	if _, err := s.database.Exec(`
-		DELETE FROM "bilvie_admin_session" WHERE "expires_at" <= ?`, time.Now().Unix()); err != nil {
+		DELETE FROM "gocms_admin_session" WHERE "expires_at" <= ?`, time.Now().Unix()); err != nil {
 		return "", fmt.Errorf("clean expired sessions: %w", err)
 	}
 	if _, err := s.database.Exec(`
-		INSERT INTO "bilvie_admin_session" ("token", "username", "expires_at") VALUES (?, ?, ?)`, token, username, expiresAt); err != nil {
+		INSERT INTO "gocms_admin_session" ("token", "username", "expires_at") VALUES (?, ?, ?)`, token, username, expiresAt); err != nil {
 		return "", fmt.Errorf("store admin session: %w", err)
 	}
 	return token, nil
 }
 
 func sessionCookie(value string, maxAge int) *http.Cookie {
-	return &http.Cookie{Name: "bilvie_admin", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: maxAge}
+	return &http.Cookie{Name: "gocms_admin", Value: value, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: maxAge}
 }
 
 func decodeRequest(request *http.Request, destination any) error {

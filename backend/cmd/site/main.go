@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"path/filepath"
 
-	"bilvie/internal/db"
-	"bilvie/internal/site"
+	"gocms/internal/db"
+	"gocms/internal/site"
 )
 
 func main() {

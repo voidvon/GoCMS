@@ -26,7 +26,7 @@ func TestMessagesUseUnifiedContentAssociation(t *testing.T) {
 	}
 
 	var contentID int64
-	if err := database.QueryRow(`SELECT "content_id" FROM "bilvie_message" WHERE "title" = '咨询'`).Scan(&contentID); err != nil {
+	if err := database.QueryRow(`SELECT "content_id" FROM "gocms_message" WHERE "title" = '咨询'`).Scan(&contentID); err != nil {
 		t.Fatal(err)
 	}
 	if contentID != 185 {

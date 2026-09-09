@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"gocms/internal/sitehost"
 )
 
 var resourceAttribute = regexp.MustCompile(`(?i)\b(href|src|action)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)`)
@@ -87,7 +89,7 @@ func (c *content) normalizeLinks(assets, theme string) error {
 				return attr
 			}
 			external := u.IsAbs() || u.Host != ""
-			if external && !strings.EqualFold(u.Hostname(), "www.bilvie.com") {
+			if external && !sitehost.Matches(u.Hostname(), c.publicHost) {
 				return attr
 			}
 			legacy := strings.HasPrefix(strings.ToLower(strings.TrimPrefix(strings.ReplaceAll(u.Path, `\`, "/"), "/")), "uploadfile/") ||
@@ -131,6 +133,15 @@ func (c *content) normalizeLinks(assets, theme string) error {
 		}))
 	}
 	return nil
+}
+
+func configuredPublicHost(rows []Row) string {
+	for _, row := range rows {
+		if host := sitehost.FromURL(row["weburl"]); host != "" {
+			return host
+		}
+	}
+	return ""
 }
 
 func isImagePath(value string) bool {

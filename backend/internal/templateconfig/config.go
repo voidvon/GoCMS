@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const tableName = "bilvie_template_assignment"
+const tableName = "gocms_template_assignment"
 
 const (
 	DimensionHome    = "home"

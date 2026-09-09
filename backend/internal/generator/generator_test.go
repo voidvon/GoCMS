@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"bilvie/internal/db"
+	"gocms/internal/db"
 )
 
 func TestPublishLifecycle(t *testing.T) {
@@ -21,14 +21,14 @@ func TestPublishLifecycle(t *testing.T) {
 		t.Fatal(e)
 	}
 	for _, q := range []string{
-		`INSERT INTO benming_ch_config (id) VALUES (1)`,
+		`INSERT INTO benming_ch_config (id,WebUrl) VALUES (1,'http://www.example.com/')`,
 		`INSERT INTO benming_ch_cuslabel (id,lname,lcontent) VALUES (1,'#BM_indextop#',''),(2,'#BM_indexfoot#',''),(3,'#BM_about#',''),(4,'#BM_botten#',''),(5,'#BM_top#','')`,
-		`INSERT INTO bilvie_category (id,name,parent_id,order_id,route_id,list_path,list_file_pattern,list_template,detail_path,detail_file_pattern,detail_template) VALUES
+		`INSERT INTO gocms_category (id,name,parent_id,order_id,route_id,list_path,list_file_pattern,list_template,detail_path,detail_file_pattern,detail_template) VALUES
 					(2,'总类',0,0,2,'catalog','{id}.html','category_list.html','entry','{id}.html','content_detail.html'),
 					(10,'子类',2,0,10,'catalog/items','{id}.html','category_list.html','entry','{id}.html','content_detail.html'),
 					(1004,'栏目',0,0,4,'articles','{id}.html','category_list.html','articles/detail','{id}.html','content_detail.html'),
 					(1006,'子栏目',1004,0,6,'articles','{id}.html','category_list.html','articles/detail','{id}.html','content_detail.html')`,
-		`INSERT INTO bilvie_content (id,category_id,route_key,title,body,cover_image,visible,featured) VALUES
+		`INSERT INTO gocms_content (id,category_id,route_key,title,body,cover_image,visible,featured) VALUES
 					(1,10,'1','阀门 & 新内容','<p>正文内容</p><img src="/UploadFile/produppic/cover.jpg">','/UploadFile/produppic/cover.jpg',1,1),
 					(9,1006,'9','测试内容','<p>详情内容</p><img src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg">','',1,0)`,
 	} {
@@ -82,7 +82,7 @@ func TestPublishLifecycle(t *testing.T) {
 	if e = os.WriteFile(filepath.Join(templates, "custom-content-list.html"), []byte(`<html><body>custom list {{tag "title" .}}{{tag "body" .}}</body></html>`), 0644); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = d.Exec(`UPDATE bilvie_category SET list_template='custom-content-list.html', detail_template='custom-content-detail.html' WHERE id=10`); e != nil {
+	if _, e = d.Exec(`UPDATE gocms_category SET list_template='custom-content-list.html', detail_template='custom-content-detail.html' WHERE id=10`); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = p.Generate(ctx); e != nil {
@@ -96,7 +96,7 @@ func TestPublishLifecycle(t *testing.T) {
 	if !strings.Contains(string(customListBody), "custom list 子类") {
 		t.Fatal("category list template assignment was not used")
 	}
-	if _, e = d.Exec(`UPDATE bilvie_category SET list_path='custom-catalog', list_file_pattern='{id}.htm', detail_path='custom-entry', detail_file_pattern='{id}-detail.html' WHERE id=10`); e != nil {
+	if _, e = d.Exec(`UPDATE gocms_category SET list_path='custom-catalog', list_file_pattern='{id}.htm', detail_path='custom-entry', detail_file_pattern='{id}-detail.html' WHERE id=10`); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = p.Generate(ctx); e != nil {
@@ -114,7 +114,7 @@ func TestPublishLifecycle(t *testing.T) {
 	if _, e = os.Stat(filepath.Join(web, "entry/1.html")); !os.IsNotExist(e) {
 		t.Fatal("old content route survived custom publication")
 	}
-	if _, e = d.Exec(`UPDATE bilvie_content SET visible=0 WHERE id=1`); e != nil {
+	if _, e = d.Exec(`UPDATE gocms_content SET visible=0 WHERE id=1`); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = p.Generate(ctx); e != nil {
@@ -147,7 +147,7 @@ func TestPublishLifecycle(t *testing.T) {
 
 func TestContentURLUsesConfiguredDetailPath(t *testing.T) {
 	c := &content{tables: map[string][]Row{
-		"bilvie_category": {{
+		"gocms_category": {{
 			"id": "10", "detail_path": "entry", "detail_file_pattern": "item-{id}.html",
 		}},
 	}}

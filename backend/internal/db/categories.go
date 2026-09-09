@@ -7,11 +7,11 @@ import (
 	"sort"
 	"strings"
 
-	"bilvie/internal/routing"
-	"bilvie/internal/templateconfig"
+	"gocms/internal/routing"
+	"gocms/internal/templateconfig"
 )
 
-const unifiedCategoryTable = "bilvie_category"
+const unifiedCategoryTable = "gocms_category"
 
 const (
 	legacyCatalogSource = "benming_ch_ProdCat"
@@ -94,8 +94,8 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("create unified category table: %w", err)
 	}
 	for _, statement := range []string{
-		`CREATE INDEX IF NOT EXISTS idx_bilvie_category_parent ON "bilvie_category" ("parent_id", "order_id", "id")`,
-		`CREATE INDEX IF NOT EXISTS idx_bilvie_category_source ON "bilvie_category" ("source_table", "source_id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_category_parent ON "gocms_category" ("parent_id", "order_id", "id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_category_source ON "gocms_category" ("source_table", "source_id")`,
 	} {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create unified category index: %w", err)
@@ -140,7 +140,7 @@ func migrateLegacyCategories(ctx context.Context, tx *sql.Tx, source legacyCateg
 
 	ids := make(map[int64]int64, len(rows))
 	var maxID int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX("id"), 0) FROM "bilvie_category"`).Scan(&maxID); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX("id"), 0) FROM "gocms_category"`).Scan(&maxID); err != nil {
 		return fmt.Errorf("read unified category id: %w", err)
 	}
 	for _, item := range rows {
@@ -175,7 +175,7 @@ func migrateLegacyCategories(ctx context.Context, tx *sql.Tx, source legacyCateg
 		pageSize := source.pageSize
 		source.applyRouteDefaults(rows, item.ID, &item)
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO "bilvie_category"
+			INSERT INTO "gocms_category"
 			("id", "name", "parent_id", "order_id", "list_page_size", "route_id",
 			 "list_path", "list_file_pattern", "list_template", "detail_path",
 			 "detail_file_pattern", "detail_template", "source_table", "source_id")
@@ -198,11 +198,11 @@ func migrateLegacyCategories(ctx context.Context, tx *sql.Tx, source legacyCateg
 
 func ensureCategoryPageSize(ctx context.Context, database *sql.DB) error {
 	var exists int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('bilvie_category') WHERE name = 'list_page_size'`).Scan(&exists); err != nil {
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('gocms_category') WHERE name = 'list_page_size'`).Scan(&exists); err != nil {
 		return fmt.Errorf("inspect category page size column: %w", err)
 	}
 	if exists == 0 {
-		if _, err := database.ExecContext(ctx, `ALTER TABLE "bilvie_category" ADD COLUMN "list_page_size" INTEGER NOT NULL DEFAULT 14`); err != nil {
+		if _, err := database.ExecContext(ctx, `ALTER TABLE "gocms_category" ADD COLUMN "list_page_size" INTEGER NOT NULL DEFAULT 14`); err != nil {
 			return fmt.Errorf("add category page size column: %w", err)
 		}
 	}
@@ -303,7 +303,7 @@ var legacyArticleRouteRules = []legacyCategoryRouteRule{
 
 func existingSourceCategoryID(ctx context.Context, tx *sql.Tx, source string, sourceID int64) (int64, bool, error) {
 	var id int64
-	err := tx.QueryRowContext(ctx, `SELECT "id" FROM "bilvie_category" WHERE "source_table" = ? AND "source_id" = ?`, source, sourceID).Scan(&id)
+	err := tx.QueryRowContext(ctx, `SELECT "id" FROM "gocms_category" WHERE "source_table" = ? AND "source_id" = ?`, source, sourceID).Scan(&id)
 	if err == sql.ErrNoRows {
 		return 0, false, nil
 	}
@@ -315,7 +315,7 @@ func existingSourceCategoryID(ctx context.Context, tx *sql.Tx, source string, so
 
 func unifiedCategoryIDExists(ctx context.Context, tx *sql.Tx, id int64) bool {
 	var count int
-	return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM "bilvie_category" WHERE "id" = ?`, id).Scan(&count) == nil && count > 0
+	return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM "gocms_category" WHERE "id" = ?`, id).Scan(&count) == nil && count > 0
 }
 
 func categoryIDExists(ids map[int64]int64, id int64) bool {

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"bilvie/internal/db"
+	"gocms/internal/db"
 )
 
 func TestAdminThemeFiles(t *testing.T) {
@@ -43,7 +43,7 @@ func TestAdminThemeFiles(t *testing.T) {
 	}
 	server.themeRoot = themeRoot
 	server.templateRoot = templateRoot
-	token, err := server.createSession("bilvie")
+	token, err := server.createSession("gocms")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestAdminThemeFiles(t *testing.T) {
 	request := func(rawURL string) *httptest.ResponseRecorder {
 		response := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, rawURL, nil)
-		req.AddCookie(&http.Cookie{Name: "bilvie_admin", Value: token})
+		req.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
 		server.Handler().ServeHTTP(response, req)
 		return response
 	}
@@ -92,7 +92,7 @@ func TestAdminThemeFiles(t *testing.T) {
 
 	updateRequest := httptest.NewRequest(http.MethodPut, "/api/admin/theme/assignments/home_index", strings.NewReader(`{"template_path":"index.html"}`))
 	updateRequest.Header.Set("Content-Type", "application/json")
-	updateRequest.AddCookie(&http.Cookie{Name: "bilvie_admin", Value: token})
+	updateRequest.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
 	updateResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(updateResponse, updateRequest)
 	if updateResponse.Code != http.StatusOK {
@@ -100,7 +100,7 @@ func TestAdminThemeFiles(t *testing.T) {
 	}
 	categoryUpdate := httptest.NewRequest(http.MethodPut, "/api/admin/theme/assignments/category_detail", strings.NewReader(`{"template_path":"z-entry.html"}`))
 	categoryUpdate.Header.Set("Content-Type", "application/json")
-	categoryUpdate.AddCookie(&http.Cookie{Name: "bilvie_admin", Value: token})
+	categoryUpdate.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
 	categoryResponse := httptest.NewRecorder()
 	server.Handler().ServeHTTP(categoryResponse, categoryUpdate)
 	if categoryResponse.Code != http.StatusBadRequest {

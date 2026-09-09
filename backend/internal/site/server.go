@@ -13,8 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"bilvie/internal/auth"
-	"bilvie/internal/templateconfig"
+	"gocms/internal/auth"
+	"gocms/internal/sitehost"
+	"gocms/internal/templateconfig"
 )
 
 type Server struct {
@@ -25,6 +26,7 @@ type Server struct {
 	assetsRoot   string
 	themeRoot    string
 	templateRoot string
+	publicHost   string
 	publication  *publication
 }
 
@@ -33,14 +35,14 @@ var htmlTagPattern = regexp.MustCompile(`(?s)<[^>]*>`)
 func New(database *sql.DB, siteRoot string) (*Server, error) {
 	if database != nil {
 		if _, err := database.Exec(`
-			CREATE TABLE IF NOT EXISTS "bilvie_admin_session" (
+			CREATE TABLE IF NOT EXISTS "gocms_admin_session" (
 				"token" TEXT PRIMARY KEY,
 				"username" TEXT NOT NULL,
 				"expires_at" INTEGER NOT NULL
 			)`); err != nil {
 			return nil, fmt.Errorf("create admin session table: %w", err)
 		}
-		if _, err := database.Exec(`CREATE INDEX IF NOT EXISTS "idx_bilvie_admin_session_expiry" ON "bilvie_admin_session" ("expires_at")`); err != nil {
+		if _, err := database.Exec(`CREATE INDEX IF NOT EXISTS "idx_gocms_admin_session_expiry" ON "gocms_admin_session" ("expires_at")`); err != nil {
 			return nil, fmt.Errorf("create admin session index: %w", err)
 		}
 		if err := templateconfig.Ensure(context.Background(), database); err != nil {
@@ -48,9 +50,10 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		}
 	}
 	return &Server{
-		database:  database,
-		siteRoot:  siteRoot,
-		fileServe: http.FileServer(http.Dir(siteRoot)),
+		database:   database,
+		siteRoot:   siteRoot,
+		fileServe:  http.FileServer(http.Dir(siteRoot)),
+		publicHost: sitehost.FromDatabase(context.Background(), database),
 	}, nil
 }
 
@@ -134,7 +137,7 @@ func (s *Server) health(response http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var contentCount int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "bilvie_content"`).Scan(&contentCount); err != nil {
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_content"`).Scan(&contentCount); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -177,7 +180,7 @@ func (s *Server) messages(response http.ResponseWriter, request *http.Request) {
 	}
 	contentID := parseIntOrZero(request.FormValue("content_id"))
 	_, err := s.database.ExecContext(request.Context(), `
-		INSERT INTO "bilvie_message" ("title", "name", "phone", "mobile", "fax", "email", "content", "created_at", "address", "state", "content_id")
+		INSERT INTO "gocms_message" ("title", "name", "phone", "mobile", "fax", "email", "content", "created_at", "address", "state", "content_id")
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
 		title, name, phone, request.FormValue("mobile"), request.FormValue("fax"), request.FormValue("email"),
 		request.FormValue("content"), time.Now().Format("2006-01-02 15:04:05"), request.FormValue("address"), contentID)
@@ -230,8 +233,8 @@ func (s *Server) adminPage(response http.ResponseWriter, request *http.Request) 
 		return
 	}
 	var contents, messages int64
-	_ = s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "bilvie_content"`).Scan(&contents)
-	_ = s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "bilvie_message"`).Scan(&messages)
+	_ = s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_content"`).Scan(&contents)
+	_ = s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_message"`).Scan(&messages)
 	response.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(response, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>后台管理</title></head><body><h1>后台管理</h1><p>内容：%d　留言：%d</p><p><a href="/">查看网站</a></p></body></html>`, contents, messages)
 }

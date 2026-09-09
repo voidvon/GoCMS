@@ -1,4 +1,4 @@
-module bilvie
+module gocms
 
 go 1.26.0
 

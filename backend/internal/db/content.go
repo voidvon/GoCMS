@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const unifiedContentTable = "bilvie_content"
+const unifiedContentTable = "gocms_content"
 
 type legacyContentRecord struct {
 	RouteID     int64
@@ -82,10 +82,10 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("create unified content table: %w", err)
 	}
 	for _, statement := range []string{
-		`CREATE INDEX IF NOT EXISTS idx_bilvie_content_category ON "bilvie_content" ("category_id", "sort_order", "id")`,
-		`CREATE INDEX IF NOT EXISTS idx_bilvie_content_visible ON "bilvie_content" ("visible", "id")`,
-		`CREATE INDEX IF NOT EXISTS idx_bilvie_content_search ON "bilvie_content" ("title", "code", "keywords")`,
-		`CREATE INDEX IF NOT EXISTS idx_bilvie_content_source ON "bilvie_content" ("source_table", "source_id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_content_category ON "gocms_content" ("category_id", "sort_order", "id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_content_visible ON "gocms_content" ("visible", "id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_content_search ON "gocms_content" ("title", "code", "keywords")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_content_source ON "gocms_content" ("source_table", "source_id")`,
 	} {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create unified content index: %w", err)
@@ -161,11 +161,11 @@ func scanLegacyArticleContent(rows *sql.Rows) (legacyContentRecord, error) {
 
 func insertMigratedContent(ctx context.Context, tx *sql.Tx, record legacyContentRecord, sourceTable string) error {
 	_, err := tx.ExecContext(ctx, `
-		INSERT INTO "bilvie_content"
+		INSERT INTO "gocms_content"
 		("category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "keywords", "description", "sort_order", "featured", "visible", "source_table", "source_id")
 		SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 		WHERE NOT EXISTS (
-			SELECT 1 FROM "bilvie_content" WHERE "source_table" = ? AND "source_id" = ?
+			SELECT 1 FROM "gocms_content" WHERE "source_table" = ? AND "source_id" = ?
 		)`, record.CategoryID, strconv.FormatInt(record.RouteID, 10), record.Title, record.Code, record.Summary, record.Body, record.Image, record.PublishedAt, record.Source, record.Keywords, record.Description, record.OrderID, record.Featured, record.Visible, sourceTable, record.RouteID, sourceTable, record.RouteID)
 	return err
 }

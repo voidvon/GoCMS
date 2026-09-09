@@ -36,7 +36,7 @@ func TestMigrateLegacyCategories(t *testing.T) {
 		t.Fatal(err)
 	}
 	var newsName, newsPath string
-	if err := database.QueryRow(`SELECT "name", "list_path" FROM "bilvie_category" WHERE "route_id" = 6`).Scan(&newsName, &newsPath); err != nil {
+	if err := database.QueryRow(`SELECT "name", "list_path" FROM "gocms_category" WHERE "route_id" = 6`).Scan(&newsName, &newsPath); err != nil {
 		t.Fatal(err)
 	}
 	if newsName != "行业新闻" || newsPath != "news" {
@@ -53,7 +53,7 @@ func TestMigrateLegacyCategories(t *testing.T) {
 		t.Fatalf("content references were not separated: product=%d news=%d", productCategory, newsCategory)
 	}
 	var newsURLID int64
-	if err := database.QueryRow(`SELECT "route_id" FROM "bilvie_category" WHERE "id" = ?`, newsCategory).Scan(&newsURLID); err != nil {
+	if err := database.QueryRow(`SELECT "route_id" FROM "gocms_category" WHERE "id" = ?`, newsCategory).Scan(&newsURLID); err != nil {
 		t.Fatal(err)
 	}
 	if newsURLID != 6 {
@@ -64,7 +64,7 @@ func TestMigrateLegacyCategories(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM "bilvie_category"`).Scan(&count); err != nil {
+	if err := database.QueryRow(`SELECT COUNT(*) FROM "gocms_category"`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 4 {

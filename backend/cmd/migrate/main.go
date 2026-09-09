@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	"bilvie/internal/db"
+	"gocms/internal/db"
 )
 
 func main() {

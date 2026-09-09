@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"bilvie/internal/routing"
+	"gocms/internal/routing"
 )
 
 const defaultContentImage = "/images/content-placeholder.jpg"
@@ -115,7 +115,7 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 		return
 	}
 	if request.Method == http.MethodDelete {
-		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "bilvie_content" WHERE "id" = ?`, id)
+		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "gocms_content" WHERE "id" = ?`, id)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -151,7 +151,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	}
 	payload.Featured = normalizeFlag(payload.Featured)
 	payload.Visible = normalizeFlag(payload.Visible)
-	payload.CoverImage = canonicalImageURL(payload.CoverImage)
+	payload.CoverImage = canonicalImageURL(payload.CoverImage, s.publicHost)
 	payload.PublishedAt = normalizeContentDate(payload.PublishedAt)
 	if err := s.validateContentCategory(request.Context(), payload.Category); err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
@@ -166,7 +166,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		}
 		defer transaction.Rollback()
 		result, err := transaction.ExecContext(request.Context(), `
-			INSERT INTO "bilvie_content"
+			INSERT INTO "gocms_content"
 			("category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "keywords", "description", "sort_order", "featured", "visible")
 			VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
@@ -180,7 +180,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
-		if _, err := transaction.ExecContext(request.Context(), `UPDATE "bilvie_content" SET "route_key" = ? WHERE "id" = ?`, strconv.FormatInt(newID, 10), newID); err != nil {
+		if _, err := transaction.ExecContext(request.Context(), `UPDATE "gocms_content" SET "route_key" = ? WHERE "id" = ?`, strconv.FormatInt(newID, 10), newID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -190,7 +190,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		}
 	} else {
 		result, err := s.database.ExecContext(request.Context(), `
-			UPDATE "bilvie_content" SET "category_id" = ?, "title" = ?, "code" = ?, "summary" = ?, "body" = ?,
+			UPDATE "gocms_content" SET "category_id" = ?, "title" = ?, "code" = ?, "summary" = ?, "body" = ?,
 			"cover_image" = ?, "published_at" = ?, "source" = ?, "keywords" = ?, "description" = ?,
 			"sort_order" = ?, "featured" = ?, "visible" = ? WHERE "id" = ?`,
 			payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
@@ -245,7 +245,7 @@ func (s *Server) queryContent(ctx context.Context, query string, categoryID int6
 		query = ""
 	}
 	var total int64
-	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "bilvie_content" WHERE `+where, args...).Scan(&total); err != nil {
+	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "gocms_content" WHERE `+where, args...).Scan(&total); err != nil {
 		return ContentPage{}, err
 	}
 	args = append(args, pageSize, (page-1)*pageSize)
@@ -254,7 +254,7 @@ func (s *Server) queryContent(ctx context.Context, query string, categoryID int6
 		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
 		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("keywords", ''), COALESCE("description", ''),
 		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0)
-		FROM "bilvie_content" WHERE `+where+` ORDER BY "sort_order" ASC, "id" DESC LIMIT ? OFFSET ?`, args...)
+		FROM "gocms_content" WHERE `+where+` ORDER BY "sort_order" ASC, "id" DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return ContentPage{}, err
 	}
@@ -297,7 +297,7 @@ func (s *Server) readContent(ctx context.Context, id int64, visibleOnly bool) (C
 		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
 		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("keywords", ''), COALESCE("description", ''),
 		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0)
-		FROM "bilvie_content" WHERE `+where, id)
+		FROM "gocms_content" WHERE `+where, id)
 	return scanContent(row)
 }
 
@@ -344,7 +344,7 @@ func (s *Server) contentDetailURL(ctx context.Context, categoryID int64, routeKe
 		var storedDirectory, storedPattern string
 		err := s.database.QueryRowContext(ctx, `
 			SELECT COALESCE("detail_path", ''), COALESCE("detail_file_pattern", '')
-			FROM "bilvie_category" WHERE "id" = ?`, categoryID).Scan(&storedDirectory, &storedPattern)
+			FROM "gocms_category" WHERE "id" = ?`, categoryID).Scan(&storedDirectory, &storedPattern)
 		if err != nil && err != sql.ErrNoRows {
 			return "", err
 		}

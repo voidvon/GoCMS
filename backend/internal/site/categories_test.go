@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"testing"
 
-	"bilvie/internal/db"
+	"gocms/internal/db"
 )
 
 func newCategoryTestServer(t *testing.T) (*Server, *sql.DB, string) {
@@ -28,7 +28,7 @@ func newCategoryTestServer(t *testing.T) (*Server, *sql.DB, string) {
 		database.Close()
 		t.Fatal(err)
 	}
-	token, err := server.createSession("bilvie")
+	token, err := server.createSession("gocms")
 	if err != nil {
 		database.Close()
 		t.Fatal(err)
@@ -41,7 +41,7 @@ func categoryRequest(t *testing.T, server *Server, token, method, path, payload 
 	t.Helper()
 	request := httptest.NewRequest(method, path, bytes.NewBufferString(payload))
 	request.Header.Set("Content-Type", "application/json")
-	request.AddCookie(&http.Cookie{Name: "bilvie_admin", Value: token})
+	request.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	return response
@@ -50,7 +50,7 @@ func categoryRequest(t *testing.T, server *Server, token, method, path, payload 
 func categoryID(t *testing.T, database *sql.DB, name string) int64 {
 	t.Helper()
 	var id int64
-	if err := database.QueryRow(`SELECT "id" FROM "bilvie_category" WHERE "name" = ?`, name).Scan(&id); err != nil {
+	if err := database.QueryRow(`SELECT "id" FROM "gocms_category" WHERE "name" = ?`, name).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	return id
@@ -98,7 +98,7 @@ func TestCategoryManagement(t *testing.T) {
 		DetailFilePattern string
 		DetailTemplate    string
 	}
-	if err := database.QueryRow(`SELECT "list_path", "list_file_pattern", "list_template", "detail_path", "detail_file_pattern", "detail_template" FROM "bilvie_category" WHERE "id" = ?`, childID).
+	if err := database.QueryRow(`SELECT "list_path", "list_file_pattern", "list_template", "detail_path", "detail_file_pattern", "detail_template" FROM "gocms_category" WHERE "id" = ?`, childID).
 		Scan(&route.ListPath, &route.ListFilePattern, &route.ListTemplate, &route.DetailPath, &route.DetailFilePattern, &route.DetailTemplate); err != nil {
 		t.Fatal(err)
 	}
@@ -118,13 +118,13 @@ func TestCategoryManagement(t *testing.T) {
 		t.Fatalf("delete parent with child returned %d: %s", response.Code, response.Body.String())
 	}
 
-	if _, err := database.Exec(`INSERT INTO "bilvie_content" ("id", "category_id", "route_key", "title") VALUES (1, ?, '1', '测试内容')`, childID); err != nil {
+	if _, err := database.Exec(`INSERT INTO "gocms_content" ("id", "category_id", "route_key", "title") VALUES (1, ?, '1', '测试内容')`, childID); err != nil {
 		t.Fatal(err)
 	}
 	if response := categoryRequest(t, server, token, http.MethodDelete, "/api/admin/categories/"+strconv.FormatInt(childID, 10), ""); response.Code != http.StatusConflict {
 		t.Fatalf("delete category with content returned %d: %s", response.Code, response.Body.String())
 	}
-	if _, err := database.Exec(`DELETE FROM "bilvie_content" WHERE "id" = 1`); err != nil {
+	if _, err := database.Exec(`DELETE FROM "gocms_content" WHERE "id" = 1`); err != nil {
 		t.Fatal(err)
 	}
 	if response := categoryRequest(t, server, token, http.MethodDelete, "/api/admin/categories/"+strconv.FormatInt(childID, 10), ""); response.Code != http.StatusOK {
@@ -138,7 +138,7 @@ func TestCategoryManagement(t *testing.T) {
 func TestContentDetailURLUsesCategoryRoute(t *testing.T) {
 	server, database, _ := newCategoryTestServer(t)
 	if _, err := database.Exec(`
-		INSERT INTO "bilvie_category"
+		INSERT INTO "gocms_category"
 		("id", "name", "parent_id", "route_id", "list_path", "list_file_pattern", "list_template", "detail_path", "detail_file_pattern", "detail_template")
 		VALUES (9, '自定义分类', 0, 9, 'catalog', '{id}.html', 'category_list.html', 'content-detail', 'item-{id}.htm', 'content_detail.html')`); err != nil {
 		t.Fatal(err)

@@ -8,21 +8,25 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	"gocms/internal/sitehost"
 )
 
 var legacyImageToken = regexp.MustCompile(`(?i)(?:https?://[^"'\s<>\)]+|//[^"'\s<>\)]+|(?:[a-z]:)?[\\/]*(?:uploadfile|produppic)[^"'\s<>\)]+)`)
 
-func normalizeImageText(value string) string {
-	return legacyImageToken.ReplaceAllStringFunc(value, normalizeImageToken)
+func normalizeImageText(value, publicHost string) string {
+	return legacyImageToken.ReplaceAllStringFunc(value, func(token string) string {
+		return normalizeImageToken(token, publicHost)
+	})
 }
 
-func normalizeImageToken(value string) string {
+func normalizeImageToken(value, publicHost string) string {
 	normalized := strings.ReplaceAll(value, `\`, "/")
 	u, err := url.Parse(normalized)
 	if err != nil || u.Path == "" {
 		return value
 	}
-	if u.Host != "" && !strings.EqualFold(u.Hostname(), "www.bilvie.com") {
+	if u.Host != "" && !sitehost.Matches(u.Hostname(), publicHost) {
 		return value
 	}
 	trimmed := strings.TrimPrefix(u.Path, "/")
@@ -44,6 +48,7 @@ func normalizeImageToken(value string) string {
 // NormalizeImagePaths migrates legacy upload URLs in every TEXT column to the
 // single public image namespace. It is safe to run repeatedly.
 func NormalizeImagePaths(ctx context.Context, database *sql.DB) error {
+	publicHost := sitehost.FromDatabase(ctx, database)
 	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -116,7 +121,7 @@ func NormalizeImagePaths(ctx context.Context, database *sql.DB) error {
 					rows.Close()
 					return fmt.Errorf("read %s.%s value: %w", table, column, err)
 				}
-				normalized := normalizeImageText(value)
+				normalized := normalizeImageText(value, publicHost)
 				if normalized != value {
 					updates = append(updates, struct {
 						rowID int64

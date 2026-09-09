@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bilvie/internal/db"
-	"bilvie/internal/generator"
 	"context"
 	"encoding/json"
 	"flag"
+	"gocms/internal/db"
+	"gocms/internal/generator"
 	"log"
 	"os"
 	"path/filepath"

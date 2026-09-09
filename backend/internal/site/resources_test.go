@@ -12,11 +12,11 @@ func TestCanonicalImageURL(t *testing.T) {
 		input, expected string
 	}{
 		{"/UploadFile/produppic/a.jpg", "/images/a.jpg"},
-		{"http://www.bilvie.com/UploadFile/a.jpg?size=small", "/images/a.jpg?size=small"},
+		{"http://www.example.com/UploadFile/a.jpg?size=small", "/images/a.jpg?size=small"},
 		{"https://img05.jdzj.com/oledit/UploadFile/news2015a/a.jpg", "https://img05.jdzj.com/oledit/UploadFile/news2015a/a.jpg"},
 		{"/images/a.jpg", "/images/a.jpg"},
 	} {
-		if actual := canonicalImageURL(test.input); actual != test.expected {
+		if actual := canonicalImageURL(test.input, "www.example.com"); actual != test.expected {
 			t.Errorf("canonicalImageURL(%q) = %q, want %q", test.input, actual, test.expected)
 		}
 	}
