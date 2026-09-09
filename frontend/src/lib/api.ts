@@ -266,6 +266,14 @@ export type Publication = { state: "idle" | "running" | "success" | "failed"; st
 export type SaveResponse = { ok: boolean; publication?: Publication; publish_started?: boolean }
 export function getPublication() { return request<Publication>("/api/admin/publish") }
 export function publishSite() { return request<Publication>("/api/admin/publish", { method: "POST" }) }
+export type SitemapFormat = "html" | "xml"
+export type SitemapResponse = { ok: boolean; format: SitemapFormat; path: string }
+export function generateSitemap(format: SitemapFormat) {
+  return request<SitemapResponse>("/api/admin/publish/sitemap", {
+    method: "POST",
+    body: JSON.stringify({ format }),
+  })
+}
 
 export function getThemeFiles() {
   return request<ThemeFiles>("/api/admin/theme")

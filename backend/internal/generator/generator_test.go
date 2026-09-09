@@ -155,3 +155,58 @@ func TestContentURLUsesConfiguredDetailPath(t *testing.T) {
 		t.Fatalf("content detail URL = %q", got)
 	}
 }
+
+func TestHomepageTagsUseUnifiedContent(t *testing.T) {
+	c := &content{tables: map[string][]Row{
+		"gocms_category": {
+			{"id": "1", "route_id": "1", "source_table": "benming_ch_ProdCat", "source_id": "1", "detail_path": "Product", "detail_file_pattern": "{id}.html"},
+			{"id": "575", "source_table": "benming_ch_NewsCat", "source_id": "4", "detail_path": "news/detail", "detail_file_pattern": "{id}.html"},
+			{"id": "576", "parent_id": "575", "source_table": "benming_ch_NewsCat", "source_id": "6", "detail_path": "news/detail", "detail_file_pattern": "{id}.html"},
+			{"id": "577", "source_table": "benming_ch_NewsCat", "source_id": "12", "detail_path": "service/detail", "detail_file_pattern": "{id}.html"},
+			{"id": "579", "parent_id": "577", "source_table": "benming_ch_NewsCat", "source_id": "14", "detail_path": "service/detail", "detail_file_pattern": "{id}.html"},
+		},
+		"gocms_content": {
+			{"id": "100", "category_id": "1", "route_key": "100", "title": "产品一", "cover_image": "/images/one.jpg", "visible": "1", "featured": "1", "sort_order": "1"},
+			{"id": "101", "category_id": "1", "route_key": "101", "title": "产品二", "cover_image": "/images/two.jpg", "visible": "1", "featured": "1", "sort_order": "2"},
+			{"id": "200", "category_id": "576", "route_key": "200", "title": "新闻一", "visible": "1", "sort_order": "1"},
+			{"id": "300", "category_id": "579", "route_key": "300", "title": "技术一", "visible": "1", "sort_order": "1"},
+		},
+	}}
+
+	rolling, err := c.tag("prodindex()", Row{}, 0)
+	if err != nil || !strings.Contains(rolling, `href="/Product/101.html"`) || !strings.Contains(rolling, `src="/images/two.jpg"`) {
+		t.Fatalf("product carousel tag = %q, err=%v", rolling, err)
+	}
+	products, err := c.tag("prodindex1()", Row{}, 0)
+	if err != nil || !strings.Contains(products, `href="/Product/100.html"`) || !strings.Contains(products, "/Product/101.html") {
+		t.Fatalf("product list tag = %q, err=%v", products, err)
+	}
+	news, err := c.tag("newsindex()", Row{}, 0)
+	if err != nil || !strings.Contains(news, `href="/news/detail/200.html"`) || strings.Contains(news, "/service/detail/") {
+		t.Fatalf("news tag = %q, err=%v", news, err)
+	}
+	service, err := c.tag("serviceindex()", Row{}, 0)
+	if err != nil || !strings.Contains(service, `href="/service/detail/300.html"`) || strings.Contains(service, "/news/detail/") {
+		t.Fatalf("service tag = %q, err=%v", service, err)
+	}
+}
+
+func TestRootCategoriesOnlyIncludeProducts(t *testing.T) {
+	c := &content{tables: map[string][]Row{
+		"gocms_category": {
+			{"id": "1", "name": "新闻", "detail_path": "news/detail", "list_path": "news"},
+			{"id": "2", "name": "进口阀门", "source_table": "benming_ch_ProdCat", "source_id": "25", "list_path": "valve"},
+			{"id": "3", "name": "技术文章", "source_table": "benming_ch_NewsCat", "source_id": "12", "detail_path": "service/detail", "list_path": "service"},
+			{"id": "4", "name": "闸阀", "source_table": "benming_ch_ProdCat", "source_id": "26", "list_path": "gate"},
+		},
+	}}
+
+	got := c.cats(0, false)
+	productStart := strings.Index(got, ">进口阀门</a>")
+	productEnd := strings.Index(got, ">闸阀</a>")
+	news := strings.Index(got, ">新闻</a>")
+	service := strings.Index(got, ">技术文章</a>")
+	if productStart < 0 || productEnd < 0 || productStart > productEnd || news >= 0 || service >= 0 {
+		t.Fatalf("root category order = %q", got)
+	}
+}

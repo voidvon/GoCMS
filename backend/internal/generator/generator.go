@@ -101,7 +101,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	defer lock.Close()
 	unlock, e := acquirePublishLock(lock)
 	if e != nil {
-		return report, fmt.Errorf("已有发布任务正在运行")
+		return report, ErrPublishBusy
 	}
 	defer unlock()
 	defer func() {
@@ -141,12 +141,22 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		c.labels[strings.ToLower(strings.Trim(r["lname"], "#"))] = r["lcontent"]
 	}
 	for _, n := range []string{"gocms_content", "gocms_category", "benming_ch_cocat", "benming_ch_job"} {
+		orderField := "orderid"
+		switch n {
+		case "gocms_content":
+			orderField = "sort_order"
+		case "gocms_category":
+			orderField = "order_id"
+		}
 		sort.SliceStable(c.tables[n], func(i, j int) bool {
 			a, b := c.tables[n][i], c.tables[n][j]
-			if a.n("orderid") == b.n("orderid") {
+			if a.n(orderField) == b.n(orderField) {
+				if n == "gocms_category" {
+					return false
+				}
 				return a.n("id") < b.n("id")
 			}
-			return a.n("orderid") < b.n("orderid")
+			return a.n(orderField) < b.n(orderField)
 		})
 	}
 	e = filepath.WalkDir(p.Templates, func(filePath string, entry fs.DirEntry, walkErr error) error {
@@ -379,6 +389,9 @@ func (c *content) categoryListPagePath(r Row, page int) string {
 }
 
 func (c *content) rootCategoryURL() string {
+	if category := c.legacyCategory("benming_ch_ProdCat", 25); category["id"] != "" && category.n("parent_id") == 0 {
+		return "/" + c.categoryListDir(category) + "/"
+	}
 	for _, category := range c.tables["gocms_category"] {
 		if category.n("parent_id") == 0 {
 			return "/" + c.categoryListDir(category) + "/"
@@ -396,18 +409,247 @@ func (c *content) contentURL(r Row) string {
 	return "/" + strings.Trim(c.categoryDetailDir(category)+"/"+filename, "/")
 }
 
+func (c *content) legacyCategory(source string, sourceID int) Row {
+	for _, category := range c.tables["gocms_category"] {
+		if strings.EqualFold(category["source_table"], source) && category.n("source_id") == sourceID {
+			return category
+		}
+	}
+	for _, category := range c.tables["gocms_category"] {
+		if strings.TrimSpace(category["source_table"]) == "" && category.n("route_id") == sourceID {
+			return category
+		}
+	}
+	return Row{}
+}
+
+func (c *content) categoryFamily(category Row) string {
+	source := category["source_table"]
+	if strings.EqualFold(source, "benming_ch_ProdCat") {
+		return "product"
+	}
+	if strings.EqualFold(source, "benming_ch_NewsCat") {
+		serviceRoot := c.legacyCategory("benming_ch_NewsCat", 12)
+		if serviceRoot["id"] != "" && c.under(category.n("id"), serviceRoot.n("id")) {
+			return "service"
+		}
+		return "news"
+	}
+
+	// This fallback keeps manually created categories compatible with the
+	// historical route layout while imported categories use source_table.
+	switch strings.ToLower(strings.Trim(category["detail_path"], "/")) {
+	case "product":
+		return "product"
+	case "service/detail":
+		return "service"
+	case "news/detail":
+		return "news"
+	default:
+		return ""
+	}
+}
+
+func (c *content) contentFamily(item Row) string {
+	return c.categoryFamily(c.cat(item.n("category_id")))
+}
+
+func (c *content) isProductCategory(category Row) bool {
+	return c.categoryFamily(category) == "product"
+}
+
+func (c *content) isDefaultProductRoot(category Row) bool {
+	return category.n("parent_id") == 0 &&
+		strings.EqualFold(category["source_table"], "benming_ch_ProdCat") &&
+		category.n("source_id") == 25
+}
+
+func (c *content) productCategories() string {
+	var b strings.Builder
+	for _, category := range c.tables["gocms_category"] {
+		if category.n("parent_id") != 0 || !strings.EqualFold(category["source_table"], "benming_ch_ProdCat") {
+			continue
+		}
+		b.WriteString(`<li><a href="` + esc(c.categoryListURL(category, 1)) + `"><span>` + esc(category["name"]) + `</span></a></li>`)
+	}
+	return b.String()
+}
+
+func (c *content) productChildren(category Row) string {
+	children := make([]Row, 0)
+	for _, child := range c.tables["gocms_category"] {
+		if child.n("parent_id") == category.n("id") && strings.EqualFold(child["source_table"], "benming_ch_ProdCat") {
+			children = append(children, child)
+		}
+	}
+	if len(children) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString(`<table width="99%" border="0" align="center" cellpadding="0" cellspacing="0">`)
+	for i, child := range children {
+		if i%5 == 0 {
+			b.WriteString(`<tr width="708">`)
+		}
+		b.WriteString(`<td width="120" height="23"><a href="` + esc(c.categoryListURL(child, 1)) + `">` + esc(child["name"]) + `</a></td>`)
+		if i%5 == 4 || i == len(children)-1 {
+			b.WriteString(`</tr>`)
+		}
+	}
+	b.WriteString(`</table>`)
+	return b.String()
+}
+
+func (c *content) productBreadcrumb(category Row) string {
+	root := c.legacyCategory("benming_ch_ProdCat", 25)
+	rootURL := "/" + c.categoryListDir(root) + "/"
+	var b strings.Builder
+	b.WriteString(`<a href="/index.html">公司主页</a> - <a href="` + esc(rootURL) + `">产品展示</a>`)
+	if category.n("parent_id") != 0 {
+		parent := c.cat(category.n("parent_id"))
+		b.WriteString(` - <a href="` + esc(c.categoryListURL(parent, 1)) + `">` + esc(parent["name"]) + `</a>`)
+	}
+	b.WriteString(` - <b><font color="#ff0000">` + esc(category["name"]) + `</font></b>`)
+	return b.String()
+}
+
+func (c *content) legacyProductList(items []Row) string {
+	var b strings.Builder
+	b.WriteString(`<table width="98%" border="0" cellpadding="0" cellspacing="0" align="center">`)
+	for i, item := range items {
+		if i%2 == 0 {
+			b.WriteString(`<tr>`)
+		}
+		image := strings.TrimSpace(item["cover_image"])
+		if image == "" {
+			image = defaultContentImage
+		}
+		b.WriteString(`<td width="50%" valign="top" class="in6" height="100"><table width="100%" height="100" border="0" cellpadding="0" cellspacing="0"><tr><td width="39%" rowspan="2"><img src="` + esc(image) + `" alt="` + esc(item["title"]) + `" width="180" height="138" /></td><td width="61%" height="20"><a href="` + esc(c.contentURL(item)) + `" class="Font_2E4690_a in4">` + esc(item["title"]) + `</a></td></tr><tr><td valign="top">` + item["summary"] + `</td></tr></table></td>`)
+		if i%2 == 1 {
+			b.WriteString(`</tr>`)
+		}
+	}
+	if len(items)%2 == 1 {
+		b.WriteString(`<td width="50%" valign="top" class="in6" height="100">&nbsp;</td></tr>`)
+	}
+	b.WriteString(`</table>`)
+	return b.String()
+}
+
+func (c *content) legacyProductPagination(category Row, page, pages, total, pageSize int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `共 <strong>%d</strong> 条信息 `, total)
+	b.WriteString(`<a href="` + esc(c.categoryListURL(category, 1)) + `" class="0a">首页</a> `)
+	if page > 1 {
+		b.WriteString(`<a href="` + esc(c.categoryListURL(category, page-1)) + `">上一页</a> `)
+	} else {
+		b.WriteString(`<span>上一页</span> `)
+	}
+	if page < pages {
+		b.WriteString(`<a href="` + esc(c.categoryListURL(category, page+1)) + `">下一页</a> `)
+	} else {
+		b.WriteString(`<span>下一页</span> `)
+	}
+	b.WriteString(`<a href="` + esc(c.categoryListURL(category, pages)) + `">尾页</a> 页次：<strong> ` + strconv.Itoa(page) + `/` + strconv.Itoa(pages) + ` </strong>页 <strong>` + strconv.Itoa(pageSize) + `</strong>条信息/页`)
+	return b.String()
+}
+
+func (c *content) categoryPageSize(category Row) int {
+	pageSize := category.n("list_page_size")
+	if pageSize < 1 {
+		pageSize = 14
+	}
+	if c.isProductCategory(category) && pageSize == 14 {
+		return 12
+	}
+	return pageSize
+}
+
+func (c *content) homepageProducts(rolling bool) []Row {
+	items := make([]Row, 0)
+	for _, item := range c.tables["gocms_content"] {
+		if item.n("visible") == 1 && item.n("featured") == 1 && c.contentFamily(item) == "product" {
+			items = append(items, item)
+		}
+	}
+	if rolling {
+		sort.SliceStable(items, func(i, j int) bool { return items[i].n("id") > items[j].n("id") })
+	} else {
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].n("sort_order") == items[j].n("sort_order") {
+				return items[i].n("id") < items[j].n("id")
+			}
+			return items[i].n("sort_order") < items[j].n("sort_order")
+		})
+	}
+	limit := 32
+	if rolling {
+		limit = 8
+	}
+	return items[:min(limit, len(items))]
+}
+
+func (c *content) homepageArticles(family string) []Row {
+	items := make([]Row, 0)
+	for _, item := range c.tables["gocms_content"] {
+		if item.n("visible") == 1 && c.contentFamily(item) == family {
+			items = append(items, item)
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].n("sort_order") == items[j].n("sort_order") {
+			return items[i].n("id") < items[j].n("id")
+		}
+		return items[i].n("sort_order") < items[j].n("sort_order")
+	})
+	return items[:min(8, len(items))]
+}
+
+func (c *content) homepageProductTag(rolling bool) string {
+	var b strings.Builder
+	for _, item := range c.homepageProducts(rolling) {
+		if !rolling {
+			b.WriteString("<li>" + link(c.contentURL(item), item["title"]) + "</li>")
+			continue
+		}
+		image := strings.TrimSpace(item["cover_image"])
+		if image == "" {
+			image = defaultContentImage
+		}
+		b.WriteString(`<li><a href="` + esc(c.contentURL(item)) + `"><img src="` + esc(image) + `" alt="` + esc(item["title"]) + `" width="140" height="120" /><span>` + esc(item["title"]) + `</span></a></li>`)
+	}
+	return b.String()
+}
+
+func (c *content) homepageArticleTag(family string) string {
+	var b strings.Builder
+	for _, item := range c.homepageArticles(family) {
+		b.WriteString("<li>" + link(c.contentURL(item), item["title"]) + "</li>")
+	}
+	return b.String()
+}
+
 func (c *content) cats(root int, plain bool) string {
 	var b strings.Builder
+	emit := func(r Row) {
+		a := link(c.categoryListURL(r, 1), r["name"])
+		if plain {
+			b.WriteString(a + " | ")
+			return
+		}
+		b.WriteString("<li>" + a + "</li>")
+	}
 	for _, r := range c.tables["gocms_category"] {
 		if r.n("parent_id") != root {
 			continue
 		}
-		a := link(c.categoryListURL(r, 1), r["name"])
-		if plain {
-			b.WriteString(a + " | ")
-		} else {
-			b.WriteString("<li>" + a + "</li>")
+		// The legacy categories tags are product-category tags. Keep article
+		// roots out of the shared header and product sidebars.
+		if root == 0 && !c.isProductCategory(r) {
+			continue
 		}
+		emit(r)
 	}
 	return b.String()
 }
@@ -426,7 +668,13 @@ func (c *content) contentList(rs []Row) string {
 
 func (c *content) categoryListTemplate(category Row) string {
 	if templatePath := strings.TrimSpace(category["list_template"]); templatePath != "" {
+		if templatePath == templateconfig.DefaultListTemplate && c.isProductCategory(category) {
+			return "product_category_list.html"
+		}
 		return templatePath
+	}
+	if c.isProductCategory(category) {
+		return "product_category_list.html"
 	}
 	return templateconfig.DefaultListTemplate
 }
@@ -512,6 +760,14 @@ func (c *content) tag(k string, r Row, depth int) (string, error) {
 		return c.featuredContent(limit), nil
 	case k == "content_index()":
 		return c.featuredContent(32), nil
+	case k == "prodindex()":
+		return c.homepageProductTag(true), nil
+	case k == "prodindex1()":
+		return c.homepageProductTag(false), nil
+	case k == "newsindex()":
+		return c.homepageArticleTag("news"), nil
+	case k == "serviceindex()", k == "serviceindex2()":
+		return c.homepageArticleTag("service"), nil
 	case k == "hope_aboutcat(32)":
 		var b strings.Builder
 		for _, v := range c.tables["benming_ch_cocat"] {
@@ -629,10 +885,7 @@ func (c *content) build() error {
 				items = append(items, item)
 			}
 		}
-		pageSize := category.n("list_page_size")
-		if pageSize < 1 {
-			pageSize = 14
-		}
+		pageSize := c.categoryPageSize(category)
 		pages := max(1, (len(items)+pageSize-1)/pageSize)
 		parent := c.cat(category.n("parent_id"))
 		for page := 1; page <= pages; page++ {
@@ -642,6 +895,7 @@ func (c *content) build() error {
 			if childrenRoot == 0 {
 				childrenRoot = category.n("id")
 			}
+			body := c.contentList(items[start:end]) + c.pagination(category, page, pages, len(items))
 			view := Row{
 				"title":             esc(category["name"]),
 				"category_name":     esc(category["name"]),
@@ -653,10 +907,17 @@ func (c *content) build() error {
 				"categories":        c.cats(0, false),
 				"keywords":          esc(category["keywords"]),
 				"description":       esc(category["description"]),
-				"body":              c.contentList(items[start:end]) + c.pagination(category, page, pages, len(items)),
+				"body":              body,
 				"content_list":      c.contentList(items[start:end]),
 				"content_count":     strconv.Itoa(len(items)),
 				"content_page_size": strconv.Itoa(pageSize),
+			}
+			if c.isProductCategory(category) {
+				view["legacy_product_breadcrumb"] = c.productBreadcrumb(category)
+				view["legacy_product_children"] = c.productChildren(category)
+				view["product_categories"] = c.productCategories()
+				view["legacy_product_list"] = c.legacyProductList(items[start:end])
+				view["legacy_product_pagination"] = c.legacyProductPagination(category, page, pages, len(items), pageSize)
 			}
 			pagePath := c.categoryListPagePath(category, page)
 			if e := c.pageTemplate(pagePath, c.categoryListTemplate(category), view); e != nil {
@@ -666,7 +927,9 @@ func (c *content) build() error {
 				alias := strings.TrimPrefix(c.categoryListURL(category, 1), "/")
 				c.pages[alias] = c.pages[pagePath]
 				dir := c.categoryListDir(category)
-				if _, ok := c.pages[dir+"/index.html"]; !ok {
+				if c.isDefaultProductRoot(category) {
+					c.pages[dir+"/index.html"] = c.pages[pagePath]
+				} else if _, ok := c.pages[dir+"/index.html"]; !ok {
 					c.pages[dir+"/index.html"] = c.pages[pagePath]
 				}
 			}
@@ -706,28 +969,16 @@ func (c *content) build() error {
 	if e := c.page("job/index.html", templateconfig.RoleJobList, Row{"hope_body": jobs.String()}); e != nil {
 		return e
 	}
-	urls := []string{}
+	urls := make([]string, 0, len(c.pages))
 	for p := range c.pages {
 		urls = append(urls, p)
 	}
 	sort.Strings(urls)
-	var sitemap strings.Builder
-	sitemap.WriteString(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>网站地图</title><ul>`)
-	for _, p := range urls {
-		sitemap.WriteString("<li>" + link("/"+p, p) + "</li>")
-	}
-	sitemap.WriteString("</ul></html>")
-	c.pages["sitemap.html"] = []byte(sitemap.String())
-	var xml strings.Builder
-	xml.WriteString(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`)
+	c.pages["sitemap.html"] = renderSitemapHTML(urls)
 	base := ""
 	if cfg := c.tables["benming_ch_config"]; len(cfg) > 0 {
 		base = strings.TrimRight(cfg[0]["weburl"], "/")
 	}
-	for _, p := range urls {
-		xml.WriteString("<url><loc>" + esc(base+"/"+p) + "</loc></url>")
-	}
-	xml.WriteString("</urlset>")
-	c.pages["Sitemap.xml"] = []byte(xml.String())
+	c.pages["Sitemap.xml"] = renderSitemapXML(base, urls)
 	return nil
 }

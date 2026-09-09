@@ -82,6 +82,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminUpdate(response, request)
 	case "/api/admin/publish":
 		s.adminPublish(response, request)
+	case "/api/admin/publish/sitemap":
+		s.adminSitemap(response, request)
 	case "/api/health":
 		s.health(response, request)
 	case "/api/admin/login":
