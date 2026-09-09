@@ -72,6 +72,10 @@ func TestPublishLifecycle(t *testing.T) {
 	if !strings.Contains(string(body), "阀门 &amp; 新内容") || !strings.Contains(string(body), "<p>正文内容</p>") || !strings.Contains(string(body), `src="/images/cover.jpg"`) {
 		t.Fatal("escaping or body rendering failed")
 	}
+	homeBody, _ := os.ReadFile(filepath.Join(web, "index.html"))
+	if !strings.Contains(string(homeBody), `position:fixed`) || !strings.Contains(string(homeBody), `src="/images/wx.jpg"`) {
+		t.Fatal("homepage floating QR code was not rendered")
+	}
 	contentBody, _ := os.ReadFile(filepath.Join(web, "articles/detail/9.html"))
 	if !strings.Contains(string(contentBody), `src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg"`) {
 		t.Fatal("third-party image URL was rewritten")
