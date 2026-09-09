@@ -10,7 +10,7 @@
 <div id="page_main" class="clearfix">
     <div class="page-right">
       <div class="site-nav"><span>当前位置 : </span><a href="/index.html">公司主页</a> &gt;&gt; <a href="/Contact.html" title="联系我们">联系我们</a> </div>
-	  <div class="page-products">
+	  <div class="page-content">
       <ul class="clearfix"><table width="95%" border=0 cellpadding=0 cellspacing=0><tr><td width="8%" height=20>&nbsp;地&nbsp;&nbsp;址：</td><td width="92%">&nbsp;{{tag "hope_address" .}}</td></tr><tr><td height=20>&nbsp;电&nbsp;&nbsp;话：</td><td>&nbsp;{{tag "hope_tel" .}}</td></tr><tr><td height=20>&nbsp;传&nbsp;&nbsp;真：</td><td>&nbsp;{{tag "hope_fax" .}}</td></tr><tr><td height=20>&nbsp;联系人：</td><td>&nbsp;{{tag "hope_ren" .}}</td></tr><tr><td height=20>&nbsp;网&nbsp;&nbsp;址：</td><td>&nbsp;{{tag "hope_weburl" .}}</td></tr><tr><td height=20>&nbsp;邮&nbsp;&nbsp;编：</td><td>&nbsp;{{tag "hope_post" .}}</td></tr></table>
 {{tag "hope_contact()" .}}</ul>
 <div class="page_list">
@@ -19,11 +19,11 @@
       </div>
     </div>
     <div class="page-left">
-      <div class="left-products">
-        <span>产品展示</span>
+      <div class="left-content">
+        <span>内容</span>
         <div id="LeftMenu" class="ddsmoothmenu-v">
           <ul>
-{{tag "hope_productscat()" .}}
+{{tag "categories()" .}}
           </ul>
         </div>
       </div>
@@ -31,7 +31,7 @@
         <span>站内搜索</span>
 <form id="form2" name="form2" method="post" action="/Search.asp?action=search">
           <p>
-            <input name="ProductsName" type="text" id="ProductsName" value="找找看" size="18"  class="Font_666666_a" onfocus="this.value='';" />
+            <input name="q" type="text" id="q" value="找找看" size="18"  class="Font_666666_a" onfocus="this.value='';" />
             <input name="searchbutton" type="submit" id="searchbutton" value="" />
           </p>
         </form>

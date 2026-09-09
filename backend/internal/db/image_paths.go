@@ -139,7 +139,7 @@ func NormalizeImagePaths(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE "benming_ch_prod" SET "smallpic" = CASE WHEN lower(trim("smallpic")) IN ('/skin/dfpic.gif', 'skin/dfpic.gif') THEN '' ELSE "smallpic" END, "bigpic" = CASE WHEN lower(trim("bigpic")) IN ('/skin/dfpic.gif', 'skin/dfpic.gif') THEN '' ELSE "bigpic" END`); err != nil {
-		return fmt.Errorf("normalize default product image: %w", err)
+		return fmt.Errorf("normalize default content image: %w", err)
 	}
 	return tx.Commit()
 }

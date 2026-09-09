@@ -2,10 +2,9 @@ import { useEffect, useState } from "react"
 import {
   Activity,
   ArrowUpRight,
-  BookOpenText,
   Inbox,
   LoaderCircle,
-  Package,
+  FileText,
   UsersRound,
 } from "lucide-react"
 
@@ -55,10 +54,9 @@ export function DashboardPage() {
   }
 
   const cards = [
-    { label: "产品总数", value: stats.products, detail: `${formatNumber(stats.visible_products)} 条公开展示`, icon: Package },
-    { label: "新闻内容", value: stats.news, detail: "已导入 Access 内容", icon: BookOpenText },
+    { label: "内容总数", value: stats.contents, detail: `${formatNumber(stats.visible_contents)} 条公开展示`, icon: FileText },
     { label: "客户留言", value: stats.messages, detail: `${formatNumber(stats.pending_messages)} 条待处理`, icon: Inbox },
-    { label: "公开产品率", value: `${stats.products ? Math.round((stats.visible_products / stats.products) * 100) : 0}%`, detail: "当前可见产品占比", icon: UsersRound },
+    { label: "公开内容率", value: `${stats.contents ? Math.round((stats.visible_contents / stats.contents) * 100) : 0}%`, detail: "当前可见内容占比", icon: UsersRound },
   ]
 
   return (
@@ -112,7 +110,7 @@ export function DashboardPage() {
             </div>
             <div>
               <p className="text-xs text-muted-foreground">公开目录</p>
-              <p className="mt-1 font-medium">{formatNumber(stats.visible_products)} 个产品</p>
+              <p className="mt-1 font-medium">{formatNumber(stats.visible_contents)} 条内容</p>
             </div>
           </CardContent>
         </Card>
@@ -128,8 +126,8 @@ export function DashboardPage() {
               <span className="font-medium">{formatNumber(stats.pending_messages)}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">隐藏产品</span>
-              <span className="font-medium">{formatNumber(stats.products - stats.visible_products)}</span>
+              <span className="text-muted-foreground">隐藏内容</span>
+              <span className="font-medium">{formatNumber(stats.contents - stats.visible_contents)}</span>
             </div>
           </CardContent>
         </Card>

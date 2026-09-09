@@ -30,8 +30,8 @@ export function PublishPage() {
     <div className="flex flex-wrap items-center gap-3"><Badge variant={report?.state === "failed" ? "destructive" : "secondary"}>{report ? labels[report.state] : "加载中"}</Badge>
     <Button disabled={!report || running} onClick={publish}>{running ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}{running ? "生成中…" : "全站重新生成"}</Button>
     <Button variant="outline" render={<a href={import.meta.env.DEV ? "http://127.0.0.1:18080/" : "/"} target="_blank" rel="noreferrer" />}><Globe />查看网站</Button></div>
-    <p className="text-sm text-muted-foreground">覆盖首页、产品详情、产品分类与分页、新闻、技术文章、公司介绍、招聘、联系页面和网站地图。</p>
-    {report?.state === "success" && <div className="grid gap-4 sm:grid-cols-3"><div><p className="text-sm text-muted-foreground">生成文件</p><p className="text-2xl font-semibold">{report.files}</p></div><div><p className="text-sm text-muted-foreground">公开产品</p><p className="text-2xl font-semibold">{report.products}</p></div><div><p className="text-sm text-muted-foreground">新闻与技术文章</p><p className="text-2xl font-semibold">{report.news}</p></div></div>}
+    <p className="text-sm text-muted-foreground">覆盖首页、内容详情、栏目分页、公司介绍、招聘、联系页面和网站地图。</p>
+    {report?.state === "success" && <div className="grid gap-4 sm:grid-cols-2"><div><p className="text-sm text-muted-foreground">生成文件</p><p className="text-2xl font-semibold">{report.files}</p></div><div><p className="text-sm text-muted-foreground">公开内容</p><p className="text-2xl font-semibold">{report.contents}</p></div></div>}
     {report && report.finished && !report.finished.startsWith("0001") && <p className="text-xs text-muted-foreground">最近完成：{new Date(report.finished).toLocaleString("zh-CN")}</p>}
    </CardContent></Card>
  </div>

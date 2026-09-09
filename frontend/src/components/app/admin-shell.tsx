@@ -1,15 +1,15 @@
 import { useState, type ComponentType } from "react"
 import {
   BarChart3,
-  BookOpenText,
   ChevronsUpDown,
   ClipboardList,
   FolderTree,
   LayoutDashboard,
   LogOut,
   Menu,
-  Package,
+  FileText,
   Globe,
+  Palette,
   Settings2,
   UsersRound,
 } from "lucide-react"
@@ -39,8 +39,8 @@ import { useAdminRoute, type AdminView } from "@/lib/admin-router"
 import { DashboardPage } from "@/components/app/dashboard-page"
 import { CategoriesPage } from "@/components/app/categories-page"
 import { MessagesPage } from "@/components/app/messages-page"
-import { NewsPage } from "@/components/app/news-page"
-import { ProductsPage } from "@/components/app/products-page"
+import { ContentPage } from "@/components/app/content-page"
+import { ThemePage } from "@/components/app/theme-page"
 
 import { PublishPage } from "@/components/app/publish-page"
 
@@ -62,11 +62,11 @@ type NavigationItem = {
 }
 
 const navigationItems: NavigationItem[] = [
- { id: "publish", label: "网站发布", icon: Globe },
+  { id: "publish", label: "网站发布", icon: Globe },
+  { id: "theme", label: "主题模板", icon: Palette },
   { id: "overview", label: "总览", icon: LayoutDashboard },
-  { id: "products", label: "产品目录", icon: Package },
-  { id: "categories", label: "产品分类", icon: FolderTree },
-  { id: "news", label: "新闻内容", icon: BookOpenText },
+  { id: "content", label: "内容", icon: FileText },
+  { id: "categories", label: "分类", icon: FolderTree },
   { id: "messages", label: "客户留言", icon: ClipboardList },
 ]
 
@@ -131,12 +131,12 @@ function Sidebar({ activeView, onNavigate }: NavigationProps) {
 function viewMeta(view: AdminView) {
   switch (view) {
  case "publish": return {title:"网站发布",description:"生成并发布公开站点"}
-    case "products":
-      return { title: "产品目录", description: "维护公开产品、分类和展示状态" }
+    case "theme":
+      return { title: "主题模板", description: "管理当前主题的样式和页面模板" }
+    case "content":
+      return { title: "内容", description: "维护内容、分类和公开展示状态" }
     case "categories":
-      return { title: "产品分类", description: "维护产品分类树和目录层级" }
-    case "news":
-      return { title: "新闻内容", description: "查看新闻发布记录和首页推荐状态" }
+      return { title: "分类", description: "维护统一的栏目树和页面生成规则" }
     case "messages":
       return { title: "客户留言", description: "集中处理来自网站的客户咨询" }
     default:
@@ -147,12 +147,11 @@ function viewMeta(view: AdminView) {
 function ViewContent({ view }: { view: AdminView }) {
   switch (view) {
  case "publish": return <PublishPage />
-    case "products":
-      return <ProductsPage />
+    case "theme": return <ThemePage />
+    case "content":
+      return <ContentPage />
     case "categories":
       return <CategoriesPage />
-    case "news":
-      return <NewsPage />
     case "messages":
       return <MessagesPage />
     default:

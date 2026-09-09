@@ -23,10 +23,14 @@ func TestPublishLifecycle(t *testing.T) {
 	for _, q := range []string{
 		`INSERT INTO benming_ch_config (id) VALUES (1)`,
 		`INSERT INTO benming_ch_cuslabel (id,lname,lcontent) VALUES (1,'#BM_indextop#',''),(2,'#BM_indexfoot#',''),(3,'#BM_about#',''),(4,'#BM_botten#',''),(5,'#BM_top#','')`,
-		`INSERT INTO benming_ch_prod (id,prodName,CatId,show,itemize,smallpic,tjhome) VALUES (1,'阀门 & 新产品',10,1,'<p>正文</p><img src="/UploadFile/produppic/product.jpg">','/UploadFile/produppic/product.jpg',1)`,
-		`INSERT INTO benming_ch_ProdCat (id,CatName,Root) VALUES (2,'总类',0),(10,'子类',2)`,
-		`INSERT INTO benming_ch_NewsCat (id,CatName,Root) VALUES (4,'新闻',0),(6,'公司新闻',4)`,
-		`INSERT INTO benming_ch_news (newsid,Title,Content,Typeid) VALUES (9,'测试新闻','<p>新闻内容</p><img src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg">',6)`,
+		`INSERT INTO bilvie_category (id,name,parent_id,order_id,route_id,list_path,list_file_pattern,list_template,detail_path,detail_file_pattern,detail_template) VALUES
+					(2,'总类',0,0,2,'catalog','{id}.html','category_list.html','entry','{id}.html','content_detail.html'),
+					(10,'子类',2,0,10,'catalog/items','{id}.html','category_list.html','entry','{id}.html','content_detail.html'),
+					(1004,'栏目',0,0,4,'articles','{id}.html','category_list.html','articles/detail','{id}.html','content_detail.html'),
+					(1006,'子栏目',1004,0,6,'articles','{id}.html','category_list.html','articles/detail','{id}.html','content_detail.html')`,
+		`INSERT INTO bilvie_content (id,category_id,route_key,title,body,cover_image,visible,featured) VALUES
+					(1,10,'1','阀门 & 新内容','<p>正文内容</p><img src="/UploadFile/produppic/cover.jpg">','/UploadFile/produppic/cover.jpg',1,1),
+					(9,1006,'9','测试内容','<p>详情内容</p><img src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg">','',1,0)`,
 	} {
 		if _, e = d.Exec(q); e != nil {
 			t.Fatal(e)
@@ -44,7 +48,7 @@ func TestPublishLifecycle(t *testing.T) {
 	if e = os.WriteFile(filepath.Join(assets, "images", "photo.jpg"), []byte("asset"), 0644); e != nil {
 		t.Fatal(e)
 	}
-	if e = os.WriteFile(filepath.Join(assets, "images", "product.jpg"), []byte("product"), 0644); e != nil {
+	if e = os.WriteFile(filepath.Join(assets, "images", "cover.jpg"), []byte("cover"), 0644); e != nil {
 		t.Fatal(e)
 	}
 	templates := filepath.Join(tmp, "templates")
@@ -56,48 +60,68 @@ func TestPublishLifecycle(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if report.Products != 1 || report.News != 1 {
+	if report.Contents != 2 {
 		t.Fatalf("bad report: %+v", report)
 	}
-	for _, n := range []string{"index.html", "Product/1.html", "Products/10.html", "Products/10-1.html", "valve/2.html", "news/detail/9.html", "news/6.html", "Sitemap.xml"} {
+	for _, n := range []string{"index.html", "entry/1.html", "catalog/items/10.html", "catalog/items/10-1.html", "catalog/2.html", "articles/detail/9.html", "articles/4.html", "articles/6.html", "Sitemap.xml"} {
 		if _, e = os.Stat(filepath.Join(web, n)); e != nil {
 			t.Fatal(n, e)
 		}
 	}
-	body, _ := os.ReadFile(filepath.Join(web, "Product/1.html"))
-	if !strings.Contains(string(body), "阀门 &amp; 新产品") || !strings.Contains(string(body), "<p>正文</p>") || !strings.Contains(string(body), `src="/images/product.jpg"`) {
+	body, _ := os.ReadFile(filepath.Join(web, "entry/1.html"))
+	if !strings.Contains(string(body), "阀门 &amp; 新内容") || !strings.Contains(string(body), "<p>正文内容</p>") || !strings.Contains(string(body), `src="/images/cover.jpg"`) {
 		t.Fatal("escaping or body rendering failed")
 	}
-	newsBody, _ := os.ReadFile(filepath.Join(web, "news/detail/9.html"))
-	if !strings.Contains(string(newsBody), `src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg"`) {
+	contentBody, _ := os.ReadFile(filepath.Join(web, "articles/detail/9.html"))
+	if !strings.Contains(string(contentBody), `src="https://img05.jdzj.com/oledit/UploadFile/news2015a/external.jpg"`) {
 		t.Fatal("third-party image URL was rewritten")
 	}
-	if _, e = d.Exec(`UPDATE benming_ch_ProdCat SET ListPath='custom-products', ListFilePattern='{id}.htm', DetailPath='custom-detail', DetailFilePattern='{id}-detail.html' WHERE id=10`); e != nil {
+	if e = os.WriteFile(filepath.Join(templates, "custom-content-detail.html"), []byte(`<html><body>custom detail {{tag "title" .}}</body></html>`), 0644); e != nil {
+		t.Fatal(e)
+	}
+	if e = os.WriteFile(filepath.Join(templates, "custom-content-list.html"), []byte(`<html><body>custom list {{tag "title" .}}{{tag "body" .}}</body></html>`), 0644); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = d.Exec(`UPDATE bilvie_category SET list_template='custom-content-list.html', detail_template='custom-content-detail.html' WHERE id=10`); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = p.Generate(ctx); e != nil {
 		t.Fatal(e)
 	}
-	for _, n := range []string{"custom-products/10.htm", "custom-products/10-1.htm", "custom-detail/1-detail.html"} {
+	customTemplateBody, _ := os.ReadFile(filepath.Join(web, "entry/1.html"))
+	if !strings.Contains(string(customTemplateBody), "custom detail 阀门 &amp; 新内容") {
+		t.Fatal("category detail template assignment was not used")
+	}
+	customListBody, _ := os.ReadFile(filepath.Join(web, "catalog/items/10.html"))
+	if !strings.Contains(string(customListBody), "custom list 子类") {
+		t.Fatal("category list template assignment was not used")
+	}
+	if _, e = d.Exec(`UPDATE bilvie_category SET list_path='custom-catalog', list_file_pattern='{id}.htm', detail_path='custom-entry', detail_file_pattern='{id}-detail.html' WHERE id=10`); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = p.Generate(ctx); e != nil {
+		t.Fatal(e)
+	}
+	for _, n := range []string{"custom-catalog/10.htm", "custom-catalog/10-1.htm", "custom-entry/1-detail.html"} {
 		if _, e = os.Stat(filepath.Join(web, n)); e != nil {
 			t.Fatal(n, e)
 		}
 	}
-	customBody, _ := os.ReadFile(filepath.Join(web, "custom-products/10.htm"))
-	if !strings.Contains(string(customBody), `href="/custom-detail/1-detail.html"`) {
-		t.Fatal("custom detail route was not used in product list")
+	customBody, _ := os.ReadFile(filepath.Join(web, "custom-catalog/10.htm"))
+	if !strings.Contains(string(customBody), `href="/custom-entry/1-detail.html"`) {
+		t.Fatal("custom detail route was not used in content list")
 	}
-	if _, e = os.Stat(filepath.Join(web, "Product/1.html")); !os.IsNotExist(e) {
-		t.Fatal("old product route survived custom publication")
+	if _, e = os.Stat(filepath.Join(web, "entry/1.html")); !os.IsNotExist(e) {
+		t.Fatal("old content route survived custom publication")
 	}
-	if _, e = d.Exec(`UPDATE benming_ch_prod SET show=0 WHERE id=1`); e != nil {
+	if _, e = d.Exec(`UPDATE bilvie_content SET visible=0 WHERE id=1`); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = p.Generate(ctx); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = os.Stat(filepath.Join(web, "Product/1.html")); !os.IsNotExist(e) {
-		t.Fatal("hidden product HTML survived")
+	if _, e = os.Stat(filepath.Join(web, "entry/1.html")); !os.IsNotExist(e) {
+		t.Fatal("hidden content HTML survived")
 	}
 	if b, e := os.ReadFile(filepath.Join(assets, "images", "photo.jpg")); e != nil || string(b) != "asset" {
 		t.Fatal("asset changed")
@@ -105,7 +129,7 @@ func TestPublishLifecycle(t *testing.T) {
 	if _, e = os.Stat(filepath.Join(web, "photo.jpg")); !os.IsNotExist(e) {
 		t.Fatal("resource copied into web")
 	}
-	if b, err := os.ReadFile(filepath.Join(assets, "images", "product.jpg")); err != nil || string(b) != "product" {
+	if b, err := os.ReadFile(filepath.Join(assets, "images", "cover.jpg")); err != nil || string(b) != "cover" {
 		t.Fatal("image changed")
 	}
 	before, _ := os.ReadFile(filepath.Join(web, "index.html"))
@@ -118,5 +142,16 @@ func TestPublishLifecycle(t *testing.T) {
 	after, _ := os.ReadFile(filepath.Join(web, "index.html"))
 	if string(before) != string(after) {
 		t.Fatal("failed publication changed live page")
+	}
+}
+
+func TestContentURLUsesConfiguredDetailPath(t *testing.T) {
+	c := &content{tables: map[string][]Row{
+		"bilvie_category": {{
+			"id": "10", "detail_path": "entry", "detail_file_pattern": "item-{id}.html",
+		}},
+	}}
+	if got := c.contentURL(Row{"category_id": "10", "route_key": "185"}); got != "/entry/item-185.html" {
+		t.Fatalf("content detail URL = %q", got)
 	}
 }

@@ -8,7 +8,7 @@ Go + SQLite 内容服务、React 管理后台、Go 模板静态发布。
 - `backend/templates/`：从原 blue 模板转换的 Go 模板；页面布局在这里维护。`tag` 函数解析数据库字段与自定义片段，不执行 ASP。
 - `frontend/`：Vite + React 管理后台，shadcn Base UI Nova；官方组件保持原样，业务封装放 `src/components/app/`。
 - `assets/theme/blue/`：当前主题的 CSS、JS、skin 和固定图片，属于代码资源并纳入 Git。
-- `assets/images/`：产品图、新闻正文图和详情介绍图，属于运行时业务资源，不纳入 Git；服务直接读取，不参与发布复制。
+- `assets/images/`：内容封面、正文和详情介绍图，属于运行时业务资源，不纳入 Git；服务直接读取，不参与发布复制。
 - `web/`：生成的 HTML 和 Sitemap.xml，不纳入 Git；发布只替换此目录。
 - `data/`：SQLite 数据库、发布状态及发布锁；不可作为静态网站根目录。
 - `legacy/`：原 ASP、Access、原模板和 IIS 配置本地归档；不纳入 Git，不参与 Go 运行。
@@ -23,7 +23,7 @@ make frontend
 ```
 
 后台：`http://127.0.0.1:5173/admin/`，网站：`http://127.0.0.1:18080/`。
-后台页面内“网站发布”支持全站重新生成；产品编辑支持“仅保存”和“保存并发布”。隐藏产品会自动提交发布任务。已有任务运行时，新的保存发布请求会排队，在当前任务结束后再读取最新数据生成。
+后台页面内“网站发布”支持全站重新生成；内容编辑支持“仅保存”和“保存并发布”。隐藏内容会自动提交发布任务。已有任务运行时，新的保存发布请求会排队，在当前任务结束后再读取最新数据生成。
 
 ```sh
 make generate  # 命令行全站生成
@@ -34,19 +34,17 @@ make test      # Go 测试/vet + 前端构建
 
 | 数据 | 模板 | 文件 |
 | --- | --- | --- |
-| 站点配置、SEO、自定义片段、推荐产品和新闻 | index | `/index.html` |
-| 公开产品 (`show=1`) | produts_detail | `/Product/{id}.html` |
-| 产品分类，包含后代产品 | produts_sort / produts_sort2 | 由分类路由配置决定，现有默认分别为 `/valve/{id}.html` 和 `/Products/{id}.html` |
-| 新闻分类 (`root=4`) | news_sort / news_news | `/news/{id}.html`、`/news/detail/{newsid}.html` |
-| 技术文章分类 (`root=12`) | service_sort / service_service | `/service/{id}.html`、`/service/detail/{newsid}.html` |
+| 站点配置、SEO、自定义片段和推荐内容 | `index.html` | `/index.html` |
+| 公开内容 (`visible=1`) | 分类绑定的详情模板 | 由内容所属分类的详情目录和文件名规则决定 |
+| 栏目内容（包含后代内容） | 分类绑定的列表模板 | 由分类的列表目录和文件名规则决定 |
 | 公司介绍 (`root=32`) | corporation | `/about/About-{id}.html` |
 | 有效招聘 (`state=1`) | job_sort / job_detail | `/job/index.html`、`/job/detail/{id}.html` |
 | 联系信息、留言表单 | contact / msg | `/contact.html`、`/msg.html` |
 | 已生成页面 | 内置 | `/Sitemap.xml`、`/sitemap.html` |
 
-产品每页 14 条，新闻每页 6 条，第一页同时生成 `{id}.html` 和 `{id}-1.html`，后续为 `{id}-{page}.html`。栏目首页沿用排序第一分类的第一页。首页轮播取最新 8 个推荐公开产品，文字推荐取 32 个；网站地图从实际生成的地址产生。
+每个分类可以单独设置每页数量；第一页同时生成 `{id}.html` 和 `{id}-1.html`，后续为 `{id}-{page}.html`。首页读取统一的推荐内容标签；网站地图从实际生成的地址产生。
 
-产品分类保存自己的静态路由规则，产品详情目录和文件名由产品所属分类决定。分类编辑中的列表目录、列表文件名规则、详情目录和详情文件名规则默认分别为 `valve`/`Products`、`{id}.html`、`Product`、`{id}.html`，因此现有线上地址不会改变。产品内容只保存 `CatId`，发布器会按该分类解析详情页路径；SQLite 启动时会自动补充并初始化这些路由字段，旧 Access 导入的列结构不受影响。
+所有内容统一使用 `bilvie_content`，所有栏目统一使用 `bilvie_category`，留言统一使用 `bilvie_message`。每个分类保存自己的列表模板、详情模板、静态目录和文件名规则；内容只保存所属分类 ID，发布器按分类解析路径。现有数据库中的 `/valve`、`/Products`、`/Product`、`/news`、`/service` 等线上目录作为分类配置保留，新建分类使用 `category`、`content` 等通用默认值。旧 Access 表只在 `cmd/migrate` 的一次性导入阶段读取，服务启动和发布过程不会读取旧内容表或旧留言表。
 
 生成使用一致的 SQLite 读事务快照。先完成所有模板渲染和 UTF-8 检查，再向临时目录写入新 HTML 和站点地图，最后切换 `web/`。新目录只包含本次生成结果，因此隐藏/删除内容及过期分页会清理；独立资源目录不被修改。未知模板标签或模板错误会终止发布，保持旧站点。发布锁用于防止 CLI/API 并发写入。
 
@@ -73,4 +71,4 @@ cd backend
 go run ./cmd/reset-password -username bilvie -password '新的密码'
 ```
 
-目前新闻后台仍是查看列表；发布器已经读取新闻正文、分类、SEO 字段并生成页面。新闻编辑、图片上传和模板/站点配置的后台编辑页面仍需后续补齐；可先通过数据库维护相应内容后发布。新增业务图片应保存到 `assets/images/`，主题图片应保存到 `assets/theme/blue/images/`，数据库字段统一使用 `/images/文件名`。
+后台的分类页面统一维护栏目树，内容编辑从统一分类树中选择所属栏目，发布器读取统一内容、分类和 SEO 字段生成页面。新增业务图片应保存到 `assets/images/`，主题图片应保存到 `assets/theme/blue/images/`，数据库字段统一使用 `/images/文件名`。

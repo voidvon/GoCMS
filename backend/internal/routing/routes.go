@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	DefaultRootListPath  = "valve"
-	DefaultChildListPath = "Products"
+	// Defaults apply only to newly created categories. Existing category
+	// records keep their configured paths so indexed URLs remain unchanged.
+	DefaultCategoryPath  = "category"
 	DefaultListPattern   = "{id}.html"
-	DefaultDetailPath    = "Product"
+	DefaultDetailPath    = "content"
 	DefaultDetailPattern = "{id}.html"
 )
 
@@ -86,19 +87,24 @@ func NormalizeFilePattern(value string, allowPage bool) (string, error) {
 	return value, nil
 }
 
-func DefaultListPath(parentID int64) string {
-	if parentID == 0 {
-		return DefaultRootListPath
-	}
-	return DefaultChildListPath
+func DefaultListPath(_ int64) string {
+	return DefaultCategoryPath
 }
 
-func RenderDetailFilename(pattern string, productID int64) (string, error) {
+func RenderDetailFilename(pattern string, contentID int64) (string, error) {
+	return RenderDetailFilenameValue(pattern, strconv.FormatInt(contentID, 10))
+}
+
+func RenderDetailFilenameValue(pattern, value string) (string, error) {
 	pattern, err := NormalizeFilePattern(pattern, false)
 	if err != nil {
 		return "", err
 	}
-	return strings.ReplaceAll(pattern, "{id}", strconv.FormatInt(productID, 10)), nil
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsAny(value, `/\\?#%`) {
+		return "", fmt.Errorf("详情编号无效")
+	}
+	return strings.ReplaceAll(pattern, "{id}", value), nil
 }
 
 func RenderListFilename(pattern string, categoryID int64, page int) (string, error) {

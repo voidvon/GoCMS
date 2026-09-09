@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{tag "category_name" .}} - {{tag "hope_webname" .}}</title>
+  <meta name="keywords" content="{{tag "keywords" .}}">
+  <meta name="description" content="{{tag "description" .}}">
+  <link rel="stylesheet" href="/css/c.css">
+</head>
+<body>
+{{tag "bm_indextop" .}}
+<main id="page_main" class="clearfix">
+  <section class="page-right">
+    <nav class="site-nav"><a href="/">首页</a> - {{tag "category_name" .}}</nav>
+    <h1>{{tag "category_name" .}}</h1>
+    <div class="category-children">{{tag "category_children" .}}</div>
+    <div class="page-content content-list">{{tag "body" .}}</div>
+  </section>
+  <aside class="page-left">
+    <section class="left-content">
+      <h2><span>栏目</span></h2>
+      <ul class="ddsmoothmenu-v">{{tag "categories()" .}}</ul>
+    </section>
+    <section class="left-search">
+      <h2><span>站内搜索</span></h2>
+      <form method="post" action="/search.asp?action=search">
+        <p><input name="q" type="search" placeholder="输入关键词"><button type="submit">搜索</button></p>
+      </form>
+    </section>
+  </aside>
+</main>
+{{tag "bm_botten" .}}
+</body>
+</html>

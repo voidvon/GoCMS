@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -18,6 +19,7 @@ import (
 	"unicode/utf8"
 
 	"bilvie/internal/routing"
+	"bilvie/internal/templateconfig"
 )
 
 type Row map[string]string
@@ -29,8 +31,7 @@ type Report struct {
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished"`
 	Files    int       `json:"files"`
-	Products int       `json:"products"`
-	News     int       `json:"news"`
+	Contents int       `json:"contents"`
 	Error    string    `json:"error,omitempty"`
 }
 type Publisher struct {
@@ -40,15 +41,16 @@ type Publisher struct {
 	Theme                string
 }
 type content struct {
-	tables    map[string][]Row
-	labels    map[string]string
-	templates map[string]*template.Template
-	pages     map[string][]byte
+	tables      map[string][]Row
+	labels      map[string]string
+	templates   map[string]*template.Template
+	assignments map[string]string
+	pages       map[string][]byte
 }
 
 var oldTag = regexp.MustCompile(`#[A-Za-z_][A-Za-z_0-9]*(?:\([^#]*?\))?#`)
 
-const defaultProductImage = "/images/index_NewsPic.jpg"
+const defaultContentImage = "/images/content-placeholder.jpg"
 
 func esc(s string) string           { return html.EscapeString(s) }
 func link(url, title string) string { return `<a href="` + esc(url) + `">` + esc(title) + `</a>` }
@@ -111,13 +113,13 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		b, _ := json.MarshalIndent(report, "", "  ")
 		_ = atomicWrite(filepath.Join(p.Data, "publish.json"), b)
 	}()
-	c := &content{tables: map[string][]Row{}, labels: map[string]string{}, templates: map[string]*template.Template{}, pages: map[string][]byte{}}
+	c := &content{tables: map[string][]Row{}, labels: map[string]string{}, templates: map[string]*template.Template{}, assignments: map[string]string{}, pages: map[string][]byte{}}
 	tx, e := p.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if e != nil {
 		return report, e
 	}
 	defer tx.Rollback()
-	names := []string{"benming_ch_config", "benming_ch_cuslabel", "benming_ch_MetaType", "benming_ch_prod", "benming_ch_ProdCat", "benming_ch_news", "benming_ch_NewsCat", "benming_ch_Cocat", "benming_ch_Contact", "benming_ch_job"}
+	names := []string{"benming_ch_config", "benming_ch_cuslabel", "benming_ch_MetaType", "bilvie_content", "bilvie_category", "benming_ch_Cocat", "benming_ch_Contact", "benming_ch_job"}
 	for _, n := range names {
 		rs, e := readTable(ctx, tx, n)
 		if e != nil {
@@ -125,13 +127,18 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		}
 		c.tables[strings.ToLower(n)] = rs
 	}
+	assignments, e := templateconfig.Load(ctx, tx)
+	if e != nil {
+		return report, e
+	}
+	c.assignments = assignments
 	if e = tx.Commit(); e != nil {
 		return report, e
 	}
 	for _, r := range c.tables["benming_ch_cuslabel"] {
 		c.labels[strings.ToLower(strings.Trim(r["lname"], "#"))] = r["lcontent"]
 	}
-	for _, n := range []string{"benming_ch_prod", "benming_ch_prodcat", "benming_ch_newscat", "benming_ch_cocat", "benming_ch_job"} {
+	for _, n := range []string{"bilvie_content", "bilvie_category", "benming_ch_cocat", "benming_ch_job"} {
 		sort.SliceStable(c.tables[n], func(i, j int) bool {
 			a, b := c.tables[n][i], c.tables[n][j]
 			if a.n("orderid") == b.n("orderid") {
@@ -140,39 +147,49 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 			return a.n("orderid") < b.n("orderid")
 		})
 	}
-	sort.Slice(c.tables["benming_ch_news"], func(i, j int) bool {
-		return c.tables["benming_ch_news"][i].n("newsid") > c.tables["benming_ch_news"][j].n("newsid")
-	})
-	entries, e := os.ReadDir(p.Templates)
-	if e != nil {
-		return report, e
-	}
-	for _, f := range entries {
-		if filepath.Ext(f.Name()) != ".html" {
-			continue
+	e = filepath.WalkDir(p.Templates, func(filePath string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		b, e := os.ReadFile(filepath.Join(p.Templates, f.Name()))
-		if e != nil {
-			return report, e
+		if entry.Type()&os.ModeSymlink != 0 {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".html") {
+			return nil
+		}
+		relative, err := filepath.Rel(p.Templates, filePath)
+		if err != nil {
+			return err
+		}
+		templatePath := filepath.ToSlash(relative)
+		b, err := os.ReadFile(filePath)
+		if err != nil {
+			return err
 		}
 		if !utf8.Valid(b) {
-			return report, fmt.Errorf("模板非 UTF-8: %s", f.Name())
+			return fmt.Errorf("模板非 UTF-8: %s", templatePath)
 		}
-		t, e := template.New(f.Name()).Funcs(template.FuncMap{"tag": func(k string, r Row) (string, error) { return c.tag(k, r, 0) }}).Parse(string(b))
-		if e != nil {
-			return report, e
+		t, err := template.New(templatePath).Funcs(template.FuncMap{"tag": func(k string, r Row) (string, error) { return c.tag(k, r, 0) }}).Parse(string(b))
+		if err != nil {
+			return err
 		}
-		c.templates[f.Name()] = t
+		c.templates[templatePath] = t
+		return nil
+	})
+	if e != nil {
+		return report, e
 	}
 	if e = c.build(); e != nil {
 		return report, e
 	}
-	for _, r := range c.tables["benming_ch_prod"] {
-		if r.n("show") == 1 {
-			report.Products++
+	for _, r := range c.tables["bilvie_content"] {
+		if r.n("visible") == 1 {
+			report.Contents++
 		}
 	}
-	report.News = len(c.tables["benming_ch_news"])
 	report.Files = len(c.pages)
 	web, e := filepath.Abs(p.Web)
 	if e != nil {
@@ -243,10 +260,23 @@ func atomicWrite(p string, b []byte) error {
 	}
 	return os.Rename(f.Name(), p)
 }
-func (c *content) page(path, tpl string, r Row) error {
-	t, ok := c.templates[tpl+".html"]
+func (c *content) page(path, role string, r Row) error {
+	templatePath, assigned := c.assignments[role]
+	if !assigned {
+		return fmt.Errorf("缺少模板配置: %s", role)
+	}
+	return c.pageTemplate(path, templatePath, r)
+}
+
+func (c *content) pageTemplate(path, templatePath string, r Row) error {
+	normalized, err := templateconfig.NormalizePath(templatePath)
+	if err != nil {
+		return fmt.Errorf("模板路径无效: %s: %w", templatePath, err)
+	}
+	templatePath = normalized
+	t, ok := c.templates[templatePath]
 	if !ok {
-		return fmt.Errorf("缺少模板: %s", tpl)
+		return fmt.Errorf("缺少模板: %s", templatePath)
 	}
 	var b strings.Builder
 	if e := t.Execute(&b, r); e != nil {
@@ -259,50 +289,38 @@ func (c *content) page(path, tpl string, r Row) error {
 	c.pages[path] = []byte(s)
 	return nil
 }
-func (c *content) cat(id int, news bool) Row {
-	table := "benming_ch_prodcat"
-	if news {
-		table = "benming_ch_newscat"
-	}
-	for _, r := range c.tables[table] {
+func (c *content) cat(id int) Row {
+	for _, r := range c.tables["bilvie_category"] {
 		if r.n("id") == id {
 			return r
 		}
 	}
 	return Row{}
 }
-func (c *content) under(id, root int, news bool) bool {
+func (c *content) under(id, root int) bool {
 	seen := map[int]bool{}
 	for id > 0 && !seen[id] {
 		if id == root {
 			return true
 		}
 		seen[id] = true
-		id = c.cat(id, news).n("root")
+		id = c.cat(id).n("parent_id")
 	}
 	return false
 }
-func (c *content) newsURL(r Row) string {
-	dir := "news"
-	if c.under(r.n("typeid"), 12, true) {
-		dir = "service"
-	}
-	return fmt.Sprintf("/%s/detail/%s.html", dir, r["newsid"])
-}
-
 func (c *content) categoryListDir(r Row) string {
-	dir := strings.TrimSpace(r["listpath"])
+	dir := strings.TrimSpace(r["list_path"])
 	if dir == "" {
-		dir = routing.DefaultListPath(int64(r.n("root")))
+		dir = routing.DefaultListPath(int64(r.n("parent_id")))
 	}
 	if normalized, err := routing.NormalizeDirectory(dir); err == nil {
 		return normalized
 	}
-	return routing.DefaultListPath(int64(r.n("root")))
+	return routing.DefaultListPath(int64(r.n("parent_id")))
 }
 
 func (c *content) categoryListPattern(r Row) string {
-	pattern := strings.TrimSpace(r["listfilepattern"])
+	pattern := strings.TrimSpace(r["list_file_pattern"])
 	if pattern == "" {
 		pattern = routing.DefaultListPattern
 	}
@@ -313,7 +331,7 @@ func (c *content) categoryListPattern(r Row) string {
 }
 
 func (c *content) categoryDetailDir(r Row) string {
-	dir := strings.TrimSpace(r["detailpath"])
+	dir := strings.TrimSpace(r["detail_path"])
 	if dir == "" {
 		dir = routing.DefaultDetailPath
 	}
@@ -324,7 +342,7 @@ func (c *content) categoryDetailDir(r Row) string {
 }
 
 func (c *content) categoryDetailPattern(r Row) string {
-	pattern := strings.TrimSpace(r["detailfilepattern"])
+	pattern := strings.TrimSpace(r["detail_file_pattern"])
 	if pattern == "" {
 		pattern = routing.DefaultDetailPattern
 	}
@@ -335,59 +353,54 @@ func (c *content) categoryDetailPattern(r Row) string {
 }
 
 func (c *content) categoryListURL(r Row, page int) string {
-	filename, err := routing.RenderListFilename(c.categoryListPattern(r), int64(r.n("id")), page)
+	routeID := int64(r.n("route_id"))
+	if routeID == 0 {
+		routeID = int64(r.n("id"))
+	}
+	filename, err := routing.RenderListFilename(c.categoryListPattern(r), routeID, page)
 	if err != nil {
-		filename = fmt.Sprintf("%d.html", r.n("id"))
+		filename = fmt.Sprintf("%d.html", routeID)
 	}
 	return "/" + strings.Trim(c.categoryListDir(r)+"/"+filename, "/")
 }
 
 func (c *content) categoryListPagePath(r Row, page int) string {
-	filename, err := routing.RenderListPageFilename(c.categoryListPattern(r), int64(r.n("id")), page)
+	routeID := int64(r.n("route_id"))
+	if routeID == 0 {
+		routeID = int64(r.n("id"))
+	}
+	filename, err := routing.RenderListPageFilename(c.categoryListPattern(r), routeID, page)
 	if err != nil {
-		filename = fmt.Sprintf("%d-%d.html", r.n("id"), page)
+		filename = fmt.Sprintf("%d-%d.html", routeID, page)
 	}
 	return strings.Trim(c.categoryListDir(r)+"/"+filename, "/")
 }
 
-func (c *content) productRootURL() string {
-	for _, category := range c.tables["benming_ch_prodcat"] {
-		if category.n("root") == 0 {
+func (c *content) rootCategoryURL() string {
+	for _, category := range c.tables["bilvie_category"] {
+		if category.n("parent_id") == 0 {
 			return "/" + c.categoryListDir(category) + "/"
 		}
 	}
-	return "/" + routing.DefaultRootListPath + "/"
+	return "/" + routing.DefaultCategoryPath + "/"
 }
 
-func (c *content) prodURL(r Row) string {
-	cat := c.cat(r.n("catid"), false)
-	filename, err := routing.RenderDetailFilename(c.categoryDetailPattern(cat), int64(r.n("id")))
+func (c *content) contentURL(r Row) string {
+	category := c.cat(r.n("category_id"))
+	filename, err := routing.RenderDetailFilenameValue(c.categoryDetailPattern(category), r["route_key"])
 	if err != nil {
-		filename = r["id"] + ".html"
+		filename = r["route_key"] + ".html"
 	}
-	return "/" + strings.Trim(c.categoryDetailDir(cat)+"/"+filename, "/")
+	return "/" + strings.Trim(c.categoryDetailDir(category)+"/"+filename, "/")
 }
 
-func (c *content) cats(root int, news bool, plain bool) string {
+func (c *content) cats(root int, plain bool) string {
 	var b strings.Builder
-	table := "benming_ch_prodcat"
-	if news {
-		table = "benming_ch_newscat"
-	}
-	for _, r := range c.tables[table] {
-		if r.n("root") != root {
+	for _, r := range c.tables["bilvie_category"] {
+		if r.n("parent_id") != root {
 			continue
 		}
-		a := ""
-		if news {
-			dir := "news"
-			if root == 12 {
-				dir = "service"
-			}
-			a = link("/"+dir+"/"+r["id"]+".html", r["catname"])
-		} else {
-			a = link(c.categoryListURL(r, 1), r["catname"])
-		}
+		a := link(c.categoryListURL(r, 1), r["name"])
 		if plain {
 			b.WriteString(a + " | ")
 		} else {
@@ -396,26 +409,56 @@ func (c *content) cats(root int, news bool, plain bool) string {
 	}
 	return b.String()
 }
-func (c *content) productList(rs []Row) string {
+
+func (c *content) contentList(rs []Row) string {
 	var b strings.Builder
-	b.WriteString(`<div class="page-products"><ul class="clearfix">`)
 	for _, r := range rs {
-		image := r["smallpic"]
+		image := strings.TrimSpace(r["cover_image"])
 		if image == "" {
-			image = defaultProductImage
+			image = defaultContentImage
 		}
-		b.WriteString(`<li><a href="` + c.prodURL(r) + `"><img loading="lazy" src="` + esc(image) + `" alt="` + esc(r["prodname"]) + `" width="140" height="120"><span>` + esc(r["prodname"]) + `</span></a></li>`)
-	}
-	b.WriteString("</ul></div>")
-	return b.String()
-}
-func (c *content) newsList(rs []Row) string {
-	var b strings.Builder
-	for _, r := range rs {
-		b.WriteString(`<div class="news_bottom_line news_sp"><p>` + link(c.newsURL(r), r["title"]) + ` <time>` + esc(r["dateandtime"]) + `</time></p><p>` + esc(r["desc"]) + `</p></div>`)
+		b.WriteString(`<li><a href="` + esc(c.contentURL(r)) + `"><img loading="lazy" src="` + esc(image) + `" alt="` + esc(r["title"]) + `" width="140" height="120"><span>` + esc(r["title"]) + `</span></a></li>`)
 	}
 	return b.String()
 }
+
+func (c *content) categoryListTemplate(category Row) string {
+	if templatePath := strings.TrimSpace(category["list_template"]); templatePath != "" {
+		return templatePath
+	}
+	return templateconfig.DefaultListTemplate
+}
+
+func (c *content) categoryDetailTemplate(category Row) string {
+	if templatePath := strings.TrimSpace(category["detail_template"]); templatePath != "" {
+		return templatePath
+	}
+	return templateconfig.DefaultDetailTemplate
+}
+
+func (c *content) contentView(r Row) Row {
+	category := c.cat(r.n("category_id"))
+	image := strings.TrimSpace(r["cover_image"])
+	if image == "" {
+		image = defaultContentImage
+	}
+	categoryRoute := c.categoryListURL(category, 1)
+	return Row{
+		"id": esc(r["id"]), "route_key": esc(r["route_key"]),
+		"title": esc(r["title"]), "body": r["body"], "content": r["body"],
+		"code": esc(r["code"]), "summary": esc(r["summary"]),
+		"cover_image": esc(image), "image": esc(image),
+		"published_at": esc(r["published_at"]), "date": esc(r["published_at"]),
+		"source": esc(r["source"]), "keywords": esc(r["keywords"]),
+		"description": esc(r["description"]),
+		"category_id": esc(category["id"]), "category_name": esc(category["name"]),
+		"category_url": categoryRoute, "content_url": c.contentURL(r),
+		"root_category_url": c.rootCategoryURL(),
+		"categories":        c.cats(0, false),
+		"category_children": c.cats(category.n("id"), false),
+	}
+}
+
 func (c *content) tag(k string, r Row, depth int) (string, error) {
 	k = strings.ToLower(k)
 	if depth > 12 {
@@ -452,55 +495,22 @@ func (c *content) tag(k string, r Row, depth int) (string, error) {
 		}
 		return "", nil
 	}
-	switch k {
-	case "hope_productscat()":
-		return c.cats(0, false, false), nil
-	case "hope_productscat2()":
-		return c.cats(0, false, true), nil
-	case "hope_newscat(4,1)":
-		return c.cats(4, true, false), nil
-	case "hope_newscat(12,2)":
-		return c.cats(12, true, false), nil
-	case "prodindex()", "prodindex1()":
-		rs := []Row{}
-		for _, p := range c.tables["benming_ch_prod"] {
-			if p.n("show") == 1 && p.n("tjhome") == 1 {
-				rs = append(rs, p)
-			}
+	switch {
+	case k == "categories()":
+		return c.cats(0, false), nil
+	case k == "categories_plain()":
+		return c.cats(0, true), nil
+	case k == "category_children()":
+		return c.cats(r.n("category_id"), false), nil
+	case strings.HasPrefix(k, "featured_content"):
+		limit, ok := callLimit(k, "featured_content", 8)
+		if !ok {
+			break
 		}
-		limit := 32
-		if k == "prodindex()" {
-			limit = 8
-			sort.Slice(rs, func(i, j int) bool { return rs[i].n("id") > rs[j].n("id") })
-		}
-		rs = rs[:min(limit, len(rs))]
-		if k == "prodindex1()" {
-			var b strings.Builder
-			for _, p := range rs {
-				b.WriteString("<li>" + link(c.prodURL(p), p["prodname"]) + "</li>")
-			}
-			return b.String(), nil
-		}
-		s := c.productList(rs)
-		return strings.TrimSuffix(strings.TrimPrefix(s, `<div class="page-products"><ul class="clearfix">`), "</ul></div>"), nil
-	case "newsindex()", "serviceindex()", "serviceindex2()":
-		var b strings.Builder
-		n := 0
-		for _, v := range c.tables["benming_ch_news"] {
-			service := c.under(v.n("typeid"), 12, true)
-			if service != (k != "newsindex()") {
-				continue
-			}
-			b.WriteString("<li>" + link(c.newsURL(v), v["title"]) + "</li>")
-			n++
-			if n == 8 {
-				break
-			}
-		}
-		return b.String(), nil
-	case "hope_random":
-		return "", nil
-	case "hope_aboutcat(32)":
+		return c.featuredContent(limit), nil
+	case k == "content_index()":
+		return c.featuredContent(32), nil
+	case k == "hope_aboutcat(32)":
 		var b strings.Builder
 		for _, v := range c.tables["benming_ch_cocat"] {
 			if v.n("root") == 32 {
@@ -508,27 +518,50 @@ func (c *content) tag(k string, r Row, depth int) (string, error) {
 			}
 		}
 		return b.String(), nil
-	case "hope_contact()":
+	case k == "hope_contact()":
 		var b strings.Builder
 		for _, v := range c.tables["benming_ch_contact"] {
 			b.WriteString("<p>" + esc(v["offname"]) + " " + esc(v["address"]) + " " + esc(v["phone"]) + "</p>")
 		}
 		return b.String(), nil
-	case "msgindex()":
-		var b strings.Builder
-		for _, v := range c.tables["benming_ch_prod"] {
-			if v.n("show") == 1 {
-				b.WriteString("<tr><td>" + link(c.prodURL(v), v["prodname"]) + "</td></tr>")
-				if b.Len() > 2000 {
-					break
-				}
-			}
-		}
-		return b.String(), nil
-	case "hope_title":
-		return "", nil
 	}
 	return "", fmt.Errorf("未实现的模板标签: %s", k)
+}
+
+func callLimit(value, name string, fallback int) (int, bool) {
+	if value == name+"()" {
+		return fallback, true
+	}
+	prefix := name + "("
+	if !strings.HasPrefix(value, prefix) || !strings.HasSuffix(value, ")") {
+		return 0, false
+	}
+	limit, err := strconv.Atoi(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(value, prefix), ")")))
+	if err != nil || limit < 1 || limit > 200 {
+		return 0, false
+	}
+	return limit, true
+}
+
+func (c *content) featuredContent(limit int) string {
+	items := make([]Row, 0, len(c.tables["bilvie_content"]))
+	for _, item := range c.tables["bilvie_content"] {
+		if item.n("visible") == 1 && item.n("featured") == 1 {
+			items = append(items, item)
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].n("sort_order") == items[j].n("sort_order") {
+			return items[i].n("id") > items[j].n("id")
+		}
+		return items[i].n("sort_order") < items[j].n("sort_order")
+	})
+	items = items[:min(limit, len(items))]
+	var b strings.Builder
+	for _, item := range items {
+		b.WriteString("<li>" + link(c.contentURL(item), item["title"]) + "</li>")
+	}
+	return b.String()
 }
 func (c *content) pagination(category Row, page, pages, total int) string {
 	var b strings.Builder
@@ -540,134 +573,99 @@ func (c *content) pagination(category Row, page, pages, total int) string {
 	return b.String()
 }
 
-func fixedPagination(dir, id string, page, pages, total int) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `<nav aria-label="分页">共 %d 条，第 %d / %d 页 `, total, page, pages)
-	for i := 1; i <= pages; i++ {
-		filename := id + ".html"
-		if i > 1 {
-			filename = fmt.Sprintf("%s-%d.html", id, i)
-		}
-		b.WriteString(link("/"+dir+"/"+filename, strconv.Itoa(i)) + " ")
-	}
-	b.WriteString("</nav>")
-	return b.String()
-}
-
 func (c *content) build() error {
-	if e := c.page("index.html", "index", Row{"hope_productrooturl": c.productRootURL()}); e != nil {
+	if e := c.page("index.html", templateconfig.RoleHomeIndex, Row{
+		"root_category_url": c.rootCategoryURL(),
+		"categories":        c.cats(0, false),
+	}); e != nil {
 		return e
 	}
-	products := []Row{}
-	for _, r := range c.tables["benming_ch_prod"] {
-		if r.n("show") != 1 {
-			continue
+
+	visible := make([]Row, 0, len(c.tables["bilvie_content"]))
+	for _, item := range c.tables["bilvie_content"] {
+		if item.n("visible") == 1 {
+			visible = append(visible, item)
 		}
-		products = append(products, r)
-		v := Row{"hope_title": esc(r["prodname"]), "hope_prodcode": esc(r["prodcode"]), "hope_img": esc(r["bigpic"]), "hope_body": r["itemize"], "hope_prodkeywords": esc(r["key"]), "hope_proddescription": esc(r["remark"])}
-		if v["hope_img"] == "" || strings.Contains(strings.ToLower(r["bigpic"]), "dfpic.gif") {
-			v["hope_img"] = esc(r["smallpic"])
+	}
+	sort.SliceStable(visible, func(i, j int) bool {
+		if visible[i].n("sort_order") == visible[j].n("sort_order") {
+			return visible[i].n("id") < visible[j].n("id")
 		}
-		if v["hope_img"] == "" {
-			v["hope_img"] = defaultProductImage
+		return visible[i].n("sort_order") < visible[j].n("sort_order")
+	})
+
+	for _, item := range visible {
+		category := c.cat(item.n("category_id"))
+		view := c.contentView(item)
+		view["previous"], view["next"] = "没有了", "没有了"
+		sameCategory := make([]Row, 0)
+		for _, candidate := range visible {
+			if candidate.n("category_id") == item.n("category_id") {
+				sameCategory = append(sameCategory, candidate)
+			}
 		}
-		v["hope_productcaturl"] = c.categoryListURL(c.cat(r.n("catid"), false), 1)
-		if e := c.page(strings.TrimPrefix(c.prodURL(r), "/"), "produts_detail", v); e != nil {
+		for index, candidate := range sameCategory {
+			if candidate.n("id") != item.n("id") {
+				continue
+			}
+			if index > 0 {
+				view["previous"] = link(c.contentURL(sameCategory[index-1]), sameCategory[index-1]["title"])
+			}
+			if index+1 < len(sameCategory) {
+				view["next"] = link(c.contentURL(sameCategory[index+1]), sameCategory[index+1]["title"])
+			}
+		}
+		if e := c.pageTemplate(strings.TrimPrefix(c.contentURL(item), "/"), c.categoryDetailTemplate(category), view); e != nil {
 			return e
 		}
 	}
-	for _, cat := range c.tables["benming_ch_prodcat"] {
-		root := cat.n("root")
-		tpl := "produts_sort2"
-		if root == 0 {
-			tpl = "produts_sort"
-		}
-		rs := []Row{}
-		for _, p := range products {
-			if c.under(p.n("catid"), cat.n("id"), false) {
-				rs = append(rs, p)
+
+	for _, category := range c.tables["bilvie_category"] {
+		items := make([]Row, 0)
+		for _, item := range visible {
+			if c.under(item.n("category_id"), category.n("id")) {
+				items = append(items, item)
 			}
 		}
-		pages := max(1, (len(rs)+13)/14)
+		pageSize := category.n("list_page_size")
+		if pageSize < 1 {
+			pageSize = 14
+		}
+		pages := max(1, (len(items)+pageSize-1)/pageSize)
+		parent := c.cat(category.n("parent_id"))
 		for page := 1; page <= pages; page++ {
-			start := min((page-1)*14, len(rs))
-			end := min(start+14, len(rs))
-			v := Row{"hope_title": esc(cat["catname"]), "hope_catname": esc(cat["catname"]), "hope_smallname": esc(cat["catname"]), "hope_bigid": esc(cat["root"]), "hope_bigname": esc(c.cat(root, false)["catname"]), "hope_bigurl": c.categoryListURL(c.cat(root, false), 1), "hope_productrooturl": c.productRootURL(), "hope_productssmallcat": c.cats(root, false, true), "hope_prodkeywords": esc(cat["key"]), "hope_body": c.productList(rs[start:end]) + c.pagination(cat, page, pages, len(rs))}
-			if root == 0 {
-				v["hope_productssmallcat"] = c.cats(cat.n("id"), false, true)
+			start := min((page-1)*pageSize, len(items))
+			end := min(start+pageSize, len(items))
+			childrenRoot := category.n("parent_id")
+			if childrenRoot == 0 {
+				childrenRoot = category.n("id")
 			}
-			pagePath := c.categoryListPagePath(cat, page)
-			if e := c.page(pagePath, tpl, v); e != nil {
+			view := Row{
+				"title":             esc(category["name"]),
+				"category_name":     esc(category["name"]),
+				"category_id":       esc(category["id"]),
+				"parent_name":       esc(parent["name"]),
+				"parent_url":        c.categoryListURL(parent, 1),
+				"root_category_url": c.rootCategoryURL(),
+				"category_children": c.cats(childrenRoot, true),
+				"categories":        c.cats(0, false),
+				"keywords":          esc(category["keywords"]),
+				"description":       esc(category["description"]),
+				"body":              c.contentList(items[start:end]) + c.pagination(category, page, pages, len(items)),
+				"content_list":      c.contentList(items[start:end]),
+				"content_count":     strconv.Itoa(len(items)),
+				"content_page_size": strconv.Itoa(pageSize),
+			}
+			pagePath := c.categoryListPagePath(category, page)
+			if e := c.pageTemplate(pagePath, c.categoryListTemplate(category), view); e != nil {
 				return e
 			}
 			if page == 1 {
-				alias := strings.TrimPrefix(c.categoryListURL(cat, 1), "/")
+				alias := strings.TrimPrefix(c.categoryListURL(category, 1), "/")
 				c.pages[alias] = c.pages[pagePath]
-				dir := c.categoryListDir(cat)
+				dir := c.categoryListDir(category)
 				if _, ok := c.pages[dir+"/index.html"]; !ok {
 					c.pages[dir+"/index.html"] = c.pages[pagePath]
-				}
-			}
-		}
-	}
-	for _, dir := range []string{routing.DefaultChildListPath, routing.DefaultRootListPath} {
-		if _, ok := c.pages[dir+"/index.html"]; !ok {
-			c.pages[dir+"/index.html"] = []byte(`<!doctype html><meta charset="utf-8"><p>暂无产品</p>`)
-		}
-	}
-	for _, r := range c.tables["benming_ch_news"] {
-		dir, tpl := "news", "news_news"
-		if c.under(r.n("typeid"), 12, true) {
-			dir, tpl = "service", "service_service"
-		}
-		v := Row{"hope_title": esc(r["title"]), "hope_body": r["content"], "hope_newskeywords": esc(r["key"]), "hope_newsdescription": esc(r["desc"]), "hope_typeid": esc(r["typeid"]), "hope_catname": esc(c.cat(r.n("typeid"), true)["catname"]), "hope_previous": "没有了", "hope_next": "没有了"}
-		same := []Row{}
-		for _, n := range c.tables["benming_ch_news"] {
-			if n["typeid"] == r["typeid"] {
-				same = append(same, n)
-			}
-		}
-		for i, n := range same {
-			if n["newsid"] == r["newsid"] {
-				if i > 0 {
-					v["hope_previous"] = link(c.newsURL(same[i-1]), same[i-1]["title"])
-				}
-				if i+1 < len(same) {
-					v["hope_next"] = link(c.newsURL(same[i+1]), same[i+1]["title"])
-				}
-			}
-		}
-		if e := c.page(dir+"/detail/"+r["newsid"]+".html", tpl, v); e != nil {
-			return e
-		}
-	}
-	for _, cat := range c.tables["benming_ch_newscat"] {
-		if cat.n("root") == 0 {
-			continue
-		}
-		dir, tpl := "news", "news_sort"
-		if c.under(cat.n("id"), 12, true) {
-			dir, tpl = "service", "service_sort"
-		}
-		rs := []Row{}
-		for _, n := range c.tables["benming_ch_news"] {
-			if c.under(n.n("typeid"), cat.n("id"), true) {
-				rs = append(rs, n)
-			}
-		}
-		pages := max(1, (len(rs)+5)/6)
-		for page := 1; page <= pages; page++ {
-			start := min((page-1)*6, len(rs))
-			end := min(start+6, len(rs))
-			v := Row{"hope_title": esc(cat["catname"]), "hope_catid": esc(cat["id"]), "hope_body": c.newsList(rs[start:end]) + fixedPagination(dir, cat["id"], page, pages, len(rs))}
-			path := fmt.Sprintf("%s/%s-%d.html", dir, cat["id"], page)
-			if e := c.page(path, tpl, v); e != nil {
-				return e
-			}
-			if page == 1 {
-				c.pages[dir+"/"+cat["id"]+".html"] = c.pages[path]
-				if _, ok := c.pages[dir+"/index.html"]; !ok {
-					c.pages[dir+"/index.html"] = c.pages[path]
 				}
 			}
 		}
@@ -678,17 +676,17 @@ func (c *content) build() error {
 		}
 		v := Row{"hope_title": esc(r["coname"]), "hope_co_centern": r["centern"]}
 		p := "about/About-" + r["id"] + ".html"
-		if e := c.page(p, "corporation", v); e != nil {
+		if e := c.page(p, templateconfig.RoleAboutDetail, v); e != nil {
 			return e
 		}
 		if _, ok := c.pages["about/index.html"]; !ok {
 			c.pages["about/index.html"] = c.pages[p]
 		}
 	}
-	if e := c.page("contact.html", "contact", Row{}); e != nil {
+	if e := c.page("contact.html", templateconfig.RoleContact, Row{}); e != nil {
 		return e
 	}
-	if e := c.page("msg.html", "msg", Row{}); e != nil {
+	if e := c.page("msg.html", templateconfig.RoleMessage, Row{}); e != nil {
 		return e
 	}
 	var jobs strings.Builder
@@ -698,12 +696,12 @@ func (c *content) build() error {
 		}
 		p := "job/detail/" + r["id"] + ".html"
 		v := Row{"hope_title": esc(r["jobname"]), "hope_address": esc(r["address"]), "hope_date": esc(r["date"]), "hope_jobneed": r["jobneed"], "hope_jobnob": esc(r["jobnob"]), "hope_linkren": esc(r["linkren"]), "hope_phone": esc(r["phone"])}
-		if e := c.page(p, "job_detail", v); e != nil {
+		if e := c.page(p, templateconfig.RoleJobDetail, v); e != nil {
 			return e
 		}
 		jobs.WriteString("<tr><td>" + link("/"+p, r["jobname"]) + "</td></tr>")
 	}
-	if e := c.page("job/index.html", "job_sort", Row{"hope_body": jobs.String()}); e != nil {
+	if e := c.page("job/index.html", templateconfig.RoleJobList, Row{"hope_body": jobs.String()}); e != nil {
 		return e
 	}
 	urls := []string{}

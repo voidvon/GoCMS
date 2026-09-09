@@ -70,11 +70,23 @@ func ImportAccess(ctx context.Context, accessPath, sqlitePath string, force bool
 		report.Tables[table.Name] = count
 		report.Total += count
 	}
-	if err := EnsureProductCategoryRoutes(ctx, database); err != nil {
-		return ImportReport{}, fmt.Errorf("initialize product category routes: %w", err)
+	if err := EnsureLegacyCategoryRouteColumns(ctx, database); err != nil {
+		return ImportReport{}, fmt.Errorf("initialize legacy category routes: %w", err)
+	}
+	if err := MigrateLegacyCategories(ctx, database); err != nil {
+		return ImportReport{}, fmt.Errorf("migrate legacy categories: %w", err)
+	}
+	if err := MigrateLegacyContent(ctx, database); err != nil {
+		return ImportReport{}, fmt.Errorf("migrate legacy content: %w", err)
+	}
+	if err := MigrateLegacyMessages(ctx, database); err != nil {
+		return ImportReport{}, fmt.Errorf("migrate legacy messages: %w", err)
 	}
 	if err := NormalizeImagePaths(ctx, database); err != nil {
 		return ImportReport{}, fmt.Errorf("normalize image paths: %w", err)
+	}
+	if err := NormalizeLegacyLabels(ctx, database); err != nil {
+		return ImportReport{}, fmt.Errorf("normalize legacy labels: %w", err)
 	}
 
 	if _, err := database.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {

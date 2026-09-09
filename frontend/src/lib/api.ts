@@ -5,62 +5,38 @@ export type AdminUser = {
 }
 
 export type AdminStats = {
-  products: number
-  visible_products: number
-  news: number
+  contents: number
+  visible_contents: number
   messages: number
   pending_messages: number
 }
 
-export type Product = {
+export type Content = {
   id: number
-  name: string
+  route_key: string
+  title: string
   code: string
   category_id: number
-  remark: string
+  summary: string
   content: string
-  small_pic: string
-  big_pic: string
+  cover_image: string
+  published_at: string
+  source: string
   keywords: string
+  description: string
   order_id: number
   featured: number
   visible: number
 }
 
-export type ProductInput = Omit<Product, "id">
+export type ContentInput = Omit<Content, "id" | "route_key">
 
-export type ProductPage = {
+export type ContentPage = {
   query: string
   page: number
   page_size: number
   total: number
-  items: Product[]
-}
-
-export type NewsItem = {
-  id: number
-  title: string
-  category_id: number
-  published_at: string
-  picture: string
-  featured: number
-}
-
-export type NewsDetail = NewsItem & {
-  content: string
-  source: string
-  keywords: string
-  description: string
-}
-
-export type NewsInput = Omit<NewsDetail, "id">
-
-export type NewsPage = {
-  query: string
-  page: number
-  page_size: number
-  total: number
-  items: NewsItem[]
+  items: Content[]
 }
 
 export type MessageItem = {
@@ -74,7 +50,7 @@ export type MessageItem = {
   content: string
   created_at: string
   state: number
-  product_id: number
+  content_id: number
 }
 
 export type MessagePage = {
@@ -89,14 +65,54 @@ export type CategoryItem = {
   name: string
   parent_id: number
   order_id: number
-  product_count: number
+  list_page_size: number
+  route_id: number
+  content_count: number
   list_path: string
   list_file_pattern: string
+  list_template: string
   detail_path: string
   detail_file_pattern: string
+  detail_template: string
 }
 
-export type CategoryInput = Omit<CategoryItem, "id" | "product_count">
+export type CategoryInput = Omit<CategoryItem, "id" | "route_id" | "content_count">
+
+export type ThemeFileKind = "css" | "template"
+
+export type ThemeFile = {
+  path: string
+  size: number
+  modified_at: string
+}
+
+export type ThemeFiles = {
+  name: string
+  css_files: ThemeFile[]
+  template_files: ThemeFile[]
+  template_groups: ThemeTemplateGroup[]
+}
+
+export type ThemeTemplateGroup = {
+  key: string
+  label: string
+  files: ThemeFile[]
+  assignments: ThemeTemplateAssignment[]
+}
+
+export type ThemeTemplateAssignment = {
+  key: string
+  label: string
+  dimension: string
+  dimension_name: string
+  template_path: string
+  available: boolean
+}
+
+export type ThemeFileContent = ThemeFile & {
+  kind: ThemeFileKind
+  content: string
+}
 
 type SessionResponse = { user: AdminUser }
 
@@ -161,14 +177,14 @@ export function getStats() {
   return request<AdminStats>("/api/admin/stats")
 }
 
-export function getProducts(page: number, pageSize: number, search: string) {
-  return request<ProductPage>(
-    `/api/admin/products${query({ page, page_size: pageSize, q: search })}`,
+export function getContent(page: number, pageSize: number, search: string, categoryID = 0) {
+  return request<ContentPage>(
+    `/api/admin/content${query({ page, page_size: pageSize, q: search, category_id: categoryID || undefined })}`,
   )
 }
 
-export function getProduct(id: number) {
-  return request<Product>(`/api/products/${id}`)
+export function getContentItem(id: number) {
+  return request<Content>(`/api/admin/content/${id}`)
 }
 
 export function getCategories() {
@@ -195,55 +211,22 @@ export function deleteCategory(id: number, publish = false) {
   })
 }
 
-export function createProduct(payload: ProductInput, publish = false) {
-  return request<SaveResponse>(`/api/admin/products${publish ? "?publish=1" : ""}`, {
+export function createContent(payload: ContentInput, publish = false) {
+  return request<SaveResponse>(`/api/admin/content${publish ? "?publish=1" : ""}`, {
     method: "POST",
     body: JSON.stringify(payload),
   })
 }
 
-export function updateProduct(id: number, payload: ProductInput, publish = false) {
-  return request<SaveResponse>(`/api/admin/products/${id}${publish ? "?publish=1" : ""}`, {
+export function updateContent(id: number, payload: ContentInput, publish = false) {
+  return request<SaveResponse>(`/api/admin/content/${id}${publish ? "?publish=1" : ""}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   })
 }
 
-export function archiveProduct(id: number) {
-  return request<SaveResponse>(`/api/admin/products/${id}?publish=1`, {
-    method: "DELETE",
-  })
-}
-
-export function deleteProduct(id: number) {
-  return request<SaveResponse>(`/api/admin/products/${id}?delete=1&publish=1`, {
-    method: "DELETE",
-  })
-}
-
-export function getNews(page: number, pageSize: number, search: string) {
-  return request<NewsPage>(
-    `/api/admin/news${query({ page, page_size: pageSize, q: search })}`,
-  )
-}
-
-export function getNewsItem(id: number) {
-  return request<NewsDetail>(`/api/admin/news/${id}`)
-}
-
-export function getNewsCategories() {
-  return request<CategoryItem[]>("/api/admin/news-categories")
-}
-
-export function updateNews(id: number, payload: NewsInput, publish = false) {
-  return request<SaveResponse>(`/api/admin/news/${id}${publish ? "?publish=1" : ""}`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  })
-}
-
-export function deleteNews(id: number) {
-  return request<SaveResponse>(`/api/admin/news/${id}?publish=1`, {
+export function deleteContent(id: number, publish = false) {
+  return request<SaveResponse>(`/api/admin/content/${id}${publish ? "?publish=1" : ""}`, {
     method: "DELETE",
   })
 }
@@ -267,7 +250,23 @@ export function deleteMessage(id: number) {
   })
 }
 
-export type Publication = { state: "idle" | "running" | "success" | "failed"; started: string; finished: string; files: number; products: number; news: number; error?: string }
+export type Publication = { state: "idle" | "running" | "success" | "failed"; started: string; finished: string; files: number; contents: number; error?: string }
 export type SaveResponse = { ok: boolean; publication?: Publication; publish_started?: boolean }
 export function getPublication() { return request<Publication>("/api/admin/publish") }
 export function publishSite() { return request<Publication>("/api/admin/publish", { method: "POST" }) }
+
+export function getThemeFiles() {
+  return request<ThemeFiles>("/api/admin/theme")
+}
+
+export function getThemeFile(kind: ThemeFileKind, filePath: string) {
+  const params = new URLSearchParams({ kind, path: filePath })
+  return request<ThemeFileContent>(`/api/admin/theme?${params.toString()}`)
+}
+
+export function updateThemeAssignment(key: string, templatePath: string) {
+  return request<{ ok: boolean; key: string; template_path: string }>(`/api/admin/theme/assignments/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    body: JSON.stringify({ template_path: templatePath }),
+  })
+}

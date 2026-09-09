@@ -23,6 +23,7 @@ func (s *Server) ConfigurePublishing(templates, data, frontend, assets, theme st
 	s.frontendRoot = frontend
 	s.assetsRoot = assets
 	s.themeRoot = theme
+	s.templateRoot = templates
 	p := &publication{publisher: generator.Publisher{DB: s.database, Web: s.siteRoot, Templates: templates, Data: data, Assets: assets, Theme: theme}, report: generator.Report{State: "idle"}}
 	if b, e := os.ReadFile(filepath.Join(data, "publish.json")); e == nil {
 		_ = json.Unmarshal(b, &p.report)

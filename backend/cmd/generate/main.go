@@ -28,7 +28,16 @@ func main() {
 		log.Fatal(e)
 	}
 	defer d.Close()
-	if e = db.EnsureProductCategoryRoutes(context.Background(), d); e != nil {
+	if e = db.EnsureUnifiedCategories(context.Background(), d); e != nil {
+		log.Fatal(e)
+	}
+	if e = db.EnsureContent(context.Background(), d); e != nil {
+		log.Fatal(e)
+	}
+	if e = db.EnsureMessages(context.Background(), d); e != nil {
+		log.Fatal(e)
+	}
+	if e = db.EnsureTemplateAssignments(context.Background(), d); e != nil {
 		log.Fatal(e)
 	}
 	r, e := (generator.Publisher{DB: d, Web: *web, Templates: *templates, Data: *data, Assets: *assets, Theme: themeRoot}).Generate(context.Background())

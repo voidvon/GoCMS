@@ -14,6 +14,7 @@ import (
 
 	"bilvie/internal/auth"
 	"bilvie/internal/routing"
+	"bilvie/internal/templateconfig"
 )
 
 type adminCredentials struct {
@@ -28,28 +29,10 @@ type AdminUser struct {
 }
 
 type AdminStats struct {
-	Products        int64 `json:"products"`
-	VisibleProducts int64 `json:"visible_products"`
-	News            int64 `json:"news"`
+	Contents        int64 `json:"contents"`
+	VisibleContents int64 `json:"visible_contents"`
 	Messages        int64 `json:"messages"`
 	PendingMessages int64 `json:"pending_messages"`
-}
-
-type NewsItem struct {
-	ID          int64  `json:"id"`
-	Title       string `json:"title"`
-	Category    int64  `json:"category_id"`
-	PublishedAt string `json:"published_at"`
-	Picture     string `json:"picture"`
-	Featured    int64  `json:"featured"`
-}
-
-type NewsDetail struct {
-	NewsItem
-	Content     string `json:"content"`
-	Source      string `json:"source"`
-	Keywords    string `json:"keywords"`
-	Description string `json:"description"`
 }
 
 type MessageItem struct {
@@ -63,7 +46,7 @@ type MessageItem struct {
 	Content   string `json:"content"`
 	CreatedAt string `json:"created_at"`
 	State     int64  `json:"state"`
-	ProductID int64  `json:"product_id"`
+	ContentID int64  `json:"content_id"`
 }
 
 type CategoryItem struct {
@@ -71,47 +54,28 @@ type CategoryItem struct {
 	Name              string `json:"name"`
 	ParentID          int64  `json:"parent_id"`
 	OrderID           int64  `json:"order_id"`
-	ProductCount      int64  `json:"product_count"`
+	ListPageSize      int64  `json:"list_page_size"`
+	RouteID           int64  `json:"route_id"`
+	ContentCount      int64  `json:"content_count"`
 	ListPath          string `json:"list_path"`
 	ListFilePattern   string `json:"list_file_pattern"`
+	ListTemplate      string `json:"list_template"`
 	DetailPath        string `json:"detail_path"`
 	DetailFilePattern string `json:"detail_file_pattern"`
+	DetailTemplate    string `json:"detail_template"`
 }
 
 type categoryPayload struct {
 	Name              string `json:"name"`
 	ParentID          int64  `json:"parent_id"`
 	OrderID           int64  `json:"order_id"`
+	ListPageSize      int64  `json:"list_page_size"`
 	ListPath          string `json:"list_path"`
 	ListFilePattern   string `json:"list_file_pattern"`
+	ListTemplate      string `json:"list_template"`
 	DetailPath        string `json:"detail_path"`
 	DetailFilePattern string `json:"detail_file_pattern"`
-}
-
-type productPayload struct {
-	Name     string `json:"name"`
-	Code     string `json:"code"`
-	Category int64  `json:"category_id"`
-	Remark   string `json:"remark"`
-	Content  string `json:"content"`
-	SmallPic string `json:"small_pic"`
-	BigPic   string `json:"big_pic"`
-	Keywords string `json:"keywords"`
-	OrderID  int64  `json:"order_id"`
-	Featured int64  `json:"featured"`
-	Visible  int64  `json:"visible"`
-}
-
-type newsPayload struct {
-	Title       string `json:"title"`
-	Content     string `json:"content"`
-	Category    int64  `json:"category_id"`
-	PublishedAt string `json:"published_at"`
-	Source      string `json:"source"`
-	Picture     string `json:"picture"`
-	Keywords    string `json:"keywords"`
-	Description string `json:"description"`
-	Featured    int64  `json:"featured"`
+	DetailTemplate    string `json:"detail_template"`
 }
 
 func (s *Server) adminLogin(response http.ResponseWriter, request *http.Request) {
@@ -185,11 +149,10 @@ func (s *Server) adminStats(response http.ResponseWriter, request *http.Request)
 		destination *int64
 		query       string
 	}{
-		{&stats.Products, `SELECT COUNT(*) FROM "benming_ch_prod"`},
-		{&stats.VisibleProducts, `SELECT COUNT(*) FROM "benming_ch_prod" WHERE "show" = 1`},
-		{&stats.News, `SELECT COUNT(*) FROM "benming_ch_news"`},
-		{&stats.Messages, `SELECT COUNT(*) FROM "benming_ch_Msg"`},
-		{&stats.PendingMessages, `SELECT COUNT(*) FROM "benming_ch_Msg" WHERE COALESCE("state", 0) = 0`},
+		{&stats.Contents, `SELECT COUNT(*) FROM "bilvie_content"`},
+		{&stats.VisibleContents, `SELECT COUNT(*) FROM "bilvie_content" WHERE "visible" = 1`},
+		{&stats.Messages, `SELECT COUNT(*) FROM "bilvie_message"`},
+		{&stats.PendingMessages, `SELECT COUNT(*) FROM "bilvie_message" WHERE COALESCE("state", 0) = 0`},
 	}
 	for _, item := range queries {
 		if err := s.database.QueryRowContext(request.Context(), item.query).Scan(item.destination); err != nil {
@@ -198,287 +161,6 @@ func (s *Server) adminStats(response http.ResponseWriter, request *http.Request)
 		}
 	}
 	writeJSON(response, http.StatusOK, stats)
-}
-
-func (s *Server) adminProducts(response http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodGet && request.Method != http.MethodPost {
-		methodNotAllowed(response)
-		return
-	}
-	if !s.requireAdmin(response, request) {
-		return
-	}
-	if request.Method == http.MethodPost {
-		s.saveProduct(response, request, 0)
-		return
-	}
-
-	query := strings.TrimSpace(request.URL.Query().Get("q"))
-	page := positiveInt(request.URL.Query().Get("page"), 1)
-	pageSize := positiveInt(request.URL.Query().Get("page_size"), 20)
-	if pageSize > 100 {
-		pageSize = 100
-	}
-	where := "1 = 1"
-	args := make([]any, 0, 3)
-	if query != "" {
-		where += ` AND ("prodName" LIKE ? OR "prodCode" LIKE ? OR "key" LIKE ?)`
-		pattern := "%" + query + "%"
-		args = append(args, pattern, pattern, pattern)
-	}
-	var total int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "benming_ch_prod" WHERE `+where, args...).Scan(&total); err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	args = append(args, pageSize, (page-1)*pageSize)
-	rows, err := s.database.QueryContext(request.Context(), `
-		SELECT "id", COALESCE("prodName", ''), COALESCE("prodCode", ''), COALESCE("CatId", 0),
-		       COALESCE("remark", ''), COALESCE("itemize", ''), COALESCE("smallpic", ''),
-		       COALESCE("bigpic", ''), COALESCE("key", ''), COALESCE("orderid", 0),
-		       COALESCE("tjhome", 0), COALESCE("show", 0)
-		FROM "benming_ch_prod" WHERE `+where+` ORDER BY "id" DESC LIMIT ? OFFSET ?`, args...)
-	if err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-	items := make([]Product, 0, pageSize)
-	for rows.Next() {
-		var item Product
-		if err := rows.Scan(&item.ID, &item.Name, &item.Code, &item.Category, &item.Remark, &item.Content, &item.SmallPic, &item.BigPic, &item.Keywords, &item.OrderID, &item.Featured, &item.Visible); err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(response, http.StatusOK, SearchResult{Query: query, Page: page, PageSize: pageSize, Total: total, Items: items})
-}
-
-func (s *Server) adminProduct(response http.ResponseWriter, request *http.Request, rawID string) {
-	if request.Method != http.MethodPut && request.Method != http.MethodPatch && request.Method != http.MethodDelete {
-		methodNotAllowed(response)
-		return
-	}
-	if !s.requireAdmin(response, request) {
-		return
-	}
-	id, err := strconv.ParseInt(rawID, 10, 64)
-	if err != nil || id < 1 {
-		http.Error(response, "invalid product id", http.StatusBadRequest)
-		return
-	}
-	if request.Method == http.MethodDelete {
-		if request.URL.Query().Get("delete") != "1" {
-			_, err = s.database.ExecContext(request.Context(), `UPDATE "benming_ch_prod" SET "show" = 0 WHERE "id" = ?`, id)
-		} else {
-			var result sql.Result
-			result, err = s.database.ExecContext(request.Context(), `DELETE FROM "benming_ch_prod" WHERE "id" = ?`, id)
-			if err == nil {
-				var affected int64
-				affected, err = result.RowsAffected()
-				if err == nil && affected == 0 {
-					http.Error(response, "product not found", http.StatusNotFound)
-					return
-				}
-			}
-		}
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		s.contentSaved(response, request)
-		return
-	}
-	s.saveProduct(response, request, id)
-}
-
-func (s *Server) saveProduct(response http.ResponseWriter, request *http.Request, id int64) {
-	var payload productPayload
-	if err := decodeRequest(request, &payload); err != nil {
-		http.Error(response, "invalid product payload", http.StatusBadRequest)
-		return
-	}
-	payload.Name = strings.TrimSpace(payload.Name)
-	if payload.Name == "" {
-		http.Error(response, "product name is required", http.StatusBadRequest)
-		return
-	}
-	payload.SmallPic = canonicalImageURL(payload.SmallPic)
-	payload.BigPic = canonicalImageURL(payload.BigPic)
-	var err error
-	if id == 0 {
-		_, err = s.database.ExecContext(request.Context(), `
-			INSERT INTO "benming_ch_prod" ("prodName", "prodCode", "CatId", "remark", "itemize", "smallpic", "bigpic", "key", "orderid", "tjhome", "show")
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, payload.Name, payload.Code, payload.Category, payload.Remark, payload.Content, payload.SmallPic, payload.BigPic, payload.Keywords, payload.OrderID, payload.Featured, payload.Visible)
-	} else {
-		_, err = s.database.ExecContext(request.Context(), `
-			UPDATE "benming_ch_prod" SET "prodName" = ?, "prodCode" = ?, "CatId" = ?, "remark" = ?, "itemize" = ?,
-			"smallpic" = ?, "bigpic" = ?, "key" = ?, "orderid" = ?, "tjhome" = ?, "show" = ? WHERE "id" = ?`,
-			payload.Name, payload.Code, payload.Category, payload.Remark, payload.Content, payload.SmallPic, payload.BigPic, payload.Keywords, payload.OrderID, payload.Featured, payload.Visible, id)
-	}
-	if err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	s.contentSaved(response, request)
-}
-
-func (s *Server) adminNews(response http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodGet || !s.requireAdmin(response, request) {
-		return
-	}
-	query := strings.TrimSpace(request.URL.Query().Get("q"))
-	page := positiveInt(request.URL.Query().Get("page"), 1)
-	pageSize := positiveInt(request.URL.Query().Get("page_size"), 20)
-	if pageSize > 100 {
-		pageSize = 100
-	}
-	where := "1 = 1"
-	args := make([]any, 0, 1)
-	if query != "" {
-		where += ` AND "Title" LIKE ?`
-		args = append(args, "%"+query+"%")
-	}
-	var total int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "benming_ch_news" WHERE `+where, args...).Scan(&total); err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	args = append(args, pageSize, (page-1)*pageSize)
-	rows, err := s.database.QueryContext(request.Context(), `
-		SELECT "newsid", COALESCE("Title", ''), COALESCE("Typeid", 0), COALESCE("Dateandtime", ''),
-		       COALESCE("Picture", ''), COALESCE("tjhome", 0)
-		FROM "benming_ch_news" WHERE `+where+` ORDER BY "newsid" DESC LIMIT ? OFFSET ?`, args...)
-	if err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-	items := make([]NewsItem, 0, pageSize)
-	for rows.Next() {
-		var item NewsItem
-		if err := rows.Scan(&item.ID, &item.Title, &item.Category, &item.PublishedAt, &item.Picture, &item.Featured); err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		items = append(items, item)
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"query": query, "page": page, "page_size": pageSize, "total": total, "items": items})
-}
-
-func (s *Server) adminNewsItem(response http.ResponseWriter, request *http.Request, rawID string) {
-	if request.Method != http.MethodGet && request.Method != http.MethodPut && request.Method != http.MethodPatch && request.Method != http.MethodDelete {
-		methodNotAllowed(response)
-		return
-	}
-	if !s.requireAdmin(response, request) {
-		return
-	}
-	id, err := strconv.ParseInt(rawID, 10, 64)
-	if err != nil || id < 1 {
-		http.Error(response, "invalid news id", http.StatusBadRequest)
-		return
-	}
-	if request.Method == http.MethodGet {
-		var item NewsDetail
-		err = s.database.QueryRowContext(request.Context(), `
-			SELECT "newsid", COALESCE("Title", ''), COALESCE("Typeid", 0), COALESCE("Dateandtime", ''),
-			       COALESCE("Picture", ''), COALESCE("tjhome", 0), COALESCE("Content", ''), COALESCE("Nfrom", ''),
-			       COALESCE("key", ''), COALESCE("desc", '')
-			FROM "benming_ch_news" WHERE "newsid" = ?`, id).
-			Scan(&item.ID, &item.Title, &item.Category, &item.PublishedAt, &item.Picture, &item.Featured, &item.Content, &item.Source, &item.Keywords, &item.Description)
-		if err != nil {
-			if err == sql.ErrNoRows {
-				http.Error(response, "news not found", http.StatusNotFound)
-				return
-			}
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		writeJSON(response, http.StatusOK, item)
-		return
-	}
-	if request.Method == http.MethodDelete {
-		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "benming_ch_news" WHERE "newsid" = ?`, id)
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		affected, err := result.RowsAffected()
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		if affected == 0 {
-			http.Error(response, "news not found", http.StatusNotFound)
-			return
-		}
-		s.contentSaved(response, request)
-		return
-	}
-	s.saveNews(response, request, id)
-}
-
-func (s *Server) saveNews(response http.ResponseWriter, request *http.Request, id int64) {
-	var payload newsPayload
-	if err := decodeRequest(request, &payload); err != nil {
-		http.Error(response, "invalid news payload", http.StatusBadRequest)
-		return
-	}
-	payload.Title = strings.TrimSpace(payload.Title)
-	if payload.Title == "" {
-		http.Error(response, "news title is required", http.StatusBadRequest)
-		return
-	}
-	payload.Picture = canonicalImageURL(payload.Picture)
-	payload.PublishedAt = normalizeNewsDate(payload.PublishedAt)
-	_, err := s.database.ExecContext(request.Context(), `
-		UPDATE "benming_ch_news" SET "Title" = ?, "Content" = ?, "Typeid" = ?, "Nfrom" = ?,
-		"Picture" = ?, "Dateandtime" = ?, "tjhome" = ?, "key" = ?, "desc" = ? WHERE "newsid" = ?`,
-		payload.Title, payload.Content, payload.Category, payload.Source, payload.Picture, payload.PublishedAt,
-		payload.Featured, payload.Keywords, payload.Description, id)
-	if err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	s.contentSaved(response, request)
-}
-
-func normalizeNewsDate(value string) string {
-	value = strings.TrimSpace(value)
-	if len(value) == len("2006-01-02T15:04") && strings.Contains(value, "T") {
-		return strings.Replace(value, "T", " ", 1) + ":00"
-	}
-	return value
-}
-
-func (s *Server) adminNewsCategories(response http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodGet || !s.requireAdmin(response, request) {
-		return
-	}
-	rows, err := s.database.QueryContext(request.Context(), `
-		SELECT "id", COALESCE("CatName", ''), COALESCE("Root", 0), COALESCE("ORderID", 0)
-		FROM "benming_ch_NewsCat" ORDER BY "Root", "ORderID", "id"`)
-	if err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-	items := make([]CategoryItem, 0)
-	for rows.Next() {
-		var item CategoryItem
-		if err := rows.Scan(&item.ID, &item.Name, &item.ParentID, &item.OrderID); err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		items = append(items, item)
-	}
-	writeJSON(response, http.StatusOK, items)
 }
 
 func (s *Server) adminMessages(response http.ResponseWriter, request *http.Request) {
@@ -491,15 +173,15 @@ func (s *Server) adminMessages(response http.ResponseWriter, request *http.Reque
 		pageSize = 100
 	}
 	var total int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "benming_ch_Msg"`).Scan(&total); err != nil {
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "bilvie_message"`).Scan(&total); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
 	rows, err := s.database.QueryContext(request.Context(), `
-		SELECT "id", COALESCE("Title", ''), COALESCE("linkren", ''), COALESCE("phone", ''), COALESCE("mobile", ''),
-		       COALESCE("email", ''), COALESCE("address", ''), COALESCE("content", ''), COALESCE("date", ''),
-		       COALESCE("state", 0), COALESCE("prodid", 0)
-		FROM "benming_ch_Msg" ORDER BY "id" DESC LIMIT ? OFFSET ?`, pageSize, (page-1)*pageSize)
+		SELECT "id", COALESCE("title", ''), COALESCE("name", ''), COALESCE("phone", ''), COALESCE("mobile", ''),
+		       COALESCE("email", ''), COALESCE("address", ''), COALESCE("content", ''), COALESCE("created_at", ''),
+		       COALESCE("state", 0), COALESCE("content_id", 0)
+		FROM "bilvie_message" ORDER BY "id" DESC LIMIT ? OFFSET ?`, pageSize, (page-1)*pageSize)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -508,7 +190,7 @@ func (s *Server) adminMessages(response http.ResponseWriter, request *http.Reque
 	items := make([]MessageItem, 0, pageSize)
 	for rows.Next() {
 		var item MessageItem
-		if err := rows.Scan(&item.ID, &item.Title, &item.Name, &item.Phone, &item.Mobile, &item.Email, &item.Address, &item.Content, &item.CreatedAt, &item.State, &item.ProductID); err != nil {
+		if err := rows.Scan(&item.ID, &item.Title, &item.Name, &item.Phone, &item.Mobile, &item.Email, &item.Address, &item.Content, &item.CreatedAt, &item.State, &item.ContentID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -531,7 +213,7 @@ func (s *Server) adminMessage(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	if request.Method == http.MethodDelete {
-		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "benming_ch_Msg" WHERE "id" = ?`, id)
+		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "bilvie_message" WHERE "id" = ?`, id)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -559,7 +241,7 @@ func (s *Server) adminMessage(response http.ResponseWriter, request *http.Reques
 		http.Error(response, "state must be 0 or 1", http.StatusBadRequest)
 		return
 	}
-	_, err = s.database.ExecContext(request.Context(), `UPDATE "benming_ch_Msg" SET "state" = ?, "statedate" = ? WHERE "id" = ?`, payload.State, time.Now().Format("2006-01-02 15:04:05"), id)
+	_, err = s.database.ExecContext(request.Context(), `UPDATE "bilvie_message" SET "state" = ? WHERE "id" = ?`, payload.State, id)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -580,13 +262,12 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		return
 	}
 	rows, err := s.database.QueryContext(request.Context(), `
-		SELECT c."id", COALESCE(c."CatName", ''), COALESCE(c."Root", 0), COALESCE(c."Orderid", 0), COUNT(p."id"),
-		       COALESCE(c."ListPath", ''), COALESCE(c."ListFilePattern", ''),
-		       COALESCE(c."DetailPath", ''), COALESCE(c."DetailFilePattern", '')
-		FROM "benming_ch_ProdCat" c
-		LEFT JOIN "benming_ch_prod" p ON p."CatId" = c."id"
-		GROUP BY c."id", c."CatName", c."Root", c."Orderid", c."ListPath", c."ListFilePattern", c."DetailPath", c."DetailFilePattern"
-		ORDER BY c."Root", c."Orderid", c."id"`)
+		SELECT c."id", c."name", c."parent_id", c."order_id", c."list_page_size", c."route_id",
+		       (SELECT COUNT(*) FROM "bilvie_content" content WHERE content."category_id" = c."id"),
+		       c."list_path", c."list_file_pattern", c."list_template", c."detail_path",
+		       c."detail_file_pattern", c."detail_template"
+		FROM "bilvie_category" c
+		ORDER BY c."parent_id", c."order_id", c."id"`)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -595,8 +276,9 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 	items := make([]CategoryItem, 0)
 	for rows.Next() {
 		var item CategoryItem
-		if err := rows.Scan(&item.ID, &item.Name, &item.ParentID, &item.OrderID, &item.ProductCount,
-			&item.ListPath, &item.ListFilePattern, &item.DetailPath, &item.DetailFilePattern); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.ParentID, &item.OrderID, &item.ListPageSize, &item.RouteID,
+			&item.ContentCount, &item.ListPath, &item.ListFilePattern, &item.ListTemplate,
+			&item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -646,11 +328,11 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 	if payload.OrderID < 0 {
 		payload.OrderID = 0
 	}
-	if err := s.validateCategoryParent(request.Context(), id, payload.ParentID); err != nil {
+	if err := s.normalizeCategoryRoutes(request.Context(), id, &payload); err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.normalizeCategoryRoutes(request.Context(), id, &payload); err != nil {
+	if err := s.validateCategoryParent(request.Context(), id, payload.ParentID); err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -659,20 +341,29 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
-		_, err := s.database.ExecContext(request.Context(), `
-			INSERT INTO "benming_ch_ProdCat"
-			("CatName", "Root", "Orderid", "ListPath", "ListFilePattern", "DetailPath", "DetailFilePattern")
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			payload.Name, payload.ParentID, payload.OrderID, payload.ListPath, payload.ListFilePattern, payload.DetailPath, payload.DetailFilePattern)
+		result, err := s.database.ExecContext(request.Context(), `
+			INSERT INTO "bilvie_category"
+			("name", "parent_id", "order_id", "list_page_size", "route_id", "list_path", "list_file_pattern", "list_template", "detail_path", "detail_file_pattern", "detail_template")
+			VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate)
 		if err != nil {
+			http.Error(response, "database error", http.StatusInternalServerError)
+			return
+		}
+		newID, err := result.LastInsertId()
+		if err != nil {
+			http.Error(response, "database error", http.StatusInternalServerError)
+			return
+		}
+		if _, err := s.database.ExecContext(request.Context(), `UPDATE "bilvie_category" SET "route_id" = ? WHERE "id" = ?`, newID, newID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
 	} else {
 		result, err := s.database.ExecContext(request.Context(), `
-			UPDATE "benming_ch_ProdCat" SET "CatName" = ?, "Root" = ?, "Orderid" = ?,
-			"ListPath" = ?, "ListFilePattern" = ?, "DetailPath" = ?, "DetailFilePattern" = ? WHERE "id" = ?`,
-			payload.Name, payload.ParentID, payload.OrderID, payload.ListPath, payload.ListFilePattern, payload.DetailPath, payload.DetailFilePattern, id)
+			UPDATE "bilvie_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "list_page_size" = ?,
+			"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ? WHERE "id" = ?`,
+			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, id)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -691,21 +382,29 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 }
 
 func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload *categoryPayload) error {
+	var current categoryPayload
 	if id > 0 {
-		var current categoryPayload
 		err := s.database.QueryRowContext(ctx, `
-			SELECT COALESCE("ListPath", ''), COALESCE("ListFilePattern", ''),
-			       COALESCE("DetailPath", ''), COALESCE("DetailFilePattern", '')
-			FROM "benming_ch_ProdCat" WHERE "id" = ?`, id).
-			Scan(&current.ListPath, &current.ListFilePattern, &current.DetailPath, &current.DetailFilePattern)
-		if err != nil && err != sql.ErrNoRows {
+			SELECT "list_page_size", "list_path", "list_file_pattern", "list_template", "detail_path", "detail_file_pattern", "detail_template"
+			FROM "bilvie_category" WHERE "id" = ?`, id).
+			Scan(&current.ListPageSize, &current.ListPath, &current.ListFilePattern, &current.ListTemplate, &current.DetailPath, &current.DetailFilePattern, &current.DetailTemplate)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("分类不存在")
+		}
+		if err != nil {
 			return fmt.Errorf("读取分类路由失败: %w", err)
 		}
 		if payload.ListPath == "" {
 			payload.ListPath = current.ListPath
 		}
+		if payload.ListPageSize <= 0 {
+			payload.ListPageSize = current.ListPageSize
+		}
 		if payload.ListFilePattern == "" {
 			payload.ListFilePattern = current.ListFilePattern
+		}
+		if payload.ListTemplate == "" {
+			payload.ListTemplate = current.ListTemplate
 		}
 		if payload.DetailPath == "" {
 			payload.DetailPath = current.DetailPath
@@ -713,18 +412,47 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 		if payload.DetailFilePattern == "" {
 			payload.DetailFilePattern = current.DetailFilePattern
 		}
+		if payload.DetailTemplate == "" {
+			payload.DetailTemplate = current.DetailTemplate
+		}
+	}
+	if payload.ListPageSize <= 0 {
+		payload.ListPageSize = 14
+	}
+	if payload.ListPageSize > 200 {
+		payload.ListPageSize = 200
 	}
 	if payload.ListPath == "" {
 		payload.ListPath = routing.DefaultListPath(payload.ParentID)
+		if payload.ParentID > 0 {
+			var parentPath string
+			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("list_path", '') FROM "bilvie_category" WHERE "id" = ?`, payload.ParentID).Scan(&parentPath); err == nil && parentPath != "" {
+				payload.ListPath = parentPath
+			}
+		}
 	}
 	if payload.ListFilePattern == "" {
 		payload.ListFilePattern = routing.DefaultListPattern
 	}
+	if payload.ListTemplate == "" {
+		payload.ListTemplate = templateconfig.DefaultListTemplate
+	}
 	if payload.DetailPath == "" {
-		payload.DetailPath = routing.DefaultDetailPath
+		if payload.ParentID > 0 {
+			var parentPath string
+			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("detail_path", '') FROM "bilvie_category" WHERE "id" = ?`, payload.ParentID).Scan(&parentPath); err == nil && parentPath != "" {
+				payload.DetailPath = parentPath
+			}
+		}
+		if payload.DetailPath == "" {
+			payload.DetailPath = routing.DefaultDetailPath
+		}
 	}
 	if payload.DetailFilePattern == "" {
 		payload.DetailFilePattern = routing.DefaultDetailPattern
+	}
+	if payload.DetailTemplate == "" {
+		payload.DetailTemplate = templateconfig.DefaultDetailTemplate
 	}
 	var err error
 	if payload.ListPath, err = routing.NormalizeDirectory(payload.ListPath); err != nil {
@@ -739,12 +467,25 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	if payload.DetailFilePattern, err = routing.NormalizeFilePattern(payload.DetailFilePattern, false); err != nil {
 		return fmt.Errorf("详情文件名规则无效: %w", err)
 	}
+	if payload.ListTemplate, err = templateconfig.NormalizePath(payload.ListTemplate); err != nil {
+		return fmt.Errorf("列表模板无效: %w", err)
+	}
+	if payload.DetailTemplate, err = templateconfig.NormalizePath(payload.DetailTemplate); err != nil {
+		return fmt.Errorf("详情模板无效: %w", err)
+	}
+	if s.templateRoot != "" {
+		for label, templatePath := range map[string]string{"列表": payload.ListTemplate, "详情": payload.DetailTemplate} {
+			if _, _, err := readThemeFile(s.templateRoot, ".html", templatePath); err != nil {
+				return fmt.Errorf("%s模板不可用: %w", label, err)
+			}
+		}
+	}
 	return nil
 }
 
 func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Request, id int64) {
-	var exists, children, products int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "benming_ch_ProdCat" WHERE "id" = ?`, id).Scan(&exists); err != nil {
+	var exists, children, content int64
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "bilvie_category" WHERE "id" = ?`, id).Scan(&exists); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -752,7 +493,7 @@ func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Requ
 		http.Error(response, "category not found", http.StatusNotFound)
 		return
 	}
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "benming_ch_ProdCat" WHERE "Root" = ?`, id).Scan(&children); err != nil {
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "bilvie_category" WHERE "parent_id" = ?`, id).Scan(&children); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -760,15 +501,16 @@ func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Requ
 		http.Error(response, "分类下还有子分类，请先移动或删除子分类", http.StatusConflict)
 		return
 	}
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "benming_ch_prod" WHERE "CatId" = ?`, id).Scan(&products); err != nil {
+	if err := s.database.QueryRowContext(request.Context(), `
+		SELECT COUNT(*) FROM "bilvie_content" WHERE "category_id" = ?`, id).Scan(&content); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
-	if products > 0 {
-		http.Error(response, "分类下还有产品，请先调整产品分类", http.StatusConflict)
+	if content > 0 {
+		http.Error(response, "栏目下还有内容，请先调整内容所属栏目", http.StatusConflict)
 		return
 	}
-	if _, err := s.database.ExecContext(request.Context(), `DELETE FROM "benming_ch_ProdCat" WHERE "id" = ?`, id); err != nil {
+	if _, err := s.database.ExecContext(request.Context(), `DELETE FROM "bilvie_category" WHERE "id" = ?`, id); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -780,7 +522,7 @@ func (s *Server) nextCategoryOrder(ctx context.Context, parentID int64, orderID 
 		return nil
 	}
 	var maxOrder sql.NullInt64
-	if err := s.database.QueryRowContext(ctx, `SELECT MAX("Orderid") FROM "benming_ch_ProdCat" WHERE "Root" = ?`, parentID).Scan(&maxOrder); err != nil {
+	if err := s.database.QueryRowContext(ctx, `SELECT MAX("order_id") FROM "bilvie_category" WHERE "parent_id" = ?`, parentID).Scan(&maxOrder); err != nil {
 		return err
 	}
 	if maxOrder.Valid {
@@ -803,13 +545,30 @@ func (s *Server) validateCategoryParent(ctx context.Context, id, parentID int64)
 		}
 		seen[current] = true
 		var parent int64
-		if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("Root", 0) FROM "benming_ch_ProdCat" WHERE "id" = ?`, current).Scan(&parent); err != nil {
+		if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("parent_id", 0) FROM "bilvie_category" WHERE "id" = ?`, current).Scan(&parent); err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("父分类不存在")
 			}
 			return fmt.Errorf("读取父分类失败: %w", err)
 		}
 		current = parent
+	}
+	return nil
+}
+
+func (s *Server) validateContentCategory(ctx context.Context, id int64) error {
+	if id == 0 {
+		return nil
+	}
+	var exists int64
+	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "bilvie_category" WHERE "id" = ?`, id).Scan(&exists); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("栏目不存在")
+		}
+		return fmt.Errorf("读取栏目失败: %w", err)
+	}
+	if exists == 0 {
+		return fmt.Errorf("栏目不存在")
 	}
 	return nil
 }

@@ -2,11 +2,11 @@ package routing
 
 import "testing"
 
-func TestProductRouteDefaults(t *testing.T) {
-	if got := DefaultListPath(0); got != "valve" {
+func TestCategoryRouteDefaults(t *testing.T) {
+	if got := DefaultListPath(0); got != "category" {
 		t.Fatalf("root list path = %q", got)
 	}
-	if got := DefaultListPath(25); got != "Products" {
+	if got := DefaultListPath(25); got != "category" {
 		t.Fatalf("child list path = %q", got)
 	}
 	filename, err := RenderDetailFilename(DefaultDetailPattern, 185)
@@ -33,7 +33,7 @@ func TestRouteValidation(t *testing.T) {
 	if _, err := NormalizeFilePattern("{id}-{page}.html", false); err == nil {
 		t.Fatal("detail pattern accepted page placeholder")
 	}
-	if got, err := NormalizeDirectory("/Products/"); err != nil || got != "Products" {
+	if got, err := NormalizeDirectory("/catalog/"); err != nil || got != "catalog" {
 		t.Fatalf("normalized directory = %q, err=%v", got, err)
 	}
 }

@@ -92,7 +92,7 @@ function RichTextToolbar({ editor, state }: { editor: NonNullable<ReturnType<typ
     <div
       className="flex flex-wrap items-center gap-0.5 border-b bg-muted/30 p-1"
       role="toolbar"
-      aria-label="产品详情编辑工具"
+      aria-label="内容详情编辑工具"
       onMouseDown={(event) => event.preventDefault()}
     >
       <IconButton

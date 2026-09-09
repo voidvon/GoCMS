@@ -116,7 +116,7 @@ func (c *content) normalizeLinks(assets, theme string) error {
 			}
 			if !ok {
 				if isImagePath(target) {
-					if fallback, exists := index["images/index_newspic.jpg"]; exists {
+					if fallback, exists := index["images/content-placeholder.jpg"]; exists {
 						u.Path = "/" + fallback
 						return m[1] + `="` + esc(u.String()) + `"`
 					}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"bilvie/internal/routing"
+	"bilvie/internal/templateconfig"
 )
 
 type ColumnType int
@@ -224,55 +225,85 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 			return fmt.Errorf("create index: %w", err)
 		}
 	}
-	return EnsureProductCategoryRoutes(ctx, database)
+	if err := EnsureLegacyCategoryRouteColumns(ctx, database); err != nil {
+		return err
+	}
+	if err := EnsureUnifiedCategories(ctx, database); err != nil {
+		return err
+	}
+	if err := EnsureContent(ctx, database); err != nil {
+		return err
+	}
+	if err := EnsureMessages(ctx, database); err != nil {
+		return err
+	}
+	return templateconfig.Ensure(ctx, database)
 }
 
-// EnsureProductCategoryRoutes adds the SQLite-only route settings without
-// changing the legacy Access import column list. Existing categories receive
-// the paths used by the published site before route customization was added.
-func EnsureProductCategoryRoutes(ctx context.Context, database *sql.DB) error {
+// EnsureLegacyCategoryRouteColumns adds route settings to the imported source
+// table. This is used only while importing the old Access database; the
+// publisher reads bilvie_category exclusively.
+func EnsureLegacyCategoryRouteColumns(ctx context.Context, database *sql.DB) error {
 	columns := map[string]string{
 		"ListPath":          "TEXT",
 		"ListFilePattern":   "TEXT",
+		"ListTemplate":      "TEXT",
 		"DetailPath":        "TEXT",
 		"DetailFilePattern": "TEXT",
+		"DetailTemplate":    "TEXT",
 	}
 	for name, columnType := range columns {
 		var exists int
 		if err := database.QueryRowContext(ctx, `
 			SELECT COUNT(*) FROM pragma_table_info('benming_ch_ProdCat') WHERE name = ?`, name).Scan(&exists); err != nil {
-			return fmt.Errorf("inspect product category route column %s: %w", name, err)
+			return fmt.Errorf("inspect legacy category route column %s: %w", name, err)
 		}
 		if exists > 0 {
 			continue
 		}
 		if _, err := database.ExecContext(ctx, `ALTER TABLE "benming_ch_ProdCat" ADD COLUMN "`+name+`" `+columnType); err != nil {
-			return fmt.Errorf("add product category route column %s: %w", name, err)
+			return fmt.Errorf("add legacy category route column %s: %w", name, err)
 		}
 	}
 	if _, err := database.ExecContext(ctx, `
 		UPDATE "benming_ch_ProdCat"
 		SET "ListPath" = CASE WHEN COALESCE("Root", 0) = 0 THEN ? ELSE ? END
-		WHERE TRIM(COALESCE("ListPath", '')) = ''`, routing.DefaultRootListPath, routing.DefaultChildListPath); err != nil {
-		return fmt.Errorf("initialize product category list paths: %w", err)
+		WHERE TRIM(COALESCE("ListPath", '')) = ''`, legacyRootListPath, legacyChildListPath); err != nil {
+		return fmt.Errorf("initialize legacy category list paths: %w", err)
 	}
 	if _, err := database.ExecContext(ctx, `
 		UPDATE "benming_ch_ProdCat"
 		SET "ListFilePattern" = ?
 		WHERE TRIM(COALESCE("ListFilePattern", '')) = ''`, routing.DefaultListPattern); err != nil {
-		return fmt.Errorf("initialize product category list file patterns: %w", err)
+		return fmt.Errorf("initialize legacy category list file patterns: %w", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE "benming_ch_ProdCat"
+		SET "ListTemplate" = ?
+		WHERE TRIM(COALESCE("ListTemplate", '')) = ''`, templateconfig.DefaultListTemplate); err != nil {
+		return fmt.Errorf("initialize legacy category list templates: %w", err)
 	}
 	if _, err := database.ExecContext(ctx, `
 		UPDATE "benming_ch_ProdCat"
 		SET "DetailPath" = ?
-		WHERE TRIM(COALESCE("DetailPath", '')) = ''`, routing.DefaultDetailPath); err != nil {
-		return fmt.Errorf("initialize product category detail paths: %w", err)
+		WHERE TRIM(COALESCE("DetailPath", '')) = ''`, legacyDetailPath); err != nil {
+		return fmt.Errorf("initialize legacy category detail paths: %w", err)
 	}
 	if _, err := database.ExecContext(ctx, `
 		UPDATE "benming_ch_ProdCat"
 		SET "DetailFilePattern" = ?
 		WHERE TRIM(COALESCE("DetailFilePattern", '')) = ''`, routing.DefaultDetailPattern); err != nil {
-		return fmt.Errorf("initialize product category detail file patterns: %w", err)
+		return fmt.Errorf("initialize legacy category detail file patterns: %w", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE "benming_ch_ProdCat"
+		SET "DetailTemplate" = ?
+		WHERE TRIM(COALESCE("DetailTemplate", '')) = ''`, templateconfig.DefaultDetailTemplate); err != nil {
+		return fmt.Errorf("initialize legacy category detail templates: %w", err)
 	}
 	return nil
+}
+
+func EnsureTemplateAssignments(ctx context.Context, database *sql.DB) error {
+	return templateconfig.Ensure(ctx, database)
 }

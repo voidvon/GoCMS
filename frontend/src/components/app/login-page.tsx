@@ -53,7 +53,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
               内容管理工作台
             </p>
             <p className="mt-3 max-w-sm text-sm leading-6 text-muted-foreground">
-              集中维护产品、新闻和客户留言，数据由 Go 服务和 SQLite 提供。
+              集中维护内容、栏目和客户留言，数据由 Go 服务和 SQLite 提供。
             </p>
           </div>
           <p className="text-xs text-muted-foreground">UTF-8 · Go + SQLite</p>

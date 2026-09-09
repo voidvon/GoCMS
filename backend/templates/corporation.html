@@ -10,7 +10,7 @@
 <div id="page_main" class="clearfix">
     <div class="page-right">
       <div class="site-nav"><span>当前位置 : </span><a href="/index.html">公司主页</a> &gt;&gt; {{tag "hope_title" .}} </div>
-	  <div class="page-products">
+	  <div class="page-content">
       <ul class="clearfix">{{tag "hope_co_centern" .}}
 </ul>
 <div class="page_list">
@@ -19,11 +19,11 @@
       </div>
     </div>
     <div class="page-left">
-      <div class="left-products">
-        <h2><span>产品展示</span></h2>
+      <div class="left-content">
+        <h2><span>内容</span></h2>
         <div id="LeftMenu" class="ddsmoothmenu-v">
           <ul>
-{{tag "hope_productscat()" .}}
+{{tag "categories()" .}}
           </ul>
         </div>
       </div>{{tag "hope_aboutcat(32)" .}}
@@ -31,7 +31,7 @@
         <h2><span>站内搜索</span></h2>
 <form id="form2" name="form2" method="post" action="/Search.asp?action=search">
           <p>
-            <input name="ProductsName" type="text" id="ProductsName" value="找找看" size="18"  class="Font_666666_a" onfocus="this.value='';" />
+            <input name="q" type="text" id="q" value="找找看" size="18"  class="Font_666666_a" onfocus="this.value='';" />
             <input name="searchbutton" type="submit" id="searchbutton" value="" />
           </p>
         </form>

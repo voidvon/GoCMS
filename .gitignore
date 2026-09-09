@@ -9,7 +9,7 @@
 # Published website (sources: backend/templates; resources served separately)
 /web/
 
-# Business-managed product and editorial images stay outside Git.
+# Business-managed content images stay outside Git.
 /assets/images/*
 !/assets/images/.gitkeep
 

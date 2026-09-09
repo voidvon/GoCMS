@@ -31,7 +31,16 @@ func main() {
 		log.Fatal(err)
 	}
 	defer database.Close()
-	if err := db.EnsureProductCategoryRoutes(context.Background(), database); err != nil {
+	if err := db.EnsureUnifiedCategories(context.Background(), database); err != nil {
+		log.Fatal(err)
+	}
+	if err := db.EnsureContent(context.Background(), database); err != nil {
+		log.Fatal(err)
+	}
+	if err := db.EnsureMessages(context.Background(), database); err != nil {
+		log.Fatal(err)
+	}
+	if err := db.EnsureTemplateAssignments(context.Background(), database); err != nil {
 		log.Fatal(err)
 	}
 	if err := database.Ping(); err != nil {
