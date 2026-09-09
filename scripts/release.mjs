@@ -115,6 +115,14 @@ function releaseExists(tag) {
   return succeeds("gh", ["release", "view", tag, "--json", "tagName"])
 }
 
+function deleteLocalTag(tag) {
+  run("git", ["tag", "--delete", tag])
+}
+
+function deleteRemoteTag(tag) {
+  run("git", ["push", remote, "--delete", tag])
+}
+
 function updateVersion(version) {
   const packageJson = readJson(packagePath)
   const packageLock = readJson(lockPath)
@@ -172,9 +180,10 @@ if (!succeeds("gh", ["auth", "status"])) {
 const hasCurrentRelease = releaseExists(currentTag)
 const hasCurrentLocalTag = localTagExists(currentTag)
 const hasCurrentRemoteTag = remoteTagExists(currentTag)
+const replaceCurrentTag = !hasCurrentRelease && (hasCurrentLocalTag || hasCurrentRemoteTag)
 
-if (!hasCurrentRelease && (hasCurrentLocalTag || hasCurrentRemoteTag)) {
-  fail(`${currentTag} 已存在但没有对应 GitHub Release，请先处理这个 tag`)
+if (replaceCurrentTag) {
+  console.log(`${currentTag} 已存在但没有对应 GitHub Release，将删除 tag 后重新发布`)
 }
 
 const releaseVersion = hasCurrentRelease ? nextVersion(packageJson.version) : packageJson.version
@@ -211,6 +220,11 @@ if (versionChanged) {
 const branch = capture("git", ["branch", "--show-current"])
 if (!branch) {
   fail("当前处于 detached HEAD，无法自动推送发布提交")
+}
+
+if (replaceCurrentTag) {
+  if (hasCurrentLocalTag) deleteLocalTag(currentTag)
+  if (hasCurrentRemoteTag) deleteRemoteTag(currentTag)
 }
 
 run("git", ["tag", "-a", releaseTag, "-m", `Release ${releaseTag}`])
