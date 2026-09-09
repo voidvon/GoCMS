@@ -32,9 +32,9 @@ make release-dry-run  # 查看下一次 Release 版本，不修改仓库
 make release          # 更新版本、创建 tag 并发布 GitHub Release
 ```
 
-版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub。Release 每个平台只上传一个单文件可执行文件；可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
+版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub，且已安装 `zip` 命令。Release 每个平台上传一个 `gocms-<tag>-<os>-<arch>.zip` 压缩包，包内包含对应平台的单文件可执行文件；可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
 
-后台“关于 GoCMS”中的“检查更新”会读取 GitHub 最新 Release。服务检测到对应平台的新版本后会直接下载单文件可执行文件、替换当前程序并自动重启；主题、模板、业务图片、数据库和已发布网站目录都不会被更新流程覆盖。
+后台“关于 GoCMS”中的“检查更新”会读取 GitHub 最新 Release。服务检测到对应平台的新版本后会下载 ZIP 压缩包、解压可执行文件、替换当前程序并自动重启；主题、模板、业务图片、数据库和已发布网站目录都不会被更新流程覆盖。只支持裸二进制下载的旧版本需要先手动下载压缩包并解压替换程序一次，之后即可自动更新。
 
 ## 发布规则
 

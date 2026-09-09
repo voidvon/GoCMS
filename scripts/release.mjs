@@ -159,7 +159,9 @@ function createReleaseAssets(tag) {
       cwd: backendRoot,
       env: { ...process.env, CGO_ENABLED: "0", GOOS: goos, GOARCH: goarch },
     })
-    assets.push(binaryPath)
+    const archivePath = join(temporaryRoot, `gocms-${tag}-${goos}-${goarch}.zip`)
+    run("zip", ["-9", archivePath, binaryName], { cwd: temporaryRoot })
+    assets.push(archivePath)
   }
 
   return { assets, temporaryRoot }

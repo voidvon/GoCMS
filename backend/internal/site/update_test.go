@@ -1,11 +1,54 @@
 package site
 
 import (
+	"archive/zip"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 )
+
+func TestExtractUpdateBinary(t *testing.T) {
+	for _, name := range []string{"gocms", "../gocms", "other"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			archivePath := filepath.Join(root, "update.zip")
+			file, err := os.Create(archivePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer := zip.NewWriter(file)
+			entry, err := writer.Create(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := entry.Write([]byte("new binary")); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+			target := filepath.Join(root, "gocms")
+			err = extractUpdateBinary(archivePath, target)
+			if name != "gocms" {
+				if err == nil {
+					t.Fatal("expected invalid entry to be rejected")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			content, err := os.ReadFile(target)
+			if err != nil || string(content) != "new binary" {
+				t.Fatalf("content = %q, error = %v", content, err)
+			}
+		})
+	}
+}
 
 func TestUpdateVersionComparison(t *testing.T) {
 	left, err := parseUpdateVersion("v0.2.0")
@@ -24,13 +67,9 @@ func TestUpdateVersionComparison(t *testing.T) {
 	}
 }
 
-func TestUpdateAssetNameIsSingleBinary(t *testing.T) {
+func TestUpdateAssetNameIsZip(t *testing.T) {
 	name := updateAssetName("v0.1.0")
-	wantSuffix := ""
-	if runtime.GOOS == "windows" {
-		wantSuffix = ".exe"
-	}
-	want := "gocms-v0.1.0-" + runtime.GOOS + "-" + runtime.GOARCH + wantSuffix
+	want := "gocms-v0.1.0-" + runtime.GOOS + "-" + runtime.GOARCH + ".zip"
 	if name != want {
 		t.Fatalf("asset name = %q, want %q", name, want)
 	}

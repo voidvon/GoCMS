@@ -1,6 +1,7 @@
 package site
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -221,6 +222,10 @@ func fetchLatestRelease(ctx context.Context) (githubRelease, error) {
 }
 
 func updateAssetName(tag string) string {
+	return fmt.Sprintf("gocms-%s-%s-%s.zip", tag, runtime.GOOS, runtime.GOARCH)
+}
+
+func updateBinaryName(tag string) string {
 	suffix := ""
 	if runtime.GOOS == "windows" {
 		suffix = ".exe"
@@ -327,7 +332,48 @@ func downloadUpdate(ctx context.Context, release githubRelease, assetName string
 		_ = os.RemoveAll(temporaryRoot)
 		return "", errors.New("下载的更新文件不是普通文件")
 	}
-	return binaryPath, nil
+	stagingPath := filepath.Join(temporaryRoot, updateBinaryName(release.TagName))
+	if err := extractUpdateBinary(binaryPath, stagingPath); err != nil {
+		_ = os.RemoveAll(temporaryRoot)
+		return "", err
+	}
+	return stagingPath, nil
+}
+
+func extractUpdateBinary(archivePath, binaryPath string) error {
+	archive, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return err
+	}
+	defer archive.Close()
+	if len(archive.File) != 1 || archive.File[0].Name != filepath.Base(binaryPath) || !archive.File[0].Mode().IsRegular() {
+		return errors.New("更新压缩包必须只包含对应平台的可执行文件")
+	}
+	entry := archive.File[0]
+	if entry.UncompressedSize64 == 0 || entry.UncompressedSize64 > maxUpdateBinaryBytes {
+		return errors.New("更新文件为空或超过大小限制")
+	}
+	source, err := entry.Open()
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	target, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	written, copyErr := io.Copy(target, io.LimitReader(source, maxUpdateBinaryBytes+1))
+	closeErr := target.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if written == 0 || written > maxUpdateBinaryBytes {
+		return errors.New("更新文件为空或超过大小限制")
+	}
+	return nil
 }
 
 func resolveExecutable() (string, error) {
