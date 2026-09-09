@@ -19,3 +19,5 @@
 
 # Local archive of the old ASP system
 /legacy/
+
+.DS_Store

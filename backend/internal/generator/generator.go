@@ -666,7 +666,18 @@ func (c *content) contentList(rs []Row) string {
 	return b.String()
 }
 
+func (c *content) articleList(rs []Row) string {
+	var b strings.Builder
+	for _, r := range rs {
+		b.WriteString(`<li><a href="` + esc(c.contentURL(r)) + `">` + esc(r["title"]) + `</a><span>` + esc(r["published_at"]) + `</span></li>`)
+	}
+	return b.String()
+}
+
 func (c *content) categoryListTemplate(category Row) string {
+	if c.categoryFamily(category) == "service" {
+		return "service_category_list.html"
+	}
 	if templatePath := strings.TrimSpace(category["list_template"]); templatePath != "" {
 		if templatePath == templateconfig.DefaultListTemplate && c.isProductCategory(category) {
 			return "product_category_list.html"
@@ -895,7 +906,11 @@ func (c *content) build() error {
 			if childrenRoot == 0 {
 				childrenRoot = category.n("id")
 			}
-			body := c.contentList(items[start:end]) + c.pagination(category, page, pages, len(items))
+			list := c.contentList(items[start:end])
+			if c.categoryFamily(category) == "service" {
+				list = c.articleList(items[start:end])
+			}
+			body := list + c.pagination(category, page, pages, len(items))
 			view := Row{
 				"title":             esc(category["name"]),
 				"category_name":     esc(category["name"]),
