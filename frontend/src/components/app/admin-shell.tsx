@@ -42,6 +42,7 @@ import { ThemePage } from "@/components/app/theme-page"
 
 import { PublishPage } from "@/components/app/publish-page"
 import { SettingsDialog } from "@/components/app/settings-dialog"
+import { ThemeToggle } from "@/components/app/theme-provider"
 
 type AdminShellProps = {
   user: AdminUser
@@ -160,6 +161,7 @@ function Sidebar({ activeView, onNavigate, user, onLogout }: SidebarProps) {
         <div className="mt-auto border-t pt-4">
           <div className="flex items-center gap-1">
             <UserMenu user={user} onLogout={onLogout} className="flex-1" />
+            <ThemeToggle />
             <SettingsDialog />
           </div>
         </div>
@@ -250,6 +252,7 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
                 <div className="mt-6 border-t pt-4">
                   <div className="flex items-center gap-1">
                     <UserMenu user={user} onLogout={handleLogout} className="flex-1" />
+                    <ThemeToggle />
                     <SettingsDialog />
                   </div>
                 </div>

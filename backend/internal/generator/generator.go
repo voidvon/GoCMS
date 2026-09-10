@@ -178,7 +178,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		return report, e
 	}
 	defer tx.Rollback()
-	names := []string{"benming_ch_config", "benming_ch_cuslabel", "benming_ch_MetaType", "gocms_content", "gocms_category", "benming_ch_Cocat", "benming_ch_Contact", "benming_ch_job"}
+	names := []string{"benming_ch_config", "benming_ch_cuslabel", "benming_ch_MetaType", "gocms_content", "gocms_category", "benming_ch_Cocat", "benming_ch_job"}
 	for _, n := range names {
 		rs, e := readTable(ctx, tx, n)
 		if e != nil {
@@ -381,9 +381,12 @@ func (c *content) under(id, root int) bool {
 func (c *content) categoryListDir(r Row) string {
 	dir := strings.TrimSpace(r["list_path"])
 	if dir == "" {
+		if c.categoryPageType(r) == routing.PageTypeCover {
+			return ""
+		}
 		dir = routing.DefaultListPath(int64(r.n("parent_id")))
 	}
-	if normalized, err := routing.NormalizeDirectory(dir); err == nil {
+	if normalized, err := routing.NormalizeOptionalDirectory(dir); err == nil {
 		return normalized
 	}
 	return routing.DefaultListPath(int64(r.n("parent_id")))
@@ -392,12 +395,32 @@ func (c *content) categoryListDir(r Row) string {
 func (c *content) categoryListPattern(r Row) string {
 	pattern := strings.TrimSpace(r["list_file_pattern"])
 	if pattern == "" {
+		if c.categoryPageType(r) == routing.PageTypeCover {
+			pattern = routing.DefaultCoverPattern
+		} else {
+			pattern = routing.DefaultListPattern
+		}
+	}
+	if c.categoryPageType(r) == routing.PageTypeCover {
+		if normalized, err := routing.NormalizeCoverFilePattern(pattern); err == nil {
+			return normalized
+		}
+		return routing.DefaultCoverPattern
+	}
+	if pattern == "" {
 		pattern = routing.DefaultListPattern
 	}
 	if normalized, err := routing.NormalizeFilePattern(pattern, false); err == nil {
 		return normalized
 	}
 	return routing.DefaultListPattern
+}
+
+func (c *content) categoryPageType(r Row) string {
+	if value, err := routing.NormalizePageType(r["page_type"]); err == nil {
+		return value
+	}
+	return routing.PageTypeList
 }
 
 func (c *content) categoryDetailDir(r Row) string {
@@ -423,27 +446,59 @@ func (c *content) categoryDetailPattern(r Row) string {
 }
 
 func (c *content) categoryListURL(r Row, page int) string {
+	if r["id"] == "" {
+		return ""
+	}
 	routeID := int64(r.n("route_id"))
 	if routeID == 0 {
 		routeID = int64(r.n("id"))
 	}
-	filename, err := routing.RenderListFilename(c.categoryListPattern(r), routeID, page)
+	var filename string
+	var err error
+	if c.categoryPageType(r) == routing.PageTypeCover {
+		filename, err = routing.RenderCoverFilename(c.categoryListPattern(r), routeID)
+	} else {
+		filename, err = routing.RenderListFilename(c.categoryListPattern(r), routeID, page)
+	}
 	if err != nil {
 		filename = fmt.Sprintf("%d.html", routeID)
+	}
+	if c.categoryPageType(r) == routing.PageTypeCover && isIndexFilename(filename) {
+		dir := c.categoryListDir(r)
+		if dir == "" {
+			return "/"
+		}
+		return "/" + strings.Trim(dir, "/") + "/"
 	}
 	return "/" + strings.Trim(c.categoryListDir(r)+"/"+filename, "/")
 }
 
 func (c *content) categoryListPagePath(r Row, page int) string {
+	if r["id"] == "" {
+		return ""
+	}
 	routeID := int64(r.n("route_id"))
 	if routeID == 0 {
 		routeID = int64(r.n("id"))
 	}
-	filename, err := routing.RenderListPageFilename(c.categoryListPattern(r), routeID, page)
+	filename, err := c.renderCategoryFilename(r, routeID, page)
 	if err != nil {
 		filename = fmt.Sprintf("%d-%d.html", routeID, page)
 	}
 	return strings.Trim(c.categoryListDir(r)+"/"+filename, "/")
+}
+
+func (c *content) renderCategoryFilename(r Row, routeID int64, page int) (string, error) {
+	pattern := c.categoryListPattern(r)
+	if c.categoryPageType(r) == routing.PageTypeCover {
+		return routing.RenderCoverFilename(pattern, routeID)
+	}
+	return routing.RenderListPageFilename(pattern, routeID, page)
+}
+
+func isIndexFilename(value string) bool {
+	lower := strings.ToLower(value)
+	return lower == "index.html" || lower == "index.htm"
 }
 
 func (c *content) rootCategory() Row {
@@ -465,6 +520,9 @@ func (c *content) rootCategory() Row {
 
 func (c *content) rootCategoryURL() string {
 	if category := c.rootCategory(); category["id"] != "" {
+		if c.categoryPageType(category) == routing.PageTypeCover {
+			return c.categoryListURL(category, 1)
+		}
 		return "/" + c.categoryListDir(category) + "/"
 	}
 	return "/" + routing.DefaultCategoryPath + "/"
@@ -592,11 +650,6 @@ func (c *content) cats(root int, plain bool) string {
 	}
 	for _, r := range c.tables["gocms_category"] {
 		if r.n("parent_id") != root {
-			continue
-		}
-		// The legacy categories tag is used by the historical product menu. Keep
-		// unrelated root collections out of that menu based on their route.
-		if root == 0 && c.categoryCollectionKey(r) != c.categoryCollectionKey(c.rootCategory()) {
 			continue
 		}
 		emit(r)
@@ -799,6 +852,15 @@ func (c *content) categoryListTemplate(category Row) string {
 	return templateconfig.DefaultListTemplate
 }
 
+func (c *content) categoryCoverTemplate(category Row) string {
+	if templatePath := strings.TrimSpace(category["cover_template"]); templatePath != "" {
+		return templatePath
+	}
+	// Older records have no cover template. Falling back keeps those records
+	// renderable until an administrator assigns one.
+	return c.categoryListTemplate(category)
+}
+
 func (c *content) categoryDetailTemplate(category Row) string {
 	if templatePath := strings.TrimSpace(category["detail_template"]); templatePath != "" {
 		return templatePath
@@ -826,6 +888,41 @@ func (c *content) contentView(r Row) Row {
 		"root_category_url": c.rootCategoryURL(),
 		"categories":        c.cats(0, false),
 		"category_children": c.cats(category.n("id"), false),
+	}
+}
+
+func (c *content) categoryView(category Row, items []Row, page, pageSize int) Row {
+	parent := c.cat(category.n("parent_id"))
+	root := c.listRoot(category)
+	rootName := root["name"]
+	if rootName == "" {
+		rootName = category["name"]
+	}
+	return Row{
+		"title":             esc(category["name"]),
+		"category_name":     esc(category["name"]),
+		"category_id":       esc(category["id"]),
+		"category_url":      c.categoryListURL(category, 1),
+		"parent_name":       esc(parent["name"]),
+		"parent_url":        c.categoryListURL(parent, 1),
+		"page_type":         c.categoryPageType(category),
+		"cover_template":    esc(category["cover_template"]),
+		"list_page":         strconv.Itoa(page),
+		"list_page_size":    strconv.Itoa(pageSize),
+		"list_root_id":      strconv.Itoa(root.n("id")),
+		"list_root_name":    esc(rootName),
+		"list_root_url":     c.categoryListURL(root, 1),
+		"root_category_url": c.rootCategoryURL(),
+		"category_children": c.cats(category.n("id"), false),
+		"categories":        c.cats(0, false),
+		"keywords":          esc(category["keywords"]),
+		"description":       esc(category["description"]),
+		// List and cover templates receive structured content through the
+		// template functions. Keep legacy markup fields empty.
+		"body":              "",
+		"content_list":      "",
+		"content_count":     strconv.Itoa(len(items)),
+		"content_page_size": strconv.Itoa(pageSize),
 	}
 }
 
@@ -894,12 +991,6 @@ func (c *content) tag(k string, r Row, depth int) (string, error) {
 			if v.n("root") == 32 {
 				b.WriteString("<li>" + link("/about/About-"+v["id"]+".html", v["coname"]) + "</li>")
 			}
-		}
-		return b.String(), nil
-	case k == "hope_contact()":
-		var b strings.Builder
-		for _, v := range c.tables["benming_ch_contact"] {
-			b.WriteString("<p>" + esc(v["offname"]) + " " + esc(v["address"]) + " " + esc(v["phone"]) + "</p>")
 		}
 		return b.String(), nil
 	}
@@ -981,39 +1072,17 @@ func (c *content) build() error {
 	for _, category := range c.tables["gocms_category"] {
 		items := c.contentsForCategory(category, visible)
 		pageSize := c.categoryPageSize(category)
-		pages := max(1, (len(items)+pageSize-1)/pageSize)
-		parent := c.cat(category.n("parent_id"))
-		root := c.listRoot(category)
-		rootName := root["name"]
-		if rootName == "" {
-			rootName = category["name"]
-		}
-		for page := 1; page <= pages; page++ {
-			view := Row{
-				"title":             esc(category["name"]),
-				"category_name":     esc(category["name"]),
-				"category_id":       esc(category["id"]),
-				"category_url":      c.categoryListURL(category, 1),
-				"parent_name":       esc(parent["name"]),
-				"parent_url":        c.categoryListURL(parent, 1),
-				"list_page":         strconv.Itoa(page),
-				"list_page_size":    strconv.Itoa(pageSize),
-				"list_root_id":      strconv.Itoa(root.n("id")),
-				"list_root_name":    esc(rootName),
-				"list_root_url":     "/" + strings.Trim(c.categoryListDir(root), "/") + "/",
-				"root_category_url": c.rootCategoryURL(),
-				"category_children": c.cats(category.n("id"), false),
-				"categories":        c.cats(0, false),
-				"keywords":          esc(category["keywords"]),
-				"description":       esc(category["description"]),
-				// List templates receive structured content through listItems and
-				// listPagination. Keep these keys empty for older custom templates
-				// so they fail soft while migrating to the new contract.
-				"body":              "",
-				"content_list":      "",
-				"content_count":     strconv.Itoa(len(items)),
-				"content_page_size": strconv.Itoa(pageSize),
+		if c.categoryPageType(category) == routing.PageTypeCover {
+			view := c.categoryView(category, items, 1, pageSize)
+			pagePath := c.categoryListPagePath(category, 1)
+			if e := c.pageTemplate(pagePath, c.categoryCoverTemplate(category), view); e != nil {
+				return e
 			}
+			continue
+		}
+		pages := max(1, (len(items)+pageSize-1)/pageSize)
+		for page := 1; page <= pages; page++ {
+			view := c.categoryView(category, items, page, pageSize)
 			pagePath := c.categoryListPagePath(category, page)
 			if e := c.pageTemplate(pagePath, c.categoryListTemplate(category), view); e != nil {
 				return e
@@ -1042,9 +1111,6 @@ func (c *content) build() error {
 		if _, ok := c.pages["about/index.html"]; !ok {
 			c.pages["about/index.html"] = c.pages[p]
 		}
-	}
-	if e := c.page("contact.html", templateconfig.RoleContact, Row{}); e != nil {
-		return e
 	}
 	if e := c.page("msg.html", templateconfig.RoleMessage, Row{}); e != nil {
 		return e

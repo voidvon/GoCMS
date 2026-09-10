@@ -6,6 +6,7 @@ import (
 	"flag"
 	"gocms/internal/db"
 	"gocms/internal/generator"
+	"gocms/internal/theme"
 	"log"
 	"os"
 	"path/filepath"
@@ -17,12 +18,8 @@ func main() {
 	templates := flag.String("templates", "templates", "template directory")
 	data := flag.String("data", "../data", "publication state directory")
 	assets := flag.String("assets", "../assets", "public resource directory")
-	theme := flag.String("theme", "", "active theme resource directory")
+	themeOverride := flag.String("theme", "", "theme resource directory override")
 	flag.Parse()
-	themeRoot := *theme
-	if themeRoot == "" {
-		themeRoot = filepath.Join(*assets, "theme", "blue")
-	}
 	d, e := db.Open(*database)
 	if e != nil {
 		log.Fatal(e)
@@ -40,7 +37,11 @@ func main() {
 	if e = db.EnsureTemplateAssignments(context.Background(), d); e != nil {
 		log.Fatal(e)
 	}
-	r, e := (generator.Publisher{DB: d, Web: *web, Templates: *templates, Data: *data, Assets: *assets, Theme: themeRoot}).Generate(context.Background())
+	themeDefinition, e := theme.Resolve(filepath.Join(*assets, "theme"), *data, *themeOverride, *templates)
+	if e != nil {
+		log.Fatal(e)
+	}
+	r, e := (generator.Publisher{DB: d, Web: *web, Templates: themeDefinition.TemplatesRoot, Data: *data, Assets: *assets, Theme: themeDefinition.AssetsRoot}).Generate(context.Background())
 	_ = json.NewEncoder(os.Stdout).Encode(r)
 	if e != nil {
 		log.Fatal(e)

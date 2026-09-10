@@ -14,16 +14,46 @@ const (
 	// records keep their configured paths so indexed URLs remain unchanged.
 	DefaultCategoryPath  = "category"
 	DefaultListPattern   = "{id}.html"
+	DefaultCoverPattern  = "{id}.html"
 	DefaultDetailPath    = "content"
 	DefaultDetailPattern = "{id}.html"
+
+	PageTypeList  = "list"
+	PageTypeCover = "cover"
 )
+
+func NormalizePageType(value string) (string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return PageTypeList, nil
+	}
+	switch value {
+	case PageTypeList, PageTypeCover:
+		return value, nil
+	default:
+		return "", fmt.Errorf("栏目类型无效")
+	}
+}
 
 // NormalizeDirectory validates a route directory stored in the database. It
 // remains relative to the published site root and can contain nested folders.
 func NormalizeDirectory(value string) (string, error) {
+	return normalizeDirectory(value, false)
+}
+
+// NormalizeOptionalDirectory accepts the site root as a valid category route.
+// It is used by cover pages such as a fixed /contact.html endpoint.
+func NormalizeOptionalDirectory(value string) (string, error) {
+	return normalizeDirectory(value, true)
+}
+
+func normalizeDirectory(value string, allowEmpty bool) (string, error) {
 	value = strings.TrimSpace(strings.ReplaceAll(value, `\`, "/"))
 	value = strings.Trim(value, "/")
 	if value == "" {
+		if allowEmpty {
+			return "", nil
+		}
 		return "", fmt.Errorf("目录不能为空")
 	}
 	clean := path.Clean(value)
@@ -45,6 +75,16 @@ func NormalizeDirectory(value string) (string, error) {
 }
 
 func NormalizeFilePattern(value string, allowPage bool) (string, error) {
+	return normalizeFilePattern(value, true, allowPage)
+}
+
+// NormalizeCoverFilePattern allows a cover route to use a fixed filename or
+// an optional {id} placeholder. Cover pages never use pagination filenames.
+func NormalizeCoverFilePattern(value string) (string, error) {
+	return normalizeFilePattern(value, false, false)
+}
+
+func normalizeFilePattern(value string, requireID, allowPage bool) (string, error) {
 	value = strings.TrimSpace(strings.ReplaceAll(value, `\`, "/"))
 	if value == "" {
 		return "", fmt.Errorf("文件名规则不能为空")
@@ -52,7 +92,7 @@ func NormalizeFilePattern(value string, allowPage bool) (string, error) {
 	if strings.Contains(value, "/") || strings.Contains(value, "\\") || strings.ContainsAny(value, "?#%") {
 		return "", fmt.Errorf("文件名规则不能包含目录或 URL 特殊字符")
 	}
-	if !strings.Contains(value, "{id}") {
+	if requireID && !strings.Contains(value, "{id}") {
 		return "", fmt.Errorf("文件名规则必须包含 {id}")
 	}
 	if strings.Contains(value, "{page}") && !allowPage {
@@ -134,4 +174,12 @@ func RenderListPageFilename(pattern string, categoryID int64, page int) (string,
 		return filename + "-" + strconv.Itoa(page), nil
 	}
 	return filename[:dot] + "-" + strconv.Itoa(page) + filename[dot:], nil
+}
+
+func RenderCoverFilename(pattern string, categoryID int64) (string, error) {
+	pattern, err := NormalizeCoverFilePattern(pattern)
+	if err != nil {
+		return "", err
+	}
+	return strings.ReplaceAll(pattern, "{id}", strconv.FormatInt(categoryID, 10)), nil
 }

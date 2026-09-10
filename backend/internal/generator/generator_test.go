@@ -162,6 +162,60 @@ func TestContentURLUsesConfiguredDetailPath(t *testing.T) {
 	}
 }
 
+func TestCoverCategoryUsesConfiguredTemplateAndRoute(t *testing.T) {
+	c := &content{
+		tables: map[string][]Row{
+			"gocms_category": {
+				{"id": "500", "name": "关于我们", "parent_id": "0", "order_id": "0", "route_id": "500", "page_type": "cover", "list_path": "about", "list_file_pattern": "index.html", "cover_template": "cover.html", "list_template": "category_list.html", "detail_path": "content", "detail_file_pattern": "{id}.html", "detail_template": "content_detail.html"},
+				{"id": "501", "name": "联系我们", "parent_id": "500", "order_id": "0", "route_id": "501", "page_type": "cover", "list_path": "", "list_file_pattern": "contact.html", "cover_template": "cover.html", "list_template": "category_list.html", "detail_path": "content", "detail_file_pattern": "{id}.html", "detail_template": "content_detail.html"},
+			},
+			"gocms_content":       {},
+			"benming_ch_config":   {},
+			"benming_ch_cuslabel": {},
+			"benming_ch_metatype": {},
+			"benming_ch_cocat":    {},
+			"benming_ch_job":      {},
+		},
+		assignments: map[string]string{
+			templateconfig.RoleHomeIndex: "index.html",
+			templateconfig.RoleMessage:   "msg.html",
+			templateconfig.RoleJobList:   "job.html",
+		},
+		templates: map[string]*template.Template{},
+		pages:     map[string][]byte{},
+	}
+	for name, source := range map[string]string{
+		"index.html": "home",
+		"msg.html":   "message",
+		"job.html":   "jobs",
+		"cover.html": `{{tag "category_name" .}}:{{range listChildren .}}{{.Name}}={{.URL}}{{end}}`,
+	} {
+		parsed, err := template.New(name).Funcs(c.templateFuncs()).Parse(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.templates[name] = parsed
+	}
+	if err := c.build(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.pages["contact.html"]; !ok {
+		t.Fatal("cover category did not generate fixed root page")
+	}
+	if _, ok := c.pages["contact-1.html"]; ok {
+		t.Fatal("cover category generated a pagination page")
+	}
+	if got := string(c.pages["contact.html"]); got != "联系我们:" {
+		t.Fatalf("cover template data = %q", got)
+	}
+	if got := string(c.pages["about/index.html"]); got != "关于我们:联系我们=/contact.html" {
+		t.Fatalf("cover child data = %q", got)
+	}
+	if got := c.categoryListURL(c.cat(500), 1); got != "/about/" {
+		t.Fatalf("cover index URL = %q", got)
+	}
+}
+
 func TestHomepageTagsUseUnifiedContent(t *testing.T) {
 	c := &content{tables: map[string][]Row{
 		"gocms_category": {
@@ -250,7 +304,7 @@ func TestListTemplatesReceiveStructuredData(t *testing.T) {
 	}
 }
 
-func TestRootCategoriesOnlyIncludeProducts(t *testing.T) {
+func TestRootCategoriesIncludeAllCollections(t *testing.T) {
 	c := &content{tables: map[string][]Row{
 		"gocms_category": {
 			{"id": "1", "name": "新闻", "order_id": "1", "detail_path": "news/detail", "list_path": "news"},
@@ -265,7 +319,7 @@ func TestRootCategoriesOnlyIncludeProducts(t *testing.T) {
 	productEnd := strings.Index(got, ">闸阀</a>")
 	news := strings.Index(got, ">新闻</a>")
 	service := strings.Index(got, ">技术文章</a>")
-	if productStart < 0 || productEnd < 0 || productStart > productEnd || news >= 0 || service >= 0 {
+	if productStart < 0 || productEnd < 0 || productStart > productEnd || news < 0 || service < 0 {
 		t.Fatalf("root category order = %q", got)
 	}
 }

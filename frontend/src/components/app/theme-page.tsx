@@ -1,25 +1,21 @@
-import { useEffect, useMemo, useState } from "react"
-import { Check, Code2, Copy, FileCode, FileText, LoaderCircle, Palette, RefreshCw, Search } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Check, Copy, Download, FileCode, FileText, LoaderCircle, Search, Upload } from "lucide-react"
 
 import {
-  getThemeFile,
-  getThemeFiles,
-  updateThemeAssignment,
-  type ThemeFile,
-  type ThemeFileContent,
-  type ThemeFileKind,
-  type ThemeFiles,
-  type ThemeTemplateGroup,
+	activateTheme,
+	getThemeFile,
+	getThemeFiles,
+	importTheme,
+	themeExportURL,
+	updateThemeAssignment,
+	type ThemeFile,
+	type ThemeFileContent,
+	type ThemeFileKind,
+	type ThemeFiles,
+	type ThemeTemplateGroup,
 } from "@/lib/api"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -201,24 +197,58 @@ export function ThemePage() {
   const [search, setSearch] = useState("")
   const [fileState, setFileState] = useState<{ key: string; content: ThemeFileContent | null; error: string }>({ key: "", content: null, error: "" })
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState("")
-  const [copiedKey, setCopiedKey] = useState("")
-  const [savingAssignmentKey, setSavingAssignmentKey] = useState("")
+	const [error, setError] = useState("")
+	const [notice, setNotice] = useState("")
+	const [copiedKey, setCopiedKey] = useState("")
+	const [savingAssignmentKey, setSavingAssignmentKey] = useState("")
+	const [themeActionID, setThemeActionID] = useState("")
+	const [importing, setImporting] = useState(false)
+	const themeInputRef = useRef<HTMLInputElement>(null)
 
-  async function loadFiles() {
+	async function loadFiles() {
     setLoading(true)
     setError("")
-    try {
-      const response = await getThemeFiles()
-      setFiles(response)
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "主题文件加载失败")
-    } finally {
-      setLoading(false)
-    }
-  }
+	try {
+		const response = await getThemeFiles()
+		setFiles(response)
+	} catch (loadError) {
+		setError(loadError instanceof Error ? loadError.message : "主题文件加载失败")
+	} finally {
+		setLoading(false)
+	}
+	}
 
-  useEffect(() => {
+	async function handleActivate(id: string) {
+		setThemeActionID(id)
+		setError("")
+		setNotice("")
+		try {
+			const result = await activateTheme(id)
+			setNotice(result.publish_started ? `已切换到${result.theme.name}，网站正在重新生成。` : `已切换到${result.theme.name}。`)
+			await loadFiles()
+		} catch (actionError) {
+			setError(actionError instanceof Error ? actionError.message : "主题切换失败")
+		} finally {
+			setThemeActionID("")
+		}
+	}
+
+	async function handleImport(file: File) {
+		setImporting(true)
+		setError("")
+		setNotice("")
+		try {
+			const result = await importTheme(file)
+			setNotice(`已导入主题${result.theme.name}。`)
+			await loadFiles()
+		} catch (importError) {
+			setError(importError instanceof Error ? importError.message : "主题导入失败")
+		} finally {
+			setImporting(false)
+		}
+	}
+
+	useEffect(() => {
     let active = true
     getThemeFiles()
       .then((response) => {
@@ -310,37 +340,66 @@ export function ThemePage() {
     window.setTimeout(() => setCopiedKey(""), 1600)
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div>
-          <p className="text-sm text-muted-foreground">管理当前发布主题的样式文件和 HTML 页面模板。</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {files && <Badge variant="outline" className="gap-1.5"><Palette />{files.name}</Badge>}
-          <Button variant="outline" size="sm" onClick={() => void loadFiles()} disabled={loading}>
-            {loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-            重新读取
-          </Button>
-        </div>
-      </div>
+	return (
+		<div className="space-y-4">
+			{notice && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">{notice}</div>}
 
       {error && <InlineAlert>{error}</InlineAlert>}
 
-      <Card>
-        <CardHeader className="border-b">
-          <CardTitle className="flex items-center gap-2"><Code2 className="size-4 text-muted-foreground" />主题文件</CardTitle>
-          <CardDescription>主题资源由 Git 管理，业务图片和生成后的网页不在此处。</CardDescription>
-        </CardHeader>
+		<Card>
         <CardContent className="pt-4">
           {loading && !files ? (
             <div className="flex min-h-64 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
           ) : files ? (
             <Tabs value={kind} onValueChange={selectKind} className="gap-4">
-              <TabsList>
-                <TabsTrigger value="css">CSS 样式 ({files.css_files.length})</TabsTrigger>
-                <TabsTrigger value="template">HTML 模板 ({files.template_files.length})</TabsTrigger>
-              </TabsList>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <TabsList>
+                  <TabsTrigger value="css">CSS 样式 ({files.css_files.length})</TabsTrigger>
+                  <TabsTrigger value="template">HTML 模板 ({files.template_files.length})</TabsTrigger>
+                </TabsList>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={files.active_theme}
+                    onValueChange={(value) => {
+                      if (value) void handleActivate(value)
+                    }}
+                    disabled={themeActionID !== "" || importing || files.themes.length === 0}
+                  >
+                    <SelectTrigger aria-label="当前主题" className="w-full sm:w-44">
+                      <SelectValue placeholder="选择主题" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {files.themes.map((theme) => (
+                        <SelectItem key={theme.id} value={theme.id}>{theme.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={<a href={files.active_theme ? themeExportURL(files.active_theme) : undefined} download={files.active_theme ? `theme-${files.active_theme}.zip` : undefined} />}
+                    disabled={!files.active_theme || themeActionID !== "" || importing}
+                  >
+                    <Download />
+                    导出
+                  </Button>
+                  <input
+                    ref={themeInputRef}
+                    type="file"
+                    accept=".zip,application/zip,application/x-zip-compressed"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      if (file) void handleImport(file)
+                      event.currentTarget.value = ""
+                    }}
+                  />
+                  <Button variant="outline" size="sm" onClick={() => themeInputRef.current?.click()} disabled={importing || themeActionID !== ""}>
+                    {importing ? <LoaderCircle className="animate-spin" /> : <Upload />}
+                    导入
+                  </Button>
+                </div>
+              </div>
               <TabsContent value="css" className="mt-0">
                 <FileBrowser kind="css" files={files.css_files} selectedPath={activePath} search={search} content={content} loading={fileLoading} error={fileError} copied={copied} onSearchChange={setSearch} onSelect={setSelectedPath} onCopy={() => void copyContent()} />
               </TabsContent>

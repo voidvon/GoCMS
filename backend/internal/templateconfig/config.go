@@ -23,7 +23,6 @@ const (
 	RoleHomeIndex   = "home_index"
 	RoleAboutDetail = "about_detail"
 	RoleMessage     = "message"
-	RoleContact     = "contact"
 	RoleJobList     = "job_list"
 	RoleJobDetail   = "job_detail"
 )
@@ -50,7 +49,6 @@ var defaults = []Assignment{
 	{Key: RoleAboutDetail, Label: "公司介绍详情模板", Dimension: DimensionDetail, DimensionName: "详情模板", TemplatePath: "corporation.html", SortOrder: 30},
 	{Key: RoleJobDetail, Label: "招聘详情模板", Dimension: DimensionDetail, DimensionName: "详情模板", TemplatePath: "job_detail.html", SortOrder: 40},
 	{Key: RoleMessage, Label: "留言模板", Dimension: DimensionMessage, DimensionName: "留言模板", TemplatePath: "msg.html", SortOrder: 50},
-	{Key: RoleContact, Label: "联系模板", Dimension: DimensionOther, DimensionName: "其他模板", TemplatePath: "contact.html", SortOrder: 60},
 }
 
 type queryer interface {

@@ -151,3 +151,29 @@ func TestContentDetailURLUsesCategoryRoute(t *testing.T) {
 		t.Fatalf("content detail URL = %q", url)
 	}
 }
+
+func TestCoverCategoryManagement(t *testing.T) {
+	server, database, token := newCategoryTestServer(t)
+	payload := `{"name":"联系我们","parent_id":0,"order_id":0,"page_type":"cover","list_path":"","list_file_pattern":"contact.html","list_template":"category_list.html","cover_template":"contact.html","detail_path":"content","detail_file_pattern":"{id}.html","detail_template":"content_detail.html"}`
+	response := categoryRequest(t, server, token, http.MethodPost, "/api/admin/categories", payload)
+	if response.Code != http.StatusOK {
+		t.Fatalf("create cover category returned %d: %s", response.Code, response.Body.String())
+	}
+
+	var category CategoryItem
+	if err := database.QueryRow(`
+		SELECT "id", "parent_id", "page_type", "list_path", "list_file_pattern", "cover_template"
+		FROM "gocms_category" WHERE "name" = ?`, "联系我们").
+		Scan(&category.ID, &category.ParentID, &category.PageType, &category.ListPath, &category.ListFilePattern, &category.CoverTemplate); err != nil {
+		t.Fatal(err)
+	}
+	if category.ID == 0 || category.ParentID != 0 || category.PageType != "cover" || category.ListPath != "" || category.ListFilePattern != "contact.html" || category.CoverTemplate != "contact.html" {
+		t.Fatalf("unexpected cover category: %+v", category)
+	}
+
+	invalid := `{"name":"联系我们","parent_id":0,"page_type":"list","list_path":"","list_file_pattern":"contact.html","list_template":"category_list.html","cover_template":"contact.html","detail_path":"content","detail_file_pattern":"{id}.html","detail_template":"content_detail.html"}`
+	response = categoryRequest(t, server, token, http.MethodPut, "/api/admin/categories/"+strconv.FormatInt(category.ID, 10), invalid)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid list route for cover category returned %d: %s", response.Code, response.Body.String())
+	}
+}

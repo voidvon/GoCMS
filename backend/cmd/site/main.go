@@ -12,6 +12,7 @@ import (
 	"gocms/internal/db"
 	"gocms/internal/embedded"
 	"gocms/internal/site"
+	"gocms/internal/theme"
 )
 
 func main() {
@@ -30,7 +31,7 @@ func main() {
 	data := flag.String("data", defaults.data, "publication state directory")
 	frontend := flag.String("frontend", defaults.frontend, "built admin SPA; empty uses the embedded SPA")
 	assets := flag.String("assets", defaults.assets, "public resource directory")
-	theme := flag.String("theme", "", "active theme resource directory")
+	themeOverride := flag.String("theme", "", "theme resource directory override")
 	flag.Parse()
 
 	if *templates == "" {
@@ -47,11 +48,6 @@ func main() {
 		}
 		embeddedFrontend = prepared
 	}
-	themeRoot := *theme
-	if themeRoot == "" {
-		themeRoot = filepath.Join(*assets, "theme", "blue")
-	}
-
 	database, err := db.Open(*databasePath)
 	if err != nil {
 		log.Fatal(err)
@@ -72,12 +68,17 @@ func main() {
 	if err := database.Ping(); err != nil {
 		log.Fatalf("cannot use SQLite database %s: %v; run cmd/migrate first", *databasePath, err)
 	}
+	themeDefinition, err := theme.Resolve(filepath.Join(*assets, "theme"), *data, *themeOverride, *templates)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	server, err := site.New(database, filepath.Clean(*root))
 	if err != nil {
 		log.Fatal(err)
 	}
-	server.ConfigurePublishing(*templates, *data, *frontend, *assets, themeRoot)
+	server.ConfigurePublishing(themeDefinition.TemplatesRoot, *data, *frontend, *assets, themeDefinition.AssetsRoot)
+	server.ConfigureThemeCatalog(filepath.Join(*assets, "theme"), *data, themeDefinition, *templates)
 	if embeddedFrontend != nil {
 		server.ConfigureEmbeddedFrontend(embeddedFrontend)
 	}

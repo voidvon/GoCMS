@@ -34,9 +34,11 @@ const emptyCategory: CategoryInput = {
   parent_id: 0,
   order_id: 0,
   list_page_size: 14,
+  page_type: "list",
   list_path: "category",
   list_file_pattern: "{id}.html",
   list_template: "category_list.html",
+  cover_template: "category_list.html",
   detail_path: "content",
   detail_file_pattern: "{id}.html",
   detail_template: "content_detail.html",
@@ -73,9 +75,11 @@ function categoryInput(category: CategoryItem): CategoryInput {
     parent_id: category.parent_id,
     order_id: category.order_id,
     list_page_size: category.list_page_size,
+    page_type: category.page_type,
     list_path: category.list_path,
     list_file_pattern: category.list_file_pattern,
     list_template: category.list_template,
+    cover_template: category.cover_template,
     detail_path: category.detail_path,
     detail_file_pattern: category.detail_file_pattern,
     detail_template: category.detail_template,
@@ -131,7 +135,7 @@ function CategoryRow({
         <FolderTree className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium">{node.name}</span>
-          <span className="block truncate text-xs text-muted-foreground">{node.content_count} 条直接内容 · 排序 {node.order_id} · #{node.route_id}</span>
+          <span className="block truncate text-xs text-muted-foreground">{node.content_count} 条直接内容 · {node.page_type === "cover" ? "封面式" : "列表式"} · 排序 {node.order_id} · #{node.route_id}</span>
         </span>
       </button>
       <div className="flex shrink-0 items-center gap-1">
@@ -208,6 +212,17 @@ export function CategoriesPage() {
 
   function update<K extends keyof CategoryInput>(key: K, value: CategoryInput[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function updatePageType(value: string) {
+    const pageType = value === "cover" ? "cover" : "list"
+    setForm((current) => ({
+      ...current,
+      page_type: pageType,
+      list_path: pageType === "list" && !current.list_path ? "category" : current.list_path,
+      list_file_pattern: pageType === "list" && !current.list_file_pattern.includes("{id}") ? "{id}.html" : current.list_file_pattern,
+      cover_template: current.cover_template || current.list_template || templateFiles[0]?.path || "category_list.html",
+    }))
   }
 
   function templateOptions(current: string, dimension: string) {
@@ -394,27 +409,37 @@ export function CategoriesPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <div className="space-y-2">
+                  <Label>栏目类型</Label>
+                  <Select value={form.page_type} onValueChange={(value) => updatePageType(value ?? "list")}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="选择栏目类型" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="list">列表式</SelectItem>
+                      <SelectItem value="cover">封面式</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="category-order">排序值</Label>
                   <Input id="category-order" type="number" min="0" value={form.order_id} onChange={(event) => update("order_id", Number(event.target.value))} />
                   <p className="text-xs text-muted-foreground">同一父分类下数值越小越靠前。</p>
                 </div>
-                <div className="space-y-2 sm:col-span-2">
+                {form.page_type === "list" ? <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="category-page-size">每页内容数</Label>
                   <Input id="category-page-size" type="number" min="1" max="200" value={form.list_page_size} onChange={(event) => update("list_page_size", Number(event.target.value))} />
                   <p className="text-xs text-muted-foreground">栏目列表页按这个数量生成分页。</p>
+                </div> : null}
+                <div className="space-y-2">
+                  <Label htmlFor="category-list-path">栏目 URL 目录</Label>
+                  <Input id="category-list-path" value={form.list_path} onChange={(event) => update("list_path", event.target.value)} placeholder={form.page_type === "cover" ? "可留空，表示站点根目录" : "category"} required={form.page_type === "list"} />
+                  <p className="text-xs text-muted-foreground">封面式栏目允许留空，页面会直接生成在站点根目录。</p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="category-list-path">栏目列表目录</Label>
-                  <Input id="category-list-path" value={form.list_path} onChange={(event) => update("list_path", event.target.value)} placeholder="category" required />
-                  <p className="text-xs text-muted-foreground">目录只影响生成路径，保存为线上已有目录即可。</p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="category-list-file-pattern">列表文件名规则</Label>
+                  <Label htmlFor="category-list-file-pattern">栏目文件名规则</Label>
                   <Input id="category-list-file-pattern" value={form.list_file_pattern} onChange={(event) => update("list_file_pattern", event.target.value)} placeholder="{id}.html" required />
-                  <p className="text-xs text-muted-foreground">使用 {"{id}"}，分页会自动追加页码。</p>
+                  <p className="text-xs text-muted-foreground">列表式必须包含 {"{id}"}；封面式也可以填写固定文件名。</p>
                 </div>
-                <div className="space-y-2">
+                {form.page_type === "list" ? <div className="space-y-2">
                   <Label>列表模板</Label>
                   <Select value={form.list_template} onValueChange={(value) => update("list_template", value ?? "")} disabled={templatesLoading}>
                     <SelectTrigger className="w-full"><SelectValue placeholder="选择列表模板" /></SelectTrigger>
@@ -423,7 +448,16 @@ export function CategoriesPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">此栏目生成列表页时使用的 HTML 模板。</p>
-                </div>
+                </div> : <div className="space-y-2">
+                  <Label>封面模板</Label>
+                  <Select value={form.cover_template} onValueChange={(value) => update("cover_template", value ?? "")} disabled={templatesLoading}>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="选择封面模板" /></SelectTrigger>
+                    <SelectContent>
+                      {templateOptions(form.cover_template, "cover").map((file) => <SelectItem key={file.path} value={file.path}>{file.path}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">此栏目生成封面页时使用的 HTML 模板。</p>
+                </div>}
                 <div className="space-y-2">
                   <Label htmlFor="category-detail-path">内容详情目录</Label>
                   <Input id="category-detail-path" value={form.detail_path} onChange={(event) => update("detail_path", event.target.value)} placeholder="content" required />

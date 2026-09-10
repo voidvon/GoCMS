@@ -24,8 +24,10 @@ type publication struct {
 func (s *Server) ConfigurePublishing(templates, data, frontend, assets, theme string) {
 	s.frontendRoot = frontend
 	s.assetsRoot = assets
+	s.themeMu.Lock()
 	s.themeRoot = theme
 	s.templateRoot = templates
+	s.themeMu.Unlock()
 	p := &publication{publisher: generator.Publisher{DB: s.database, Web: s.siteRoot, Templates: templates, Data: data, Assets: assets, Theme: theme}, report: generator.Report{State: "idle"}}
 	if b, e := os.ReadFile(filepath.Join(data, "publish.json")); e == nil {
 		_ = json.Unmarshal(b, &p.report)
@@ -36,6 +38,10 @@ func (s *Server) startPublish(queue bool) (generator.Report, bool) {
 	p := s.publication
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return s.startPublishLocked(p, queue)
+}
+
+func (s *Server) startPublishLocked(p *publication, queue bool) (generator.Report, bool) {
 	if p.report.State == "running" {
 		if queue {
 			p.pending = true

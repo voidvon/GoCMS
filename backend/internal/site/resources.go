@@ -41,11 +41,12 @@ func canonicalImageURL(value, publicHost string) string {
 }
 
 func (s *Server) resourceRoots(requestPath string) ([]string, string, bool) {
+	themeRoot, _ := s.themePaths()
 	themeRoots := func(directory string) []string {
-		if s.themeRoot == "" {
+		if themeRoot == "" {
 			return nil
 		}
-		return []string{filepath.Join(s.themeRoot, directory)}
+		return []string{filepath.Join(themeRoot, directory)}
 	}
 	for _, route := range []struct {
 		prefix string
@@ -58,8 +59,8 @@ func (s *Server) resourceRoots(requestPath string) ([]string, string, bool) {
 				if s.assetsRoot != "" {
 					roots = append(roots, filepath.Join(s.assetsRoot, "images"))
 				}
-				if s.themeRoot != "" {
-					roots = append(roots, filepath.Join(s.themeRoot, "images"))
+				if themeRoot != "" {
+					roots = append(roots, filepath.Join(themeRoot, "images"))
 				}
 				return roots
 			},

@@ -66,11 +66,13 @@ export type CategoryItem = {
   parent_id: number
   order_id: number
   list_page_size: number
+  page_type: "list" | "cover"
   route_id: number
   content_count: number
   list_path: string
   list_file_pattern: string
   list_template: string
+  cover_template: string
   detail_path: string
   detail_file_pattern: string
   detail_template: string
@@ -88,9 +90,20 @@ export type ThemeFile = {
 
 export type ThemeFiles = {
   name: string
+  active_theme: string
+  themes: ThemeInfo[]
   css_files: ThemeFile[]
   template_files: ThemeFile[]
   template_groups: ThemeTemplateGroup[]
+}
+
+export type ThemeInfo = {
+  id: string
+  name: string
+  version?: string
+  description?: string
+  author?: string
+  active: boolean
 }
 
 export type ThemeTemplateGroup = {
@@ -135,13 +148,14 @@ function endpoint(path: string) {
 }
 
 async function request<T>(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers)
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json")
+  }
   const response = await fetch(endpoint(path), {
     ...init,
     credentials: "include",
-    headers: {
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
-      ...init.headers,
-    },
+    headers,
   })
   const contentType = response.headers.get("content-type") ?? ""
   const payload = contentType.includes("application/json")
@@ -277,6 +291,26 @@ export function generateSitemap(format: SitemapFormat) {
 
 export function getThemeFiles() {
   return request<ThemeFiles>("/api/admin/theme")
+}
+
+export function activateTheme(id: string) {
+  return request<{ ok: boolean; theme: ThemeInfo; publish_started: boolean; publication?: Publication }>("/api/admin/theme/activate", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  })
+}
+
+export function importTheme(file: File) {
+  const body = new FormData()
+  body.append("theme", file)
+  return request<{ ok: boolean; theme: ThemeInfo }>("/api/admin/theme/import", {
+    method: "POST",
+    body,
+  })
+}
+
+export function themeExportURL(id?: string) {
+  return endpoint(`/api/admin/theme/export${query({ id })}`)
 }
 
 export function getThemeFile(kind: ThemeFileKind, filePath: string) {

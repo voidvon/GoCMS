@@ -36,4 +36,16 @@ func TestRouteValidation(t *testing.T) {
 	if got, err := NormalizeDirectory("/catalog/"); err != nil || got != "catalog" {
 		t.Fatalf("normalized directory = %q, err=%v", got, err)
 	}
+	if got, err := NormalizeOptionalDirectory("/"); err != nil || got != "" {
+		t.Fatalf("optional root directory = %q, err=%v", got, err)
+	}
+	if got, err := NormalizeCoverFilePattern("contact.html"); err != nil || got != "contact.html" {
+		t.Fatalf("cover filename = %q, err=%v", got, err)
+	}
+	if got, err := RenderCoverFilename("contact.html", 25); err != nil || got != "contact.html" {
+		t.Fatalf("cover route filename = %q, err=%v", got, err)
+	}
+	if got, err := RenderCoverFilename("{id}.html", 25); err != nil || got != "25.html" {
+		t.Fatalf("cover id filename = %q, err=%v", got, err)
+	}
 }

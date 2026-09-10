@@ -76,6 +76,9 @@ func ImportAccess(ctx context.Context, accessPath, sqlitePath string, force bool
 	if err := MigrateLegacyCategories(ctx, database); err != nil {
 		return ImportReport{}, fmt.Errorf("migrate legacy categories: %w", err)
 	}
+	if err := MigrateLegacyContactCategory(ctx, database); err != nil {
+		return ImportReport{}, fmt.Errorf("migrate legacy contact category: %w", err)
+	}
 	if err := MigrateLegacyContent(ctx, database); err != nil {
 		return ImportReport{}, fmt.Errorf("migrate legacy content: %w", err)
 	}

@@ -2,6 +2,7 @@
 /data/*.db-*
 /data/publish.json
 /data/publish.lock
+/data/theme.json
 /bin/
 /.web-stage-*/
 /web.previous/

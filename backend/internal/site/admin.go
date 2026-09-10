@@ -55,11 +55,13 @@ type CategoryItem struct {
 	ParentID          int64  `json:"parent_id"`
 	OrderID           int64  `json:"order_id"`
 	ListPageSize      int64  `json:"list_page_size"`
+	PageType          string `json:"page_type"`
 	RouteID           int64  `json:"route_id"`
 	ContentCount      int64  `json:"content_count"`
 	ListPath          string `json:"list_path"`
 	ListFilePattern   string `json:"list_file_pattern"`
 	ListTemplate      string `json:"list_template"`
+	CoverTemplate     string `json:"cover_template"`
 	DetailPath        string `json:"detail_path"`
 	DetailFilePattern string `json:"detail_file_pattern"`
 	DetailTemplate    string `json:"detail_template"`
@@ -70,9 +72,11 @@ type categoryPayload struct {
 	ParentID          int64  `json:"parent_id"`
 	OrderID           int64  `json:"order_id"`
 	ListPageSize      int64  `json:"list_page_size"`
+	PageType          string `json:"page_type"`
 	ListPath          string `json:"list_path"`
 	ListFilePattern   string `json:"list_file_pattern"`
 	ListTemplate      string `json:"list_template"`
+	CoverTemplate     string `json:"cover_template"`
 	DetailPath        string `json:"detail_path"`
 	DetailFilePattern string `json:"detail_file_pattern"`
 	DetailTemplate    string `json:"detail_template"`
@@ -262,9 +266,9 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		return
 	}
 	rows, err := s.database.QueryContext(request.Context(), `
-		SELECT c."id", c."name", c."parent_id", c."order_id", c."list_page_size", c."route_id",
+		SELECT c."id", c."name", c."parent_id", c."order_id", c."list_page_size", c."page_type", c."route_id",
 		       (SELECT COUNT(*) FROM "gocms_content" content WHERE content."category_id" = c."id"),
-		       c."list_path", c."list_file_pattern", c."list_template", c."detail_path",
+		       c."list_path", c."list_file_pattern", c."list_template", c."cover_template", c."detail_path",
 		       c."detail_file_pattern", c."detail_template"
 		FROM "gocms_category" c
 		ORDER BY c."parent_id", c."order_id", c."id"`)
@@ -276,9 +280,9 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 	items := make([]CategoryItem, 0)
 	for rows.Next() {
 		var item CategoryItem
-		if err := rows.Scan(&item.ID, &item.Name, &item.ParentID, &item.OrderID, &item.ListPageSize, &item.RouteID,
+		if err := rows.Scan(&item.ID, &item.Name, &item.ParentID, &item.OrderID, &item.ListPageSize, &item.PageType, &item.RouteID,
 			&item.ContentCount, &item.ListPath, &item.ListFilePattern, &item.ListTemplate,
-			&item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate); err != nil {
+			&item.CoverTemplate, &item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -343,9 +347,9 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		}
 		result, err := s.database.ExecContext(request.Context(), `
 			INSERT INTO "gocms_category"
-			("name", "parent_id", "order_id", "list_page_size", "route_id", "list_path", "list_file_pattern", "list_template", "detail_path", "detail_file_pattern", "detail_template")
-			VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
-			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate)
+			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template")
+			VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -361,9 +365,9 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		}
 	} else {
 		result, err := s.database.ExecContext(request.Context(), `
-			UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "list_page_size" = ?,
-			"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ? WHERE "id" = ?`,
-			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, id)
+			UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "list_page_size" = ?, "page_type" = ?,
+			"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ? WHERE "id" = ?`,
+			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, id)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -385,9 +389,9 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	var current categoryPayload
 	if id > 0 {
 		err := s.database.QueryRowContext(ctx, `
-			SELECT "list_page_size", "list_path", "list_file_pattern", "list_template", "detail_path", "detail_file_pattern", "detail_template"
+			SELECT "list_page_size", "page_type", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template"
 			FROM "gocms_category" WHERE "id" = ?`, id).
-			Scan(&current.ListPageSize, &current.ListPath, &current.ListFilePattern, &current.ListTemplate, &current.DetailPath, &current.DetailFilePattern, &current.DetailTemplate)
+			Scan(&current.ListPageSize, &current.PageType, &current.ListPath, &current.ListFilePattern, &current.ListTemplate, &current.CoverTemplate, &current.DetailPath, &current.DetailFilePattern, &current.DetailTemplate)
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("分类不存在")
 		}
@@ -400,11 +404,17 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 		if payload.ListPageSize <= 0 {
 			payload.ListPageSize = current.ListPageSize
 		}
+		if payload.PageType == "" {
+			payload.PageType = current.PageType
+		}
 		if payload.ListFilePattern == "" {
 			payload.ListFilePattern = current.ListFilePattern
 		}
 		if payload.ListTemplate == "" {
 			payload.ListTemplate = current.ListTemplate
+		}
+		if payload.CoverTemplate == "" {
+			payload.CoverTemplate = current.CoverTemplate
 		}
 		if payload.DetailPath == "" {
 			payload.DetailPath = current.DetailPath
@@ -422,7 +432,11 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	if payload.ListPageSize > 200 {
 		payload.ListPageSize = 200
 	}
-	if payload.ListPath == "" {
+	var err error
+	if payload.PageType, err = routing.NormalizePageType(payload.PageType); err != nil {
+		return err
+	}
+	if payload.ListPath == "" && payload.PageType != routing.PageTypeCover {
 		payload.ListPath = routing.DefaultListPath(payload.ParentID)
 		if payload.ParentID > 0 {
 			var parentPath string
@@ -436,6 +450,9 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	}
 	if payload.ListTemplate == "" {
 		payload.ListTemplate = templateconfig.DefaultListTemplate
+	}
+	if payload.CoverTemplate == "" && payload.PageType == routing.PageTypeCover {
+		payload.CoverTemplate = payload.ListTemplate
 	}
 	if payload.DetailPath == "" {
 		if payload.ParentID > 0 {
@@ -454,11 +471,21 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	if payload.DetailTemplate == "" {
 		payload.DetailTemplate = templateconfig.DefaultDetailTemplate
 	}
-	var err error
-	if payload.ListPath, err = routing.NormalizeDirectory(payload.ListPath); err != nil {
+	if payload.PageType == routing.PageTypeCover {
+		if payload.ListPath, err = routing.NormalizeOptionalDirectory(payload.ListPath); err != nil {
+			return fmt.Errorf("栏目目录无效: %w", err)
+		}
+	} else if payload.ListPath, err = routing.NormalizeDirectory(payload.ListPath); err != nil {
 		return fmt.Errorf("列表目录无效: %w", err)
 	}
-	if payload.ListFilePattern, err = routing.NormalizeFilePattern(payload.ListFilePattern, false); err != nil {
+	if payload.PageType == routing.PageTypeCover {
+		if payload.ListFilePattern == "" {
+			payload.ListFilePattern = routing.DefaultCoverPattern
+		}
+		if payload.ListFilePattern, err = routing.NormalizeCoverFilePattern(payload.ListFilePattern); err != nil {
+			return fmt.Errorf("封面文件名规则无效: %w", err)
+		}
+	} else if payload.ListFilePattern, err = routing.NormalizeFilePattern(payload.ListFilePattern, false); err != nil {
 		return fmt.Errorf("列表文件名规则无效: %w", err)
 	}
 	if payload.DetailPath, err = routing.NormalizeDirectory(payload.DetailPath); err != nil {
@@ -473,9 +500,24 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	if payload.DetailTemplate, err = templateconfig.NormalizePath(payload.DetailTemplate); err != nil {
 		return fmt.Errorf("详情模板无效: %w", err)
 	}
-	if s.templateRoot != "" {
-		for label, templatePath := range map[string]string{"列表": payload.ListTemplate, "详情": payload.DetailTemplate} {
-			if _, _, err := readThemeFile(s.templateRoot, ".html", templatePath); err != nil {
+	if payload.CoverTemplate != "" {
+		if payload.CoverTemplate, err = templateconfig.NormalizePath(payload.CoverTemplate); err != nil {
+			return fmt.Errorf("封面模板无效: %w", err)
+		}
+	}
+	if payload.PageType == routing.PageTypeCover && payload.CoverTemplate == "" {
+		return fmt.Errorf("封面模板不能为空")
+	}
+	_, templateRoot := s.themePaths()
+	if templateRoot != "" {
+		templates := map[string]string{"详情": payload.DetailTemplate}
+		if payload.PageType == routing.PageTypeCover {
+			templates["封面"] = payload.CoverTemplate
+		} else {
+			templates["列表"] = payload.ListTemplate
+		}
+		for label, templatePath := range templates {
+			if _, _, err := readThemeFile(templateRoot, ".html", templatePath); err != nil {
 				return fmt.Errorf("%s模板不可用: %w", label, err)
 			}
 		}

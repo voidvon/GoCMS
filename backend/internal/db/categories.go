@@ -16,13 +16,16 @@ const unifiedCategoryTable = "gocms_category"
 const (
 	legacyCatalogSource       = "benming_ch_ProdCat"
 	legacyArticleSource       = "benming_ch_NewsCat"
+	legacyContactSource       = "legacy_contact_page"
 	legacyCatalogListTemplate = "product_category_list.html"
 	legacyArticleListTemplate = "service_category_list.html"
 	// These values are preserved only for a fresh import of the historical
 	// site. They are never used as defaults by the runtime CMS.
-	legacyRootListPath  = "valve"
-	legacyChildListPath = "Products"
-	legacyDetailPath    = "Product"
+	legacyRootListPath    = "valve"
+	legacyChildListPath   = "Products"
+	legacyDetailPath      = "Product"
+	legacyContactParentID = 1
+	legacyContactPageID   = 2
 )
 
 type legacyCategory struct {
@@ -82,10 +85,12 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 			"parent_id" INTEGER NOT NULL DEFAULT 0,
 			"order_id" INTEGER NOT NULL DEFAULT 0,
 			"list_page_size" INTEGER NOT NULL DEFAULT 14,
+			"page_type" TEXT NOT NULL DEFAULT 'list',
 			"route_id" INTEGER NOT NULL,
 			"list_path" TEXT NOT NULL,
 			"list_file_pattern" TEXT NOT NULL,
 			"list_template" TEXT NOT NULL,
+			"cover_template" TEXT NOT NULL DEFAULT '',
 			"detail_path" TEXT NOT NULL,
 			"detail_file_pattern" TEXT NOT NULL,
 			"detail_template" TEXT NOT NULL,
@@ -104,6 +109,9 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	if err := ensureCategoryPageSize(ctx, database); err != nil {
+		return err
+	}
+	if err := ensureCategoryPageType(ctx, database); err != nil {
 		return err
 	}
 
@@ -128,6 +136,59 @@ func MigrateLegacyCategories(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("commit unified category migration: %w", err)
 	}
 	return nil
+}
+
+// MigrateLegacyContactCategory converts the old standalone contact page into
+// a cover category. It is an import adapter and is intentionally not called by
+// the runtime server or publisher.
+func MigrateLegacyContactCategory(ctx context.Context, database *sql.DB) error {
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin legacy contact migration: %w", err)
+	}
+	defer tx.Rollback()
+
+	parentID, exists, err := existingSourceCategoryID(ctx, tx, legacyContactSource, legacyContactParentID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		parentID, err = insertLegacyContactCategory(ctx, tx, legacyContactParentID, 0, 0, "关于我们", "about", "index.html", "category_list.html")
+		if err != nil {
+			return err
+		}
+	}
+	if _, exists, err := existingSourceCategoryID(ctx, tx, legacyContactSource, legacyContactPageID); err != nil {
+		return err
+	} else if !exists {
+		if _, err := insertLegacyContactCategory(ctx, tx, legacyContactPageID, parentID, 0, "联系我们", "", "contact.html", "contact.html"); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit legacy contact migration: %w", err)
+	}
+	return nil
+}
+
+func insertLegacyContactCategory(ctx context.Context, tx *sql.Tx, sourceID, parentID, orderID int64, name, listPath, listPattern, coverTemplate string) (int64, error) {
+	var id int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX("id"), 0) + 1 FROM "gocms_category"`).Scan(&id); err != nil {
+		return 0, fmt.Errorf("allocate legacy contact category id: %w", err)
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO "gocms_category"
+		("id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id",
+		 "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path",
+		 "detail_file_pattern", "detail_template", "source_table", "source_id")
+		VALUES (?, ?, ?, ?, 14, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, name, parentID, orderID, routing.PageTypeCover, id, listPath, listPattern,
+		"category_list.html", coverTemplate, routing.DefaultDetailPath, routing.DefaultDetailPattern,
+		templateconfig.DefaultDetailTemplate, legacyContactSource, sourceID)
+	if err != nil {
+		return 0, fmt.Errorf("insert legacy contact category %s: %w", name, err)
+	}
+	return id, nil
 }
 
 func migrateLegacyCategories(ctx context.Context, tx *sql.Tx, source legacyCategorySource) error {
@@ -207,6 +268,31 @@ func ensureCategoryPageSize(ctx context.Context, database *sql.DB) error {
 		if _, err := database.ExecContext(ctx, `ALTER TABLE "gocms_category" ADD COLUMN "list_page_size" INTEGER NOT NULL DEFAULT 14`); err != nil {
 			return fmt.Errorf("add category page size column: %w", err)
 		}
+	}
+	return nil
+}
+
+func ensureCategoryPageType(ctx context.Context, database *sql.DB) error {
+	columns := map[string]string{
+		"page_type":      "TEXT NOT NULL DEFAULT 'list'",
+		"cover_template": "TEXT NOT NULL DEFAULT ''",
+	}
+	for name, definition := range columns {
+		var exists int
+		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('gocms_category') WHERE name = ?`, name).Scan(&exists); err != nil {
+			return fmt.Errorf("inspect category %s column: %w", name, err)
+		}
+		if exists == 0 {
+			if _, err := database.ExecContext(ctx, `ALTER TABLE "gocms_category" ADD COLUMN "`+name+`" `+definition); err != nil {
+				return fmt.Errorf("add category %s column: %w", name, err)
+			}
+		}
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE "gocms_category"
+		SET "page_type" = 'list'
+		WHERE TRIM(COALESCE("page_type", '')) = ''`); err != nil {
+		return fmt.Errorf("initialize category page types: %w", err)
 	}
 	return nil
 }

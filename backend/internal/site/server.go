@@ -18,21 +18,27 @@ import (
 	"gocms/internal/auth"
 	"gocms/internal/sitehost"
 	"gocms/internal/templateconfig"
+	"gocms/internal/theme"
 )
 
 type Server struct {
-	database     *sql.DB
-	siteRoot     string
-	fileServe    http.Handler
-	frontendRoot string
-	frontendFS   fs.FS
-	assetsRoot   string
-	themeRoot    string
-	templateRoot string
-	publicHost   string
-	publication  *publication
-	updateMu     sync.Mutex
-	updateActive bool
+	database               *sql.DB
+	siteRoot               string
+	fileServe              http.Handler
+	frontendRoot           string
+	frontendFS             fs.FS
+	assetsRoot             string
+	themeRoot              string
+	templateRoot           string
+	themeBase              string
+	themeData              string
+	themeFallbackTemplates string
+	activeTheme            theme.Definition
+	themeMu                sync.RWMutex
+	publicHost             string
+	publication            *publication
+	updateMu               sync.Mutex
+	updateActive           bool
 }
 
 var htmlTagPattern = regexp.MustCompile(`(?s)<[^>]*>`)
@@ -100,6 +106,12 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminMessages(response, request)
 	case "/api/admin/categories":
 		s.adminCategories(response, request)
+	case "/api/admin/theme/activate":
+		s.adminThemeActivate(response, request)
+	case "/api/admin/theme/import":
+		s.adminThemeImport(response, request)
+	case "/api/admin/theme/export":
+		s.adminThemeExport(response, request)
 	case "/api/admin/theme":
 		s.adminTheme(response, request)
 	case "/api/search":

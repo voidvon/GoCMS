@@ -5,6 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#ffffff" />
     <title>GoCMS 后台 · 内容管理</title>
+    <script>
+      (() => {
+        let storedTheme = null
+        try {
+          storedTheme = window.localStorage.getItem("gocms-admin-theme")
+        } catch {
+          // The app falls back to the system preference when storage is unavailable.
+        }
+        const dark = storedTheme === "dark" ||
+          (storedTheme !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches)
+        document.documentElement.classList.toggle("dark", dark)
+        document.documentElement.style.colorScheme = dark ? "dark" : "light"
+        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#171717" : "#ffffff")
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

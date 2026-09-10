@@ -71,3 +71,46 @@ func TestMigrateLegacyCategories(t *testing.T) {
 		t.Fatalf("migration was not idempotent: %d categories", count)
 	}
 }
+
+func TestMigrateLegacyContactCategory(t *testing.T) {
+	database, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLegacyContactCategory(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+
+	var parentID, childParentID int64
+	var parentType, childType, childPath, childPattern, childTemplate string
+	if err := database.QueryRow(`
+		SELECT "id", "page_type" FROM "gocms_category"
+		WHERE "source_table" = ? AND "source_id" = ?`, legacyContactSource, legacyContactParentID).
+		Scan(&parentID, &parentType); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`
+		SELECT "parent_id", "page_type", "list_path", "list_file_pattern", "cover_template"
+		FROM "gocms_category" WHERE "source_table" = ? AND "source_id" = ?`, legacyContactSource, legacyContactPageID).
+		Scan(&childParentID, &childType, &childPath, &childPattern, &childTemplate); err != nil {
+		t.Fatal(err)
+	}
+	if parentID == 0 || childParentID != parentID || parentType != "cover" || childType != "cover" || childPath != "" || childPattern != "contact.html" || childTemplate != "contact.html" {
+		t.Fatalf("unexpected legacy contact category: parent=%d/%s child=%d/%s/%s/%s/%s", parentID, parentType, childParentID, childType, childPath, childPattern, childTemplate)
+	}
+	if err := MigrateLegacyContactCategory(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM "gocms_category" WHERE "source_table" = ?`, legacyContactSource).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("legacy contact migration was not idempotent: %d categories", count)
+	}
+}

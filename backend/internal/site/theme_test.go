@@ -1,7 +1,11 @@
 package site
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -11,6 +15,8 @@ import (
 	"testing"
 
 	"gocms/internal/db"
+	"gocms/internal/templateconfig"
+	themepkg "gocms/internal/theme"
 )
 
 func TestAdminThemeFiles(t *testing.T) {
@@ -124,4 +130,164 @@ func TestAdminThemeFiles(t *testing.T) {
 	if response := request("/api/admin/theme?" + traversalPath); response.Code != http.StatusBadRequest {
 		t.Fatalf("path traversal status = %d, body = %s", response.Code, response.Body.String())
 	}
+}
+
+func TestAdminThemeCatalogActions(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	server, err := New(database, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	themesRoot := filepath.Join(t.TempDir(), "themes")
+	first := writeTestTheme(t, themesRoot, "first", "First")
+	second := writeTestTheme(t, themesRoot, "second", "Second")
+	dataRoot := filepath.Join(t.TempDir(), "data")
+	server.ConfigureThemeCatalog(themesRoot, dataRoot, first, "")
+	token, err := server.createSession("gocms")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := func(method, rawURL string, body io.Reader, contentType string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		req := httptest.NewRequest(method, rawURL, body)
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		req.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
+		server.Handler().ServeHTTP(response, req)
+		return response
+	}
+
+	listResponse := request(http.MethodGet, "/api/admin/theme", nil, "")
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("theme list status = %d: %s", listResponse.Code, listResponse.Body.String())
+	}
+	var listed ThemeFilesResponse
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if listed.ActiveTheme != "first" || len(listed.Themes) != 2 || !listed.Themes[0].Active {
+		t.Fatalf("unexpected theme catalog: %+v", listed)
+	}
+
+	activation := bytes.NewBufferString(`{"id":"second"}`)
+	activationResponse := request(http.MethodPost, "/api/admin/theme/activate", activation, "application/json")
+	if activationResponse.Code != http.StatusOK {
+		t.Fatalf("theme activation status = %d: %s", activationResponse.Code, activationResponse.Body.String())
+	}
+	if active, err := themepkg.LoadActive(dataRoot); err != nil || active != "second" {
+		t.Fatalf("active theme = %q, err = %v", active, err)
+	}
+	assetsRoot, templatesRoot := server.themePaths()
+	if assetsRoot != second.AssetsRoot || templatesRoot != second.TemplatesRoot {
+		t.Fatalf("active roots = %q, %q", assetsRoot, templatesRoot)
+	}
+
+	exportResponse := request(http.MethodGet, "/api/admin/theme/export?id=second", nil, "")
+	if exportResponse.Code != http.StatusOK || exportResponse.Header().Get("Content-Type") != "application/zip" {
+		t.Fatalf("theme export = %d %q", exportResponse.Code, exportResponse.Header().Get("Content-Type"))
+	}
+
+	thirdRoot := filepath.Join(t.TempDir(), "third")
+	third := writeTestTheme(t, filepath.Dir(thirdRoot), filepath.Base(thirdRoot), "Third")
+	var archive bytes.Buffer
+	if err := themepkg.WriteArchive(&archive, third); err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	multipartWriter := multipart.NewWriter(&body)
+	part, err := multipartWriter.CreateFormFile("theme", "third.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(archive.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := multipartWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	importResponse := request(http.MethodPost, "/api/admin/theme/import", &body, multipartWriter.FormDataContentType())
+	if importResponse.Code != http.StatusCreated {
+		t.Fatalf("theme import status = %d: %s", importResponse.Code, importResponse.Body.String())
+	}
+	listResponse = request(http.MethodGet, "/api/admin/theme", nil, "")
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Themes) != 3 || listed.ActiveTheme != "second" {
+		t.Fatalf("catalog after import = %+v", listed)
+	}
+}
+
+func TestThemeValidationRequiresCoverTemplate(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := db.CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_category"
+		("id", "name", "parent_id", "route_id", "list_path", "list_file_pattern", "list_template", "page_type", "cover_template", "detail_path", "detail_file_pattern", "detail_template")
+		VALUES (1, '封面栏目', 0, 1, 'landing', 'page.html', 'category_list.html', 'cover', 'cover.html', 'content', '{id}.html', 'content_detail.html')`); err != nil {
+		t.Fatal(err)
+	}
+
+	themesRoot := filepath.Join(t.TempDir(), "themes")
+	definition := writeTestTheme(t, themesRoot, "cover-check", "Cover Check")
+	for _, assignment := range templateconfig.Defaults() {
+		path := filepath.Join(definition.TemplatesRoot, assignment.TemplatePath)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("<main>"+assignment.Key+"</main>"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(definition.TemplatesRoot, "content_detail.html"), []byte("<main>detail</main>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(database, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.validateThemeTemplates(definition); err == nil || !strings.Contains(err.Error(), "cover.html") {
+		t.Fatalf("missing cover template was accepted: %v", err)
+	}
+	coverPath := filepath.Join(definition.TemplatesRoot, "cover.html")
+	if err := os.WriteFile(coverPath, []byte("<main>cover</main>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.validateThemeTemplates(definition); err != nil {
+		t.Fatalf("cover template validation failed: %v", err)
+	}
+}
+
+func writeTestTheme(t *testing.T, themesRoot, id, name string) themepkg.Definition {
+	t.Helper()
+	root := filepath.Join(themesRoot, id)
+	for path, content := range map[string]string{
+		filepath.Join(root, "theme.json"):                `{"id":"` + id + `","name":"` + name + `"}`,
+		filepath.Join(root, "templates", "index.html"):   "<main>" + id + "</main>",
+		filepath.Join(root, "assets", "css", "site.css"): "body { color: red; }",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	definition, err := themepkg.Find(themesRoot, id, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return definition
 }
