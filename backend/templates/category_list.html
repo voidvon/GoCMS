@@ -14,8 +14,23 @@
   <section class="page-right">
     <nav class="site-nav"><a href="/">首页</a> - {{tag "category_name" .}}</nav>
     <h1>{{tag "category_name" .}}</h1>
-    <div class="category-children">{{tag "category_children" .}}</div>
-    <div class="page-content content-list">{{tag "body" .}}</div>
+    <div class="category-children">
+      {{range listChildren .}}<a href="{{.URL}}">{{.Name}}</a>{{end}}
+    </div>
+    <div class="page-content content-list">
+      <ul>
+        {{range listItems .}}
+        <li><a href="{{.URL}}">{{.Title}}</a><time>{{.Date}}</time><p>{{.Excerpt}}</p></li>
+        {{end}}
+      </ul>
+      {{with listPagination .}}
+      <nav aria-label="分页">
+        {{if .HasPrevious}}<a href="{{.PreviousURL}}">上一页</a>{{end}}
+        {{range .PageLinks}}{{if .Current}}<strong>{{.Number}}</strong>{{else}}<a href="{{.URL}}">{{.Number}}</a>{{end}}{{end}}
+        {{if .HasNext}}<a href="{{.NextURL}}">下一页</a>{{end}}
+      </nav>
+      {{end}}
+    </div>
   </section>
   <aside class="page-left">
     <section class="left-content">

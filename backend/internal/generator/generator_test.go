@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"text/template"
 
 	"gocms/internal/db"
+	"gocms/internal/templateconfig"
 )
 
 func TestPublishLifecycle(t *testing.T) {
@@ -83,7 +85,7 @@ func TestPublishLifecycle(t *testing.T) {
 	if e = os.WriteFile(filepath.Join(templates, "custom-content-detail.html"), []byte(`<html><body>custom detail {{tag "title" .}}</body></html>`), 0644); e != nil {
 		t.Fatal(e)
 	}
-	if e = os.WriteFile(filepath.Join(templates, "custom-content-list.html"), []byte(`<html><body>custom list {{tag "title" .}}{{tag "body" .}}</body></html>`), 0644); e != nil {
+	if e = os.WriteFile(filepath.Join(templates, "custom-content-list.html"), []byte(`<html><body>custom list {{tag "title" .}}{{range listItems .}}<a href="{{.URL}}">{{.Title}}</a>{{end}}</body></html>`), 0644); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = d.Exec(`UPDATE gocms_category SET list_template='custom-content-list.html', detail_template='custom-content-detail.html' WHERE id=10`); e != nil {
@@ -195,13 +197,66 @@ func TestHomepageTagsUseUnifiedContent(t *testing.T) {
 	}
 }
 
+func TestListTemplatesReceiveStructuredData(t *testing.T) {
+	c := &content{tables: map[string][]Row{
+		"gocms_category": {
+			{"id": "575", "name": "新闻", "source_table": "benming_ch_NewsCat", "source_id": "4", "list_path": "news", "list_template": "service_category_list.html", "detail_path": "news/detail", "detail_file_pattern": "{id}.html"},
+			{"id": "576", "name": "行业新闻", "parent_id": "575", "source_table": "benming_ch_NewsCat", "source_id": "6", "list_path": "news", "list_template": "service_category_list.html", "detail_path": "news/detail", "detail_file_pattern": "{id}.html"},
+			{"id": "577", "name": "技术文章", "source_table": "benming_ch_NewsCat", "source_id": "12", "list_path": "service", "list_template": "service_category_list.html", "detail_path": "service/detail", "detail_file_pattern": "{id}.html"},
+			{"id": "578", "name": "阀门技术", "parent_id": "577", "source_table": "benming_ch_NewsCat", "source_id": "13", "list_path": "service", "list_template": "service_category_list.html", "detail_path": "service/detail", "detail_file_pattern": "{id}.html"},
+			{"id": "579", "name": "阀门知识", "parent_id": "577", "source_table": "benming_ch_NewsCat", "source_id": "14", "list_path": "service", "list_template": "service_category_list.html", "detail_path": "service/detail", "detail_file_pattern": "{id}.html"},
+		},
+		"gocms_content": {
+			{"id": "1", "category_id": "578", "route_key": "1", "title": "测试文章 &", "summary": "测试摘要", "published_at": "2026-09-10 12:00:00", "cover_image": "/images/article.jpg", "visible": "1", "sort_order": "1"},
+		},
+	}}
+
+	for _, category := range []Row{c.cat(575), c.cat(578), c.cat(579)} {
+		if got := c.categoryListTemplate(category); got != "service_category_list.html" {
+			t.Fatalf("article category %q uses list template %q", category["id"], got)
+		}
+	}
+	configuredDefault := Row{
+		"source_table":  "benming_ch_NewsCat",
+		"list_path":     "service",
+		"detail_path":   "service/detail",
+		"list_template": templateconfig.DefaultListTemplate,
+	}
+	if got := c.categoryListTemplate(configuredDefault); got != templateconfig.DefaultListTemplate {
+		t.Fatalf("configured list template was overridden: %q", got)
+	}
+	custom := c.cat(578)
+	custom["list_template"] = "custom-list.html"
+	if got := c.categoryListTemplate(custom); got != "custom-list.html" {
+		t.Fatalf("custom list template was ignored: %q", got)
+	}
+
+	view := Row{"category_id": "578", "list_page": "1", "list_page_size": "6"}
+	items := c.listItems(view)
+	if len(items) != 1 || items[0].Title != "测试文章 &amp;" || items[0].Date != "2026-09-10" || items[0].URL != "/service/detail/1.html" {
+		t.Fatalf("structured list item = %+v", items)
+	}
+
+	listTemplate, err := template.New("list").Funcs(c.templateFuncs()).Parse(`{{range listItems .}}<li>{{.Title}}|{{.Date}}|{{.Excerpt}}</li>{{end}}{{with listPagination .}}<span>{{.Total}}/{{.Pages}}</span>{{end}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rendered strings.Builder
+	if err := listTemplate.Execute(&rendered, view); err != nil {
+		t.Fatal(err)
+	}
+	if got := rendered.String(); got != `<li>测试文章 &amp;|2026-09-10|测试摘要</li><span>1/1</span>` {
+		t.Fatalf("theme list rendering = %q", got)
+	}
+}
+
 func TestRootCategoriesOnlyIncludeProducts(t *testing.T) {
 	c := &content{tables: map[string][]Row{
 		"gocms_category": {
-			{"id": "1", "name": "新闻", "detail_path": "news/detail", "list_path": "news"},
-			{"id": "2", "name": "进口阀门", "source_table": "benming_ch_ProdCat", "source_id": "25", "list_path": "valve"},
-			{"id": "3", "name": "技术文章", "source_table": "benming_ch_NewsCat", "source_id": "12", "detail_path": "service/detail", "list_path": "service"},
-			{"id": "4", "name": "闸阀", "source_table": "benming_ch_ProdCat", "source_id": "26", "list_path": "gate"},
+			{"id": "1", "name": "新闻", "order_id": "1", "detail_path": "news/detail", "list_path": "news"},
+			{"id": "2", "name": "进口阀门", "order_id": "0", "source_table": "benming_ch_ProdCat", "source_id": "25", "list_path": "valve"},
+			{"id": "3", "name": "技术文章", "order_id": "2", "source_table": "benming_ch_NewsCat", "source_id": "12", "detail_path": "service/detail", "list_path": "service"},
+			{"id": "4", "name": "闸阀", "order_id": "1", "source_table": "benming_ch_ProdCat", "source_id": "26", "list_path": "valve"},
 		},
 	}}
 

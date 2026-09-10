@@ -14,8 +14,10 @@ import (
 const unifiedCategoryTable = "gocms_category"
 
 const (
-	legacyCatalogSource = "benming_ch_ProdCat"
-	legacyArticleSource = "benming_ch_NewsCat"
+	legacyCatalogSource       = "benming_ch_ProdCat"
+	legacyArticleSource       = "benming_ch_NewsCat"
+	legacyCatalogListTemplate = "product_category_list.html"
+	legacyArticleListTemplate = "service_category_list.html"
 	// These values are preserved only for a fresh import of the historical
 	// site. They are never used as defaults by the runtime CMS.
 	legacyRootListPath  = "valve"
@@ -55,7 +57,7 @@ var legacyCategorySources = []legacyCategorySource{
 			COALESCE("DetailPath", ''), COALESCE("DetailFilePattern", ''), COALESCE("DetailTemplate", '')
 			FROM "benming_ch_ProdCat" ORDER BY "id"`,
 		contentCategoryUpdate: `UPDATE "benming_ch_prod" SET "CatId" = ? WHERE "CatId" = ?`,
-		pageSize:              14,
+		pageSize:              12,
 		withRouteFields:       true,
 		applyRouteDefaults:    applyLegacyCatalogRoutes,
 	},
@@ -244,8 +246,8 @@ func applyLegacyCatalogRoutes(_ []legacyCategory, _ int64, item *legacyCategory)
 	if strings.TrimSpace(item.ListFilePattern) == "" {
 		item.ListFilePattern = routing.DefaultListPattern
 	}
-	if strings.TrimSpace(item.ListTemplate) == "" {
-		item.ListTemplate = templateconfig.DefaultListTemplate
+	if strings.TrimSpace(item.ListTemplate) == "" || item.ListTemplate == templateconfig.DefaultListTemplate {
+		item.ListTemplate = legacyCatalogListTemplate
 	}
 	if strings.TrimSpace(item.DetailPath) == "" {
 		item.DetailPath = legacyDetailPath
@@ -281,7 +283,7 @@ func applyLegacyArticleRoutes(rows []legacyCategory, id int64, item *legacyCateg
 		}
 	}
 	item.ListFilePattern = routing.DefaultListPattern
-	item.ListTemplate = templateconfig.DefaultListTemplate
+	item.ListTemplate = legacyArticleListTemplate
 	item.DetailFilePattern = routing.DefaultListPattern
 	item.DetailTemplate = templateconfig.DefaultDetailTemplate
 }

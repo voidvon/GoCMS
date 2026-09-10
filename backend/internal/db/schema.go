@@ -280,7 +280,7 @@ func EnsureLegacyCategoryRouteColumns(ctx context.Context, database *sql.DB) err
 	if _, err := database.ExecContext(ctx, `
 		UPDATE "benming_ch_ProdCat"
 		SET "ListTemplate" = ?
-		WHERE TRIM(COALESCE("ListTemplate", '')) = ''`, templateconfig.DefaultListTemplate); err != nil {
+		WHERE TRIM(COALESCE("ListTemplate", '')) = ''`, legacyCatalogListTemplate); err != nil {
 		return fmt.Errorf("initialize legacy category list templates: %w", err)
 	}
 	if _, err := database.ExecContext(ctx, `

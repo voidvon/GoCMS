@@ -35,12 +35,12 @@ func TestMigrateLegacyCategories(t *testing.T) {
 	if err := MigrateLegacyCategories(ctx, database); err != nil {
 		t.Fatal(err)
 	}
-	var newsName, newsPath string
-	if err := database.QueryRow(`SELECT "name", "list_path" FROM "gocms_category" WHERE "route_id" = 6`).Scan(&newsName, &newsPath); err != nil {
+	var newsName, newsPath, newsTemplate string
+	if err := database.QueryRow(`SELECT "name", "list_path", "list_template" FROM "gocms_category" WHERE "route_id" = 6`).Scan(&newsName, &newsPath, &newsTemplate); err != nil {
 		t.Fatal(err)
 	}
-	if newsName != "行业新闻" || newsPath != "news" {
-		t.Fatalf("unexpected migrated categories: %q %q", newsName, newsPath)
+	if newsName != "行业新闻" || newsPath != "news" || newsTemplate != legacyArticleListTemplate {
+		t.Fatalf("unexpected migrated categories: %q %q %q", newsName, newsPath, newsTemplate)
 	}
 	var productCategory, newsCategory int64
 	if err := database.QueryRow(`SELECT "CatId" FROM "benming_ch_prod" WHERE "id" = 1`).Scan(&productCategory); err != nil {

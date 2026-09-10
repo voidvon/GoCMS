@@ -10,14 +10,52 @@
 {{tag "bm_indextop" .}}
 <div id="page_main" class="clearfix">
     <div class="page-right">
-      <div class="site-nav"><span>当前位置 : </span>{{tag "legacy_product_breadcrumb" .}}</div>
-      <table width="100%" border="0" cellpadding="0" cellspacing="0"><tr><td>{{tag "legacy_product_children" .}}</td></tr></table>
+      <div class="site-nav"><span>当前位置 : </span><a href="/index.html" class="F_a">公司主页</a> - <a href="{{tag "root_category_url" .}}" class="F_a">产品展示</a> - <b><font color="#ff0000">{{tag "category_name" .}}</font></b></div>
+      <table width="100%" border="0" cellpadding="0" cellspacing="0">
+        <tr><td>
+          <table width="99%" border="0" align="center" cellpadding="0" cellspacing="0">
+            {{range listChildren .}}
+            {{if .RowStart}}<tr width="708">{{end}}
+              <td width="120" height="23"><a href="{{.URL}}">{{.Name}}</a></td>
+            {{if .RowEnd}}</tr>{{end}}
+            {{end}}
+          </table>
+        </td></tr>
+      </table>
       <div class="page-products">
-      <ul class="clearfix">{{tag "legacy_product_list" .}}<table width="90%" border="0" align="center" cellpadding="0" cellspacing="0"><tr><td height="45" align="center">{{tag "legacy_product_pagination" .}}</td></tr></table>
-</ul>
-<div class="page_list">
-  <div class="list_info"></div>
-</div>
+        <ul class="clearfix">
+          <table width="98%" border="0" cellpadding="0" cellspacing="0" align="center">
+            {{range listItems .}}
+            {{if .RowStart}}<tr>{{end}}
+              <td width="50%" valign="top" class="in6" height="100">
+                <table width="100%" height="100" border="0" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td width="39%" rowspan="2"><img src="{{.Image}}" alt="{{.Title}}" width="180" height="138" /></td>
+                    <td width="61%" height="20"><a href="{{.URL}}" class="Font_2E4690_a in4">{{.Title}}</a></td>
+                  </tr>
+                  <tr><td valign="top">{{.Summary}}</td></tr>
+                </table>
+              </td>
+            {{if .RowEnd}}
+              {{if .RowStart}}<td width="50%" valign="top" class="in6" height="100">&nbsp;</td>{{end}}
+            </tr>
+            {{end}}
+            {{end}}
+          </table>
+          {{with listPagination .}}
+          <table width="90%" border="0" align="center" cellpadding="0" cellspacing="0">
+            <tr><td height="45" align="center">
+              共 <strong>{{.Total}}</strong> 条信息
+              <a href="{{.FirstURL}}" class="0a">首页</a>
+              {{if .HasPrevious}}<a href="{{.PreviousURL}}" class="0a">上一页</a>{{else}}<span class="0a">上一页</span>{{end}}
+              {{if .HasNext}}<a href="{{.NextURL}}" class="0a">下一页</a>{{else}}<span class="0a">下一页</span>{{end}}
+              <a href="{{.LastURL}}" class="0a">尾页</a>
+              页次：<strong>{{.Page}}/{{.Pages}}</strong> 页 <strong>{{.PageSize}}</strong>条信息/页
+            </td></tr>
+          </table>
+          {{end}}
+        </ul>
+        <div class="page_list"><div class="list_info"></div></div>
       </div>
     </div>
     <div class="page-left">
@@ -25,24 +63,22 @@
         <h2><span>产品展示</span></h2>
         <div id="LeftMenu" class="ddsmoothmenu-v">
           <ul>
-{{tag "product_categories" .}}
+            {{range catalogCategories .}}<li><a href="{{.URL}}">{{.Name}}</a></li>{{end}}
           </ul>
         </div>
-
       </div>
       <div class="left-search">
         <h2><span>站内搜索</span></h2>
-<form id="form2" name="form2" method="post" action="/Search.asp?action=search">
+        <form id="form2" name="form2" method="post" action="/Search.asp?action=search">
           <p>
-            <input name="ProductsName" type="text" id="ProductsName" value="找找看" size="18"  class="Font_666666_a" onfocus="this.value='';" />
+            <input name="ProductsName" type="text" id="ProductsName" value="找找看" size="18" class="Font_666666_a" onfocus="this.value='';" />
             <input name="searchbutton" type="submit" id="searchbutton" value="" />
           </p>
         </form>
-      </div><div class="index-contact">
-
-</div></div>
+      </div>
+      <div class="index-contact"></div>
+    </div>
 </div>
-    {{tag "bm_botten" .}}
-</div>
+{{tag "bm_botten" .}}
 </body>
 </html>
