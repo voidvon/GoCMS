@@ -28,26 +28,28 @@ func main() {
 	defer database.Close()
 
 	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		log.Fatal(err)
+	}
 	transaction, err := database.BeginTx(ctx, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer transaction.Rollback()
 
-	var id int64
-	if err := transaction.QueryRowContext(ctx, `
-		SELECT "Id" FROM "benming_master" WHERE "UserName" = ?`, strings.TrimSpace(*username)).Scan(&id); err != nil {
-		log.Fatalf("find administrator: %v", err)
-	}
-
 	hash, err := auth.HashPassword(*password)
 	if err != nil {
 		log.Fatalf("hash administrator password: %v", err)
 	}
 	if _, err := transaction.ExecContext(ctx, `
-		UPDATE "benming_master" SET "PassWord" = ?, "LastLogin" = NULL, "LastLoginIp" = NULL
-		WHERE "Id" = ?`, hash, id); err != nil {
-		log.Fatalf("update administrator password: %v", err)
+		INSERT INTO "gocms_admin_user"
+		("username", "password_hash", "flags", "last_login", "last_login_ip")
+		VALUES (?, ?, '', NULL, NULL)
+		ON CONFLICT ("username") DO UPDATE SET
+			"password_hash" = excluded."password_hash",
+			"last_login" = NULL,
+			"last_login_ip" = NULL`, strings.TrimSpace(*username), hash); err != nil {
+		log.Fatalf("save administrator password: %v", err)
 	}
 	if err := transaction.Commit(); err != nil {
 		log.Fatal(err)

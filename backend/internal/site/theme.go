@@ -59,21 +59,20 @@ type ThemeFileContent struct {
 	Content string `json:"content"`
 }
 
-func (s *Server) ConfigureThemeCatalog(themesRoot, dataRoot string, definition themepkg.Definition, fallbackTemplates string) {
+func (s *Server) ConfigureThemeCatalog(themesRoot, dataRoot string, definition themepkg.Definition) {
 	s.themeMu.Lock()
 	s.themeBase = themesRoot
 	s.themeData = dataRoot
-	s.themeFallbackTemplates = fallbackTemplates
 	s.activeTheme = definition
 	s.themeRoot = definition.AssetsRoot
 	s.templateRoot = definition.TemplatesRoot
 	s.themeMu.Unlock()
 }
 
-func (s *Server) themeState() (string, string, string, themepkg.Definition) {
+func (s *Server) themeState() (string, string, themepkg.Definition) {
 	s.themeMu.RLock()
 	defer s.themeMu.RUnlock()
-	return s.themeBase, s.themeData, s.themeFallbackTemplates, s.activeTheme
+	return s.themeBase, s.themeData, s.activeTheme
 }
 
 func (s *Server) themePaths() (string, string) {
@@ -134,7 +133,7 @@ func (s *Server) adminTheme(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	templateGroups := s.themeTemplateGroups(templateFiles)
-	base, _, _, active := s.themeState()
+	base, _, active := s.themeState()
 	themes, err := themepkg.List(base, active.Manifest.ID)
 	if err != nil {
 		http.Error(response, "读取主题列表失败", http.StatusInternalServerError)
@@ -166,12 +165,12 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 		return
 	}
 	id := strings.TrimSpace(payload.ID)
-	base, dataRoot, fallbackTemplates, _ := s.themeState()
+	base, dataRoot, _ := s.themeState()
 	if base == "" {
 		http.Error(response, "主题目录未配置", http.StatusServiceUnavailable)
 		return
 	}
-	definition, err := themepkg.Find(base, id, fallbackTemplates)
+	definition, err := themepkg.Find(base, id)
 	if err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
@@ -284,7 +283,7 @@ func (s *Server) adminThemeImport(response http.ResponseWriter, request *http.Re
 	if !s.requireAdmin(response, request) {
 		return
 	}
-	base, _, _, _ := s.themeState()
+	base, _, _ := s.themeState()
 	if base == "" {
 		http.Error(response, "主题目录未配置", http.StatusServiceUnavailable)
 		return
@@ -319,12 +318,12 @@ func (s *Server) adminThemeExport(response http.ResponseWriter, request *http.Re
 	if !s.requireAdmin(response, request) {
 		return
 	}
-	base, _, fallbackTemplates, active := s.themeState()
+	base, _, active := s.themeState()
 	id := strings.TrimSpace(request.URL.Query().Get("id"))
 	definition := active
 	if id != "" {
 		var err error
-		definition, err = themepkg.Find(base, id, fallbackTemplates)
+		definition, err = themepkg.Find(base, id)
 		if err != nil {
 			http.Error(response, err.Error(), http.StatusNotFound)
 			return
@@ -457,7 +456,7 @@ func templateDimension(filePath string) string {
 		return templateconfig.DimensionMessage
 	case strings.Contains(name, "list") || strings.Contains(name, "sort"):
 		return templateconfig.DimensionList
-	case strings.Contains(name, "detail") || name == "corporation.html":
+	case strings.Contains(name, "detail"):
 		return templateconfig.DimensionDetail
 	default:
 		return templateconfig.DimensionOther

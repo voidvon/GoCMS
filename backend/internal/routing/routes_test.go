@@ -3,11 +3,8 @@ package routing
 import "testing"
 
 func TestCategoryRouteDefaults(t *testing.T) {
-	if got := DefaultListPath(0); got != "category" {
+	if got := DefaultListPath(); got != "category" {
 		t.Fatalf("root list path = %q", got)
-	}
-	if got := DefaultListPath(25); got != "category" {
-		t.Fatalf("child list path = %q", got)
 	}
 	filename, err := RenderDetailFilename(DefaultDetailPattern, 185)
 	if err != nil || filename != "185.html" {
@@ -39,10 +36,10 @@ func TestRouteValidation(t *testing.T) {
 	if got, err := NormalizeOptionalDirectory("/"); err != nil || got != "" {
 		t.Fatalf("optional root directory = %q, err=%v", got, err)
 	}
-	if got, err := NormalizeCoverFilePattern("contact.html"); err != nil || got != "contact.html" {
+	if got, err := NormalizeCoverFilePattern("landing.html"); err != nil || got != "landing.html" {
 		t.Fatalf("cover filename = %q, err=%v", got, err)
 	}
-	if got, err := RenderCoverFilename("contact.html", 25); err != nil || got != "contact.html" {
+	if got, err := RenderCoverFilename("landing.html", 25); err != nil || got != "landing.html" {
 		t.Fatalf("cover route filename = %q, err=%v", got, err)
 	}
 	if got, err := RenderCoverFilename("{id}.html", 25); err != nil || got != "25.html" {

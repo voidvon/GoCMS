@@ -4,288 +4,53 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sort"
-	"strings"
-
-	"gocms/internal/routing"
-	"gocms/internal/templateconfig"
 )
 
 const unifiedCategoryTable = "gocms_category"
 
-const (
-	legacyCatalogSource       = "benming_ch_ProdCat"
-	legacyArticleSource       = "benming_ch_NewsCat"
-	legacyContactSource       = "legacy_contact_page"
-	legacyCatalogListTemplate = "product_category_list.html"
-	legacyArticleListTemplate = "service_category_list.html"
-	// These values are preserved only for a fresh import of the historical
-	// site. They are never used as defaults by the runtime CMS.
-	legacyRootListPath    = "valve"
-	legacyChildListPath   = "Products"
-	legacyDetailPath      = "Product"
-	legacyContactParentID = 1
-	legacyContactPageID   = 2
-)
-
-type legacyCategory struct {
-	ID                int64
-	Name              string
-	ParentID          int64
-	OrderID           int64
-	ListPath          string
-	ListFilePattern   string
-	ListTemplate      string
-	DetailPath        string
-	DetailFilePattern string
-	DetailTemplate    string
-}
-
-type legacyCategorySource struct {
-	sourceTable           string
-	categoryQuery         string
-	contentCategoryUpdate string
-	pageSize              int64
-	withRouteFields       bool
-	applyRouteDefaults    func([]legacyCategory, int64, *legacyCategory)
-}
-
-// These adapters are used only while importing the old Access database. The
-// runtime CMS has one category table and does not branch on the source table.
-var legacyCategorySources = []legacyCategorySource{
-	{
-		sourceTable: legacyCatalogSource,
-		categoryQuery: `SELECT "id", COALESCE("CatName", ''), COALESCE("Root", 0), COALESCE("Orderid", 0),
-			COALESCE("ListPath", ''), COALESCE("ListFilePattern", ''), COALESCE("ListTemplate", ''),
-			COALESCE("DetailPath", ''), COALESCE("DetailFilePattern", ''), COALESCE("DetailTemplate", '')
-			FROM "benming_ch_ProdCat" ORDER BY "id"`,
-		contentCategoryUpdate: `UPDATE "benming_ch_prod" SET "CatId" = ? WHERE "CatId" = ?`,
-		pageSize:              12,
-		withRouteFields:       true,
-		applyRouteDefaults:    applyLegacyCatalogRoutes,
-	},
-	{
-		sourceTable: legacyArticleSource,
-		categoryQuery: `SELECT "id", COALESCE("CatName", ''), COALESCE("Root", 0), COALESCE("ORderID", 0)
-			FROM "benming_ch_NewsCat" ORDER BY "id"`,
-		contentCategoryUpdate: `UPDATE "benming_ch_news" SET "Typeid" = ? WHERE "Typeid" = ?`,
-		pageSize:              6,
-		applyRouteDefaults:    applyLegacyArticleRoutes,
-	},
-}
-
-// EnsureUnifiedCategories creates the runtime category model. It deliberately
-// does not inspect the imported source tables; those are handled by the
-// explicit one-time migration command.
+// EnsureUnifiedCategories creates the category model used by the CMS. A
+// category owns its route and template bindings, which keeps presentation
+// decisions in database configuration and themes.
 func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 	if _, err := database.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS "`+unifiedCategoryTable+`" (
-			"id" INTEGER PRIMARY KEY,
+			"id" INTEGER PRIMARY KEY AUTOINCREMENT,
 			"name" TEXT NOT NULL,
 			"parent_id" INTEGER NOT NULL DEFAULT 0,
 			"order_id" INTEGER NOT NULL DEFAULT 0,
 			"list_page_size" INTEGER NOT NULL DEFAULT 14,
 			"page_type" TEXT NOT NULL DEFAULT 'list',
-			"route_id" INTEGER NOT NULL,
-			"list_path" TEXT NOT NULL,
-			"list_file_pattern" TEXT NOT NULL,
-			"list_template" TEXT NOT NULL,
+			"route_id" INTEGER NOT NULL DEFAULT 0,
+			"list_path" TEXT NOT NULL DEFAULT 'category',
+			"list_file_pattern" TEXT NOT NULL DEFAULT '{id}.html',
+			"list_template" TEXT NOT NULL DEFAULT 'category_list.html',
 			"cover_template" TEXT NOT NULL DEFAULT '',
-			"detail_path" TEXT NOT NULL,
-			"detail_file_pattern" TEXT NOT NULL,
-			"detail_template" TEXT NOT NULL,
-			"source_table" TEXT,
-			"source_id" INTEGER,
-			UNIQUE ("source_table", "source_id")
+			"detail_path" TEXT NOT NULL DEFAULT 'content',
+			"detail_file_pattern" TEXT NOT NULL DEFAULT '{id}.html',
+			"detail_template" TEXT NOT NULL DEFAULT 'content_detail.html',
+			"keywords" TEXT NOT NULL DEFAULT '',
+			"description" TEXT NOT NULL DEFAULT '',
+			"cover_content" TEXT NOT NULL DEFAULT ''
 		)`); err != nil {
-		return fmt.Errorf("create unified category table: %w", err)
+		return fmt.Errorf("create category table: %w", err)
 	}
 	for _, statement := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_gocms_category_parent ON "gocms_category" ("parent_id", "order_id", "id")`,
-		`CREATE INDEX IF NOT EXISTS idx_gocms_category_source ON "gocms_category" ("source_table", "source_id")`,
 	} {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
-			return fmt.Errorf("create unified category index: %w", err)
+			return fmt.Errorf("create category index: %w", err)
 		}
 	}
-	if err := ensureCategoryPageSize(ctx, database); err != nil {
-		return err
-	}
-	if err := ensureCategoryPageType(ctx, database); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// MigrateLegacyCategories imports the historical category tables into the
-// runtime model. It is intentionally called only by ImportAccess.
-func MigrateLegacyCategories(ctx context.Context, database *sql.DB) error {
-	tx, err := database.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin unified category migration: %w", err)
-	}
-	defer tx.Rollback()
-
-	for _, source := range legacyCategorySources {
-		if err := migrateLegacyCategories(ctx, tx, source); err != nil {
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit unified category migration: %w", err)
-	}
-	return nil
-}
-
-// MigrateLegacyContactCategory converts the old standalone contact page into
-// a cover category. It is an import adapter and is intentionally not called by
-// the runtime server or publisher.
-func MigrateLegacyContactCategory(ctx context.Context, database *sql.DB) error {
-	tx, err := database.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin legacy contact migration: %w", err)
-	}
-	defer tx.Rollback()
-
-	parentID, exists, err := existingSourceCategoryID(ctx, tx, legacyContactSource, legacyContactParentID)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		parentID, err = insertLegacyContactCategory(ctx, tx, legacyContactParentID, 0, 0, "关于我们", "about", "index.html", "category_list.html")
-		if err != nil {
-			return err
-		}
-	}
-	if _, exists, err := existingSourceCategoryID(ctx, tx, legacyContactSource, legacyContactPageID); err != nil {
-		return err
-	} else if !exists {
-		if _, err := insertLegacyContactCategory(ctx, tx, legacyContactPageID, parentID, 0, "联系我们", "", "contact.html", "contact.html"); err != nil {
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit legacy contact migration: %w", err)
-	}
-	return nil
-}
-
-func insertLegacyContactCategory(ctx context.Context, tx *sql.Tx, sourceID, parentID, orderID int64, name, listPath, listPattern, coverTemplate string) (int64, error) {
-	var id int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX("id"), 0) + 1 FROM "gocms_category"`).Scan(&id); err != nil {
-		return 0, fmt.Errorf("allocate legacy contact category id: %w", err)
-	}
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO "gocms_category"
-		("id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id",
-		 "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path",
-		 "detail_file_pattern", "detail_template", "source_table", "source_id")
-		VALUES (?, ?, ?, ?, 14, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, name, parentID, orderID, routing.PageTypeCover, id, listPath, listPattern,
-		"category_list.html", coverTemplate, routing.DefaultDetailPath, routing.DefaultDetailPattern,
-		templateconfig.DefaultDetailTemplate, legacyContactSource, sourceID)
-	if err != nil {
-		return 0, fmt.Errorf("insert legacy contact category %s: %w", name, err)
-	}
-	return id, nil
-}
-
-func migrateLegacyCategories(ctx context.Context, tx *sql.Tx, source legacyCategorySource) error {
-	rows, err := readLegacyCategories(ctx, tx, source.categoryQuery, source.sourceTable, source.withRouteFields)
-	if err != nil {
-		return err
-	}
-	if len(rows) == 0 {
-		return nil
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
-
-	ids := make(map[int64]int64, len(rows))
-	var maxID int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX("id"), 0) FROM "gocms_category"`).Scan(&maxID); err != nil {
-		return fmt.Errorf("read unified category id: %w", err)
-	}
-	for _, item := range rows {
-		mapped, exists, err := existingSourceCategoryID(ctx, tx, source.sourceTable, item.ID)
-		if err != nil {
-			return err
-		}
-		if exists {
-			ids[item.ID] = mapped
-			continue
-		}
-		candidate := item.ID
-		if candidate < 1 || categoryIDExists(ids, candidate) || unifiedCategoryIDExists(ctx, tx, candidate) {
-			maxID++
-			candidate = maxID
-		} else if candidate > maxID {
-			maxID = candidate
-		}
-		ids[item.ID] = candidate
-	}
-
-	for _, item := range rows {
-		if _, exists, err := existingSourceCategoryID(ctx, tx, source.sourceTable, item.ID); err != nil {
-			return err
-		} else if exists {
-			continue
-		}
-		parentID := int64(0)
-		if item.ParentID > 0 {
-			parentID = ids[item.ParentID]
-		}
-		pageSize := source.pageSize
-		source.applyRouteDefaults(rows, item.ID, &item)
-		_, err := tx.ExecContext(ctx, `
-			INSERT INTO "gocms_category"
-			("id", "name", "parent_id", "order_id", "list_page_size", "route_id",
-			 "list_path", "list_file_pattern", "list_template", "detail_path",
-			 "detail_file_pattern", "detail_template", "source_table", "source_id")
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			ids[item.ID], item.Name, parentID, item.OrderID, pageSize, item.ID,
-			item.ListPath, item.ListFilePattern, item.ListTemplate, item.DetailPath,
-			item.DetailFilePattern, item.DetailTemplate, source.sourceTable, item.ID)
-		if err != nil {
-			return fmt.Errorf("migrate %s category %d: %w", source.sourceTable, item.ID, err)
-		}
-	}
-
-	for oldID, newID := range ids {
-		if _, err := tx.ExecContext(ctx, source.contentCategoryUpdate, newID, oldID); err != nil {
-			return fmt.Errorf("migrate %s content reference %d: %w", source.sourceTable, oldID, err)
-		}
-	}
-	return nil
-}
-
-func ensureCategoryPageSize(ctx context.Context, database *sql.DB) error {
-	var exists int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('gocms_category') WHERE name = 'list_page_size'`).Scan(&exists); err != nil {
-		return fmt.Errorf("inspect category page size column: %w", err)
-	}
-	if exists == 0 {
-		if _, err := database.ExecContext(ctx, `ALTER TABLE "gocms_category" ADD COLUMN "list_page_size" INTEGER NOT NULL DEFAULT 14`); err != nil {
-			return fmt.Errorf("add category page size column: %w", err)
-		}
-	}
-	return nil
-}
-
-func ensureCategoryPageType(ctx context.Context, database *sql.DB) error {
-	columns := map[string]string{
+	for name, definition := range map[string]string{
+		"list_page_size": "INTEGER NOT NULL DEFAULT 14",
 		"page_type":      "TEXT NOT NULL DEFAULT 'list'",
 		"cover_template": "TEXT NOT NULL DEFAULT ''",
-	}
-	for name, definition := range columns {
-		var exists int
-		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('gocms_category') WHERE name = ?`, name).Scan(&exists); err != nil {
-			return fmt.Errorf("inspect category %s column: %w", name, err)
-		}
-		if exists == 0 {
-			if _, err := database.ExecContext(ctx, `ALTER TABLE "gocms_category" ADD COLUMN "`+name+`" `+definition); err != nil {
-				return fmt.Errorf("add category %s column: %w", name, err)
-			}
+		"keywords":       "TEXT NOT NULL DEFAULT ''",
+		"description":    "TEXT NOT NULL DEFAULT ''",
+		"cover_content":  "TEXT NOT NULL DEFAULT ''",
+	} {
+		if err := ensureCategoryColumn(ctx, database, name, definition); err != nil {
+			return err
 		}
 	}
 	if _, err := database.ExecContext(ctx, `
@@ -297,120 +62,15 @@ func ensureCategoryPageType(ctx context.Context, database *sql.DB) error {
 	return nil
 }
 
-func readLegacyCategories(ctx context.Context, tx *sql.Tx, query, sourceTable string, withRouteFields bool) ([]legacyCategory, error) {
-	rows, err := tx.QueryContext(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("read %s categories: %w", sourceTable, err)
+func ensureCategoryColumn(ctx context.Context, database *sql.DB, name, definition string) error {
+	var exists int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('gocms_category') WHERE name = ?`, name).Scan(&exists); err != nil {
+		return fmt.Errorf("inspect category %s column: %w", name, err)
 	}
-	defer rows.Close()
-	items := make([]legacyCategory, 0)
-	for rows.Next() {
-		var item legacyCategory
-		values := []any{&item.ID, &item.Name, &item.ParentID, &item.OrderID}
-		if withRouteFields {
-			values = append(values, &item.ListPath, &item.ListFilePattern, &item.ListTemplate, &item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate)
-		}
-		err = rows.Scan(values...)
-		if err != nil {
-			return nil, fmt.Errorf("scan %s category: %w", sourceTable, err)
-		}
-		items = append(items, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read %s categories: %w", sourceTable, err)
-	}
-	return items, nil
-}
-
-func applyLegacyCatalogRoutes(_ []legacyCategory, _ int64, item *legacyCategory) {
-	if strings.TrimSpace(item.ListPath) == "" {
-		item.ListPath = legacyChildListPath
-		if item.ParentID == 0 {
-			item.ListPath = legacyRootListPath
+	if exists == 0 {
+		if _, err := database.ExecContext(ctx, `ALTER TABLE "gocms_category" ADD COLUMN "`+name+`" `+definition); err != nil {
+			return fmt.Errorf("add category %s column: %w", name, err)
 		}
 	}
-	if strings.TrimSpace(item.ListFilePattern) == "" {
-		item.ListFilePattern = routing.DefaultListPattern
-	}
-	if strings.TrimSpace(item.ListTemplate) == "" || item.ListTemplate == templateconfig.DefaultListTemplate {
-		item.ListTemplate = legacyCatalogListTemplate
-	}
-	if strings.TrimSpace(item.DetailPath) == "" {
-		item.DetailPath = legacyDetailPath
-	}
-	if strings.TrimSpace(item.DetailFilePattern) == "" {
-		item.DetailFilePattern = routing.DefaultDetailPattern
-	}
-	if strings.TrimSpace(item.DetailTemplate) == "" {
-		item.DetailTemplate = templateconfig.DefaultDetailTemplate
-	}
-}
-
-func applyLegacyArticleRoutes(rows []legacyCategory, id int64, item *legacyCategory) {
-	rootID := id
-	byID := make(map[int64]legacyCategory, len(rows))
-	for _, row := range rows {
-		byID[row.ID] = row
-	}
-	seen := map[int64]bool{}
-	for {
-		parent, ok := byID[rootID]
-		if !ok || parent.ParentID == 0 || seen[rootID] {
-			break
-		}
-		seen[rootID] = true
-		rootID = parent.ParentID
-	}
-	for _, rule := range legacyArticleRouteRules {
-		if rule.RootID == rootID || rule.RootID == legacyRouteFallback {
-			item.ListPath = rule.ListPath
-			item.DetailPath = rule.DetailPath
-			break
-		}
-	}
-	item.ListFilePattern = routing.DefaultListPattern
-	item.ListTemplate = legacyArticleListTemplate
-	item.DetailFilePattern = routing.DefaultListPattern
-	item.DetailTemplate = templateconfig.DefaultDetailTemplate
-}
-
-const legacyRouteFallback int64 = -1
-
-type legacyCategoryRouteRule struct {
-	RootID     int64
-	ListPath   string
-	DetailPath string
-}
-
-// Historical URL aliases are migration input. They are stored on each
-// imported category and are never consulted by the runtime route resolver.
-var legacyArticleRouteRules = []legacyCategoryRouteRule{
-	{RootID: 12, ListPath: "service", DetailPath: "service/detail"},
-	{RootID: legacyRouteFallback, ListPath: "news", DetailPath: "news/detail"},
-}
-
-func existingSourceCategoryID(ctx context.Context, tx *sql.Tx, source string, sourceID int64) (int64, bool, error) {
-	var id int64
-	err := tx.QueryRowContext(ctx, `SELECT "id" FROM "gocms_category" WHERE "source_table" = ? AND "source_id" = ?`, source, sourceID).Scan(&id)
-	if err == sql.ErrNoRows {
-		return 0, false, nil
-	}
-	if err != nil {
-		return 0, false, fmt.Errorf("read migrated category %s/%d: %w", source, sourceID, err)
-	}
-	return id, true, nil
-}
-
-func unifiedCategoryIDExists(ctx context.Context, tx *sql.Tx, id int64) bool {
-	var count int
-	return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM "gocms_category" WHERE "id" = ?`, id).Scan(&count) == nil && count > 0
-}
-
-func categoryIDExists(ids map[int64]int64, id int64) bool {
-	for _, mapped := range ids {
-		if mapped == id {
-			return true
-		}
-	}
-	return false
+	return nil
 }

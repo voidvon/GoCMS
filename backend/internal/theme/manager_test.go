@@ -90,6 +90,39 @@ func TestImportRejectsUnsafeArchivePath(t *testing.T) {
 	}
 }
 
+func TestListRejectsLegacyThemeLayout(t *testing.T) {
+	themesRoot := filepath.Join(t.TempDir(), "themes")
+	legacyRoot := filepath.Join(themesRoot, "legacy")
+	if err := os.MkdirAll(filepath.Join(legacyRoot, "css"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, ManifestFile), []byte(`{"id":"legacy","name":"Legacy"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, "index.html"), []byte("<main>legacy</main>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyRoot, "css", "site.css"), []byte("body{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := List(themesRoot, ""); err == nil {
+		t.Fatal("legacy theme layout was accepted")
+	}
+}
+
+func TestImportRejectsLegacyThemeArchive(t *testing.T) {
+	themesRoot := filepath.Join(t.TempDir(), "themes")
+	archive := makeArchive(t, map[string]string{
+		ManifestFile:   `{"id":"legacy","name":"Legacy"}`,
+		"index.html":   "<main>legacy</main>",
+		"css/site.css": "body{}",
+	})
+	if _, err := ImportArchive(themesRoot, bytes.NewReader(archive)); err == nil {
+		t.Fatal("legacy theme archive was accepted")
+	}
+}
+
 func makeArchive(t *testing.T, files map[string]string) []byte {
 	t.Helper()
 	var buffer bytes.Buffer

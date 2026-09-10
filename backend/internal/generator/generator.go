@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,13 +16,17 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"gocms/internal/db"
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
 )
 
 type Row map[string]string
 
-func (r Row) n(k string) int { v, _ := strconv.Atoi(r[k]); return v }
+func (r Row) n(key string) int {
+	value, _ := strconv.Atoi(r[key])
+	return value
+}
 
 type Report struct {
 	State    string    `json:"state"`
@@ -33,24 +36,24 @@ type Report struct {
 	Contents int       `json:"contents"`
 	Error    string    `json:"error,omitempty"`
 }
+
 type Publisher struct {
 	DB                   *sql.DB
 	Web, Templates, Data string
 	Assets               string
 	Theme                string
 }
+
 type content struct {
 	tables      map[string][]Row
-	labels      map[string]string
+	settings    map[string]string
 	templates   map[string]*template.Template
 	assignments map[string]string
 	pages       map[string][]byte
-	publicHost  string
 }
 
-// ListItem, ListCategory, and ListPagination are the data contract exposed to
-// list templates. They intentionally contain no markup so each theme can
-// choose its own structure.
+// ListItem, ListCategory, ListPagination, and NavigationItem are the data
+// contract exposed to themes. They intentionally contain no markup.
 type ListItem struct {
 	URL         string
 	Title       string
@@ -71,6 +74,12 @@ type ListCategory struct {
 	Last     bool
 	RowStart bool
 	RowEnd   bool
+}
+
+type NavigationItem struct {
+	URL      string
+	Name     string
+	Children []NavigationItem
 }
 
 type ListPage struct {
@@ -95,70 +104,75 @@ type ListPagination struct {
 
 func (c *content) templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"tag":            func(k string, r Row) (string, error) { return c.tag(k, r, 0) },
-		"listItems":      func(r Row) []ListItem { return c.listItems(r) },
-		"listCategories": func(r Row) []ListCategory { return c.listCategories(r) },
-		"listChildren":   func(r Row) []ListCategory { return c.listChildren(r) },
-		"catalogCategories": func(r Row) []ListCategory {
-			return c.catalogCategories(r)
+		"setting":           func(key string) string { return esc(c.settings[strings.TrimSpace(key)]) },
+		"settingHTML":       func(key string) string { return c.settings[strings.TrimSpace(key)] },
+		"include":           func(path string, row Row) (string, error) { return c.include(path, row) },
+		"listItems":         func(row Row) []ListItem { return c.listItems(row) },
+		"listCategories":    func(row Row) []ListCategory { return c.listCategories(row) },
+		"listChildren":      func(row Row) []ListCategory { return c.listChildren(row) },
+		"catalogCategories": func(_ Row) []ListCategory { return c.catalogCategories() },
+		"navigation":        func(_ Row) []NavigationItem { return c.navigation() },
+		"featuredItems":     func(limit int) []ListItem { return c.featuredItems(limit) },
+		"featuredItemsIn": func(collection string, limit int) []ListItem {
+			return c.featuredItemsIn(collection, limit)
 		},
-		"listPagination": func(r Row) ListPagination { return c.listPagination(r) },
+		"listPagination": func(row Row) ListPagination {
+			return c.listPagination(row)
+		},
 	}
 }
 
-var oldTag = regexp.MustCompile(`#[A-Za-z_][A-Za-z_0-9]*(?:\([^#]*?\))?#`)
+func esc(value string) string { return html.EscapeString(value) }
 
-const defaultContentImage = "/images/content-placeholder.jpg"
-
-func esc(s string) string           { return html.EscapeString(s) }
-func link(url, title string) string { return `<a href="` + esc(url) + `">` + esc(title) + `</a>` }
 func readTable(ctx context.Context, tx *sql.Tx, name string) ([]Row, error) {
-	rows, e := tx.QueryContext(ctx, `SELECT * FROM "`+name+`"`)
-	if e != nil {
-		return nil, e
+	rows, err := tx.QueryContext(ctx, `SELECT * FROM "`+name+`"`)
+	if err != nil {
+		return nil, err
 	}
 	defer rows.Close()
-	cols, e := rows.Columns()
-	if e != nil {
-		return nil, e
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
 	}
-	out := []Row{}
+	items := make([]Row, 0)
 	for rows.Next() {
-		vals := make([]any, len(cols))
-		ptr := make([]any, len(cols))
-		for i := range vals {
-			ptr[i] = &vals[i]
+		values := make([]any, len(columns))
+		pointers := make([]any, len(columns))
+		for index := range values {
+			pointers[index] = &values[index]
 		}
-		if e = rows.Scan(ptr...); e != nil {
-			return nil, e
+		if err := rows.Scan(pointers...); err != nil {
+			return nil, err
 		}
-		r := Row{}
-		for i, k := range cols {
-			v := ""
-			if vals[i] != nil {
-				v = fmt.Sprint(vals[i])
-				if b, ok := vals[i].([]byte); ok {
-					v = string(b)
-				}
+		row := Row{}
+		for index, column := range columns {
+			if values[index] == nil {
+				row[strings.ToLower(column)] = ""
+				continue
 			}
-			r[strings.ToLower(k)] = v
+			if value, ok := values[index].([]byte); ok {
+				row[strings.ToLower(column)] = string(value)
+				continue
+			}
+			row[strings.ToLower(column)] = fmt.Sprint(values[index])
 		}
-		out = append(out, r)
+		items = append(items, row)
 	}
-	return out, rows.Err()
+	return items, rows.Err()
 }
+
 func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	report = Report{State: "running", Started: time.Now()}
 	if err = os.MkdirAll(p.Data, 0755); err != nil {
-		return
+		return report, err
 	}
-	lock, e := os.OpenFile(filepath.Join(p.Data, "publish.lock"), os.O_CREATE|os.O_RDWR, 0600)
-	if e != nil {
-		return report, e
+	lock, err := os.OpenFile(filepath.Join(p.Data, "publish.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return report, err
 	}
 	defer lock.Close()
-	unlock, e := acquirePublishLock(lock)
-	if e != nil {
+	unlock, err := acquirePublishLock(lock)
+	if err != nil {
 		return report, ErrPublishBusy
 	}
 	defer unlock()
@@ -169,55 +183,46 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 			report.State = "failed"
 			report.Error = err.Error()
 		}
-		b, _ := json.MarshalIndent(report, "", "  ")
-		_ = atomicWrite(filepath.Join(p.Data, "publish.json"), b)
+		data, _ := json.MarshalIndent(report, "", "  ")
+		_ = atomicWrite(filepath.Join(p.Data, "publish.json"), data)
 	}()
-	c := &content{tables: map[string][]Row{}, labels: map[string]string{}, templates: map[string]*template.Template{}, assignments: map[string]string{}, pages: map[string][]byte{}}
-	tx, e := p.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if e != nil {
-		return report, e
+
+	c := &content{
+		tables:      map[string][]Row{},
+		settings:    map[string]string{},
+		templates:   map[string]*template.Template{},
+		assignments: map[string]string{},
+		pages:       map[string][]byte{},
 	}
-	defer tx.Rollback()
-	names := []string{"benming_ch_config", "benming_ch_cuslabel", "benming_ch_MetaType", "gocms_content", "gocms_category", "benming_ch_Cocat", "benming_ch_job"}
-	for _, n := range names {
-		rs, e := readTable(ctx, tx, n)
-		if e != nil {
-			return report, e
+	tx, err := p.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return report, err
+	}
+	for _, name := range []string{"gocms_category", "gocms_content"} {
+		rows, readErr := readTable(ctx, tx, name)
+		if readErr != nil {
+			_ = tx.Rollback()
+			return report, readErr
 		}
-		c.tables[strings.ToLower(n)] = rs
+		c.tables[name] = rows
 	}
-	c.publicHost = configuredPublicHost(c.tables["benming_ch_config"])
-	assignments, e := templateconfig.Load(ctx, tx)
-	if e != nil {
-		return report, e
+	c.settings, err = db.LoadSiteSettings(ctx, tx)
+	if err != nil {
+		_ = tx.Rollback()
+		return report, err
 	}
-	c.assignments = assignments
-	if e = tx.Commit(); e != nil {
-		return report, e
+	c.assignments, err = templateconfig.Load(ctx, tx)
+	if err != nil {
+		_ = tx.Rollback()
+		return report, err
 	}
-	for _, r := range c.tables["benming_ch_cuslabel"] {
-		c.labels[strings.ToLower(strings.Trim(r["lname"], "#"))] = r["lcontent"]
+	if err = tx.Commit(); err != nil {
+		return report, err
 	}
-	for _, n := range []string{"gocms_content", "gocms_category", "benming_ch_cocat", "benming_ch_job"} {
-		orderField := "orderid"
-		switch n {
-		case "gocms_content":
-			orderField = "sort_order"
-		case "gocms_category":
-			orderField = "order_id"
-		}
-		sort.SliceStable(c.tables[n], func(i, j int) bool {
-			a, b := c.tables[n][i], c.tables[n][j]
-			if a.n(orderField) == b.n(orderField) {
-				if n == "gocms_category" {
-					return false
-				}
-				return a.n("id") < b.n("id")
-			}
-			return a.n(orderField) < b.n(orderField)
-		})
-	}
-	e = filepath.WalkDir(p.Templates, func(filePath string, entry fs.DirEntry, walkErr error) error {
+
+	sortRows(c.tables["gocms_category"], "order_id", true)
+	sortRows(c.tables["gocms_content"], "sort_order", false)
+	err = filepath.WalkDir(p.Templates, func(filePath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -235,138 +240,169 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 			return err
 		}
 		templatePath := filepath.ToSlash(relative)
-		b, err := os.ReadFile(filePath)
+		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return err
 		}
-		if !utf8.Valid(b) {
+		if !utf8.Valid(data) {
 			return fmt.Errorf("模板非 UTF-8: %s", templatePath)
 		}
-		t, err := template.New(templatePath).Funcs(c.templateFuncs()).Parse(string(b))
+		parsed, err := template.New(templatePath).Funcs(c.templateFuncs()).Parse(string(data))
 		if err != nil {
-			return err
+			return fmt.Errorf("解析模板 %s: %w", templatePath, err)
 		}
-		c.templates[templatePath] = t
+		c.templates[templatePath] = parsed
 		return nil
 	})
-	if e != nil {
-		return report, e
+	if err != nil {
+		return report, err
 	}
-	if e = c.build(); e != nil {
-		return report, e
+	if err = c.build(); err != nil {
+		return report, err
 	}
-	for _, r := range c.tables["gocms_content"] {
-		if r.n("visible") == 1 {
+	for _, row := range c.tables["gocms_content"] {
+		if row.n("visible") == 1 {
 			report.Contents++
 		}
 	}
 	report.Files = len(c.pages)
-	web, e := filepath.Abs(p.Web)
-	if e != nil {
-		return report, e
+
+	web, err := filepath.Abs(p.Web)
+	if err != nil {
+		return report, err
 	}
 	if web == filepath.Dir(web) {
 		return report, fmt.Errorf("invalid web root")
 	}
-	stage, e := os.MkdirTemp(filepath.Dir(web), ".web-stage-")
-	if e != nil {
-		return report, e
+	stage, err := os.MkdirTemp(filepath.Dir(web), ".web-stage-")
+	if err != nil {
+		return report, err
 	}
 	defer os.RemoveAll(stage)
-	// Resource trees are served independently; publishing never copies their bytes.
-	if e = c.normalizeLinks(p.Assets, p.Theme); e != nil {
-		return report, e
+	if err = c.normalizeLinks(p.Assets, p.Theme); err != nil {
+		return report, err
 	}
-	for rel, b := range c.pages {
-		if e = ctx.Err(); e != nil {
-			return report, e
+	for relative, data := range c.pages {
+		if err = ctx.Err(); err != nil {
+			return report, err
 		}
-		if e = atomicWrite(filepath.Join(stage, filepath.FromSlash(rel)), b); e != nil {
-			return report, e
+		if err = atomicWrite(filepath.Join(stage, filepath.FromSlash(relative)), data); err != nil {
+			return report, err
 		}
 	}
-	// Both renames stay on the same filesystem. Roll back if installing the staged site fails.
+
 	backup := web + ".previous"
-	if _, e = os.Stat(backup); e == nil {
+	if _, err = os.Stat(backup); err == nil {
 		return report, fmt.Errorf("上次发布备份仍存在: %s，请先检查恢复", backup)
 	}
 	hadWeb := false
-	if _, e = os.Stat(web); e == nil {
-		if e = os.Rename(web, backup); e != nil {
-			return report, e
+	if _, err = os.Stat(web); err == nil {
+		if err = os.Rename(web, backup); err != nil {
+			return report, err
 		}
 		hadWeb = true
 	}
-	if e = os.Rename(stage, web); e != nil {
+	if err = os.Rename(stage, web); err != nil {
 		if hadWeb {
 			_ = os.Rename(backup, web)
 		}
-		return report, e
+		return report, err
 	}
 	if hadWeb {
 		_ = os.RemoveAll(backup)
 	}
 	return report, nil
 }
-func atomicWrite(p string, b []byte) error {
-	if e := os.MkdirAll(filepath.Dir(p), 0755); e != nil {
-		return e
-	}
-	f, e := os.CreateTemp(filepath.Dir(p), ".publish-")
-	if e != nil {
-		return e
-	}
-	defer os.Remove(f.Name())
-	if _, e = f.Write(b); e != nil {
-		f.Close()
-		return e
-	}
-	if e = f.Chmod(0644); e != nil {
-		f.Close()
-		return e
-	}
-	if e = f.Close(); e != nil {
-		return e
-	}
-	return os.Rename(f.Name(), p)
-}
-func (c *content) page(path, role string, r Row) error {
-	templatePath, assigned := c.assignments[role]
-	if !assigned {
-		return fmt.Errorf("缺少模板配置: %s", role)
-	}
-	return c.pageTemplate(path, templatePath, r)
+
+func sortRows(rows []Row, orderField string, category bool) {
+	sort.SliceStable(rows, func(left, right int) bool {
+		a, b := rows[left], rows[right]
+		if a.n(orderField) == b.n(orderField) {
+			if category {
+				return a.n("id") < b.n("id")
+			}
+			return a.n("id") < b.n("id")
+		}
+		return a.n(orderField) < b.n(orderField)
+	})
 }
 
-func (c *content) pageTemplate(path, templatePath string, r Row) error {
+func atomicWrite(filePath string, data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+		return err
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(filePath), ".publish-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporary.Name())
+	if _, err = temporary.Write(data); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err = temporary.Chmod(0644); err != nil {
+		_ = temporary.Close()
+		return err
+	}
+	if err = temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporary.Name(), filePath)
+}
+
+func (c *content) page(rolePath, role string, row Row) error {
+	templatePath, ok := c.assignments[role]
+	if !ok {
+		return fmt.Errorf("缺少模板配置: %s", role)
+	}
+	return c.pageTemplate(rolePath, templatePath, row)
+}
+
+func (c *content) pageTemplate(pagePath, templatePath string, row Row) error {
 	normalized, err := templateconfig.NormalizePath(templatePath)
 	if err != nil {
 		return fmt.Errorf("模板路径无效: %s: %w", templatePath, err)
 	}
-	templatePath = normalized
-	t, ok := c.templates[templatePath]
+	parsed, ok := c.templates[normalized]
 	if !ok {
-		return fmt.Errorf("缺少模板: %s", templatePath)
+		return fmt.Errorf("缺少模板: %s", normalized)
 	}
-	var b strings.Builder
-	if e := t.Execute(&b, r); e != nil {
-		return fmt.Errorf("生成 %s: %w", path, e)
+	var output strings.Builder
+	if err := parsed.Execute(&output, row); err != nil {
+		return fmt.Errorf("生成 %s: %w", pagePath, err)
 	}
-	s := b.String()
-	if !utf8.ValidString(s) {
-		return fmt.Errorf("生成页面非 UTF-8: %s", path)
+	if !utf8.ValidString(output.String()) {
+		return fmt.Errorf("生成页面非 UTF-8: %s", pagePath)
 	}
-	c.pages[path] = []byte(s)
+	c.pages[pagePath] = []byte(output.String())
 	return nil
 }
+
+func (c *content) include(templatePath string, row Row) (string, error) {
+	normalized, err := templateconfig.NormalizePath(templatePath)
+	if err != nil {
+		return "", err
+	}
+	parsed, ok := c.templates[normalized]
+	if !ok {
+		return "", fmt.Errorf("缺少模板: %s", normalized)
+	}
+	var output strings.Builder
+	if err := parsed.Execute(&output, row); err != nil {
+		return "", err
+	}
+	return output.String(), nil
+}
+
 func (c *content) cat(id int) Row {
-	for _, r := range c.tables["gocms_category"] {
-		if r.n("id") == id {
-			return r
+	for _, category := range c.tables["gocms_category"] {
+		if category.n("id") == id {
+			return category
 		}
 	}
 	return Row{}
 }
+
 func (c *content) under(id, root int) bool {
 	seen := map[int]bool{}
 	for id > 0 && !seen[id] {
@@ -378,37 +414,34 @@ func (c *content) under(id, root int) bool {
 	}
 	return false
 }
-func (c *content) categoryListDir(r Row) string {
-	dir := strings.TrimSpace(r["list_path"])
-	if dir == "" {
-		if c.categoryPageType(r) == routing.PageTypeCover {
+
+func (c *content) categoryListDir(row Row) string {
+	directory := strings.TrimSpace(row["list_path"])
+	if directory == "" {
+		if c.categoryPageType(row) == routing.PageTypeCover {
 			return ""
 		}
-		dir = routing.DefaultListPath(int64(r.n("parent_id")))
+		directory = routing.DefaultListPath()
 	}
-	if normalized, err := routing.NormalizeOptionalDirectory(dir); err == nil {
+	if normalized, err := routing.NormalizeOptionalDirectory(directory); err == nil {
 		return normalized
 	}
-	return routing.DefaultListPath(int64(r.n("parent_id")))
+	return routing.DefaultListPath()
 }
 
-func (c *content) categoryListPattern(r Row) string {
-	pattern := strings.TrimSpace(r["list_file_pattern"])
+func (c *content) categoryListPattern(row Row) string {
+	pattern := strings.TrimSpace(row["list_file_pattern"])
 	if pattern == "" {
-		if c.categoryPageType(r) == routing.PageTypeCover {
-			pattern = routing.DefaultCoverPattern
-		} else {
-			pattern = routing.DefaultListPattern
+		if c.categoryPageType(row) == routing.PageTypeCover {
+			return routing.DefaultCoverPattern
 		}
+		return routing.DefaultListPattern
 	}
-	if c.categoryPageType(r) == routing.PageTypeCover {
+	if c.categoryPageType(row) == routing.PageTypeCover {
 		if normalized, err := routing.NormalizeCoverFilePattern(pattern); err == nil {
 			return normalized
 		}
 		return routing.DefaultCoverPattern
-	}
-	if pattern == "" {
-		pattern = routing.DefaultListPattern
 	}
 	if normalized, err := routing.NormalizeFilePattern(pattern, false); err == nil {
 		return normalized
@@ -416,26 +449,26 @@ func (c *content) categoryListPattern(r Row) string {
 	return routing.DefaultListPattern
 }
 
-func (c *content) categoryPageType(r Row) string {
-	if value, err := routing.NormalizePageType(r["page_type"]); err == nil {
+func (c *content) categoryPageType(row Row) string {
+	if value, err := routing.NormalizePageType(row["page_type"]); err == nil {
 		return value
 	}
 	return routing.PageTypeList
 }
 
-func (c *content) categoryDetailDir(r Row) string {
-	dir := strings.TrimSpace(r["detail_path"])
-	if dir == "" {
-		dir = routing.DefaultDetailPath
+func (c *content) categoryDetailDir(row Row) string {
+	directory := strings.TrimSpace(row["detail_path"])
+	if directory == "" {
+		directory = routing.DefaultDetailPath
 	}
-	if normalized, err := routing.NormalizeDirectory(dir); err == nil {
+	if normalized, err := routing.NormalizeDirectory(directory); err == nil {
 		return normalized
 	}
 	return routing.DefaultDetailPath
 }
 
-func (c *content) categoryDetailPattern(r Row) string {
-	pattern := strings.TrimSpace(r["detail_file_pattern"])
+func (c *content) categoryDetailPattern(row Row) string {
+	pattern := strings.TrimSpace(row["detail_file_pattern"])
 	if pattern == "" {
 		pattern = routing.DefaultDetailPattern
 	}
@@ -445,55 +478,53 @@ func (c *content) categoryDetailPattern(r Row) string {
 	return routing.DefaultDetailPattern
 }
 
-func (c *content) categoryListURL(r Row, page int) string {
-	if r["id"] == "" {
+func (c *content) categoryListURL(row Row, page int) string {
+	if row["id"] == "" {
 		return ""
 	}
-	routeID := int64(r.n("route_id"))
+	routeID := row.n("route_id")
 	if routeID == 0 {
-		routeID = int64(r.n("id"))
+		routeID = row.n("id")
 	}
 	var filename string
 	var err error
-	if c.categoryPageType(r) == routing.PageTypeCover {
-		filename, err = routing.RenderCoverFilename(c.categoryListPattern(r), routeID)
+	if c.categoryPageType(row) == routing.PageTypeCover {
+		filename, err = routing.RenderCoverFilename(c.categoryListPattern(row), int64(routeID))
 	} else {
-		filename, err = routing.RenderListFilename(c.categoryListPattern(r), routeID, page)
+		filename, err = routing.RenderListFilename(c.categoryListPattern(row), int64(routeID), page)
 	}
 	if err != nil {
-		filename = fmt.Sprintf("%d.html", routeID)
+		filename = strconv.Itoa(routeID) + ".html"
 	}
-	if c.categoryPageType(r) == routing.PageTypeCover && isIndexFilename(filename) {
-		dir := c.categoryListDir(r)
-		if dir == "" {
+	directory := c.categoryListDir(row)
+	if c.categoryPageType(row) == routing.PageTypeCover && isIndexFilename(filename) {
+		if directory == "" {
 			return "/"
 		}
-		return "/" + strings.Trim(dir, "/") + "/"
+		return "/" + strings.Trim(directory, "/") + "/"
 	}
-	return "/" + strings.Trim(c.categoryListDir(r)+"/"+filename, "/")
+	return "/" + strings.Trim(directory+"/"+filename, "/")
 }
 
-func (c *content) categoryListPagePath(r Row, page int) string {
-	if r["id"] == "" {
+func (c *content) categoryListPagePath(row Row, page int) string {
+	if row["id"] == "" {
 		return ""
 	}
-	routeID := int64(r.n("route_id"))
+	routeID := row.n("route_id")
 	if routeID == 0 {
-		routeID = int64(r.n("id"))
+		routeID = row.n("id")
 	}
-	filename, err := c.renderCategoryFilename(r, routeID, page)
+	var filename string
+	var err error
+	if c.categoryPageType(row) == routing.PageTypeCover {
+		filename, err = routing.RenderCoverFilename(c.categoryListPattern(row), int64(routeID))
+	} else {
+		filename, err = routing.RenderListPageFilename(c.categoryListPattern(row), int64(routeID), page)
+	}
 	if err != nil {
 		filename = fmt.Sprintf("%d-%d.html", routeID, page)
 	}
-	return strings.Trim(c.categoryListDir(r)+"/"+filename, "/")
-}
-
-func (c *content) renderCategoryFilename(r Row, routeID int64, page int) (string, error) {
-	pattern := c.categoryListPattern(r)
-	if c.categoryPageType(r) == routing.PageTypeCover {
-		return routing.RenderCoverFilename(pattern, routeID)
-	}
-	return routing.RenderListPageFilename(pattern, routeID, page)
+	return strings.Trim(c.categoryListDir(row)+"/"+filename, "/")
 }
 
 func isIndexFilename(value string) bool {
@@ -501,38 +532,11 @@ func isIndexFilename(value string) bool {
 	return lower == "index.html" || lower == "index.htm"
 }
 
-func (c *content) rootCategory() Row {
-	var root Row
-	for _, category := range c.tables["gocms_category"] {
-		if category.n("parent_id") != 0 {
-			continue
-		}
-		if strings.TrimSpace(category["list_path"]) == "" && strings.TrimSpace(category["detail_path"]) == "" {
-			continue
-		}
-		if root["id"] == "" || category.n("order_id") < root.n("order_id") ||
-			(category.n("order_id") == root.n("order_id") && category.n("id") < root.n("id")) {
-			root = category
-		}
-	}
-	return root
-}
-
-func (c *content) rootCategoryURL() string {
-	if category := c.rootCategory(); category["id"] != "" {
-		if c.categoryPageType(category) == routing.PageTypeCover {
-			return c.categoryListURL(category, 1)
-		}
-		return "/" + c.categoryListDir(category) + "/"
-	}
-	return "/" + routing.DefaultCategoryPath + "/"
-}
-
-func (c *content) contentURL(r Row) string {
-	category := c.cat(r.n("category_id"))
-	filename, err := routing.RenderDetailFilenameValue(c.categoryDetailPattern(category), r["route_key"])
+func (c *content) contentURL(row Row) string {
+	category := c.cat(row.n("category_id"))
+	filename, err := routing.RenderDetailFilenameValue(c.categoryDetailPattern(category), row["route_key"])
 	if err != nil {
-		filename = r["route_key"] + ".html"
+		filename = row["route_key"] + ".html"
 	}
 	return "/" + strings.Trim(c.categoryDetailDir(category)+"/"+filename, "/")
 }
@@ -551,8 +555,32 @@ func (c *content) listRoot(category Row) Row {
 	return current
 }
 
-// Collection keys are derived from configured routes for compatibility with
-// the legacy homepage tags. They are never used to select a list template.
+func (c *content) rootCategory() Row {
+	var root Row
+	for _, category := range c.tables["gocms_category"] {
+		if category.n("parent_id") != 0 {
+			continue
+		}
+		if root["id"] == "" || category.n("order_id") < root.n("order_id") ||
+			(category.n("order_id") == root.n("order_id") && category.n("id") < root.n("id")) {
+			root = category
+		}
+	}
+	return root
+}
+
+func (c *content) rootCategoryURL() string {
+	root := c.rootCategory()
+	if root["id"] == "" {
+		return "/" + routing.DefaultListPath() + "/"
+	}
+	directory := c.categoryListDir(root)
+	if directory == "" {
+		return "/"
+	}
+	return "/" + strings.Trim(directory, "/") + "/"
+}
+
 func (c *content) categoryCollectionKey(category Row) string {
 	root := c.listRoot(category)
 	value := strings.Trim(strings.TrimSpace(root["list_path"]), "/")
@@ -573,90 +601,6 @@ func (c *content) categoryPageSize(category Row) int {
 	return pageSize
 }
 
-func (c *content) homepageProducts(rolling bool) []Row {
-	items := make([]Row, 0)
-	collection := c.categoryCollectionKey(c.rootCategory())
-	for _, item := range c.tables["gocms_content"] {
-		if item.n("visible") == 1 && item.n("featured") == 1 && c.categoryCollectionKey(c.cat(item.n("category_id"))) == collection {
-			items = append(items, item)
-		}
-	}
-	if rolling {
-		sort.SliceStable(items, func(i, j int) bool { return items[i].n("id") > items[j].n("id") })
-	} else {
-		sort.SliceStable(items, func(i, j int) bool {
-			if items[i].n("sort_order") == items[j].n("sort_order") {
-				return items[i].n("id") < items[j].n("id")
-			}
-			return items[i].n("sort_order") < items[j].n("sort_order")
-		})
-	}
-	limit := 32
-	if rolling {
-		limit = 8
-	}
-	return items[:min(limit, len(items))]
-}
-
-func (c *content) homepageArticles(family string) []Row {
-	items := make([]Row, 0)
-	for _, item := range c.tables["gocms_content"] {
-		if item.n("visible") == 1 && c.categoryCollectionKey(c.cat(item.n("category_id"))) == strings.ToLower(family) {
-			items = append(items, item)
-		}
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].n("sort_order") == items[j].n("sort_order") {
-			return items[i].n("id") < items[j].n("id")
-		}
-		return items[i].n("sort_order") < items[j].n("sort_order")
-	})
-	return items[:min(8, len(items))]
-}
-
-func (c *content) homepageProductTag(rolling bool) string {
-	var b strings.Builder
-	for _, item := range c.homepageProducts(rolling) {
-		if !rolling {
-			b.WriteString("<li>" + link(c.contentURL(item), item["title"]) + "</li>")
-			continue
-		}
-		image := strings.TrimSpace(item["cover_image"])
-		if image == "" {
-			image = defaultContentImage
-		}
-		b.WriteString(`<li><a href="` + esc(c.contentURL(item)) + `"><img src="` + esc(image) + `" alt="` + esc(item["title"]) + `" width="140" height="120" /><span>` + esc(item["title"]) + `</span></a></li>`)
-	}
-	return b.String()
-}
-
-func (c *content) homepageArticleTag(family string) string {
-	var b strings.Builder
-	for _, item := range c.homepageArticles(family) {
-		b.WriteString("<li>" + link(c.contentURL(item), item["title"]) + "</li>")
-	}
-	return b.String()
-}
-
-func (c *content) cats(root int, plain bool) string {
-	var b strings.Builder
-	emit := func(r Row) {
-		a := link(c.categoryListURL(r, 1), r["name"])
-		if plain {
-			b.WriteString(a + " | ")
-			return
-		}
-		b.WriteString("<li>" + a + "</li>")
-	}
-	for _, r := range c.tables["gocms_category"] {
-		if r.n("parent_id") != root {
-			continue
-		}
-		emit(r)
-	}
-	return b.String()
-}
-
 func (c *content) visibleContents() []Row {
 	items := make([]Row, 0, len(c.tables["gocms_content"]))
 	for _, item := range c.tables["gocms_content"] {
@@ -664,12 +608,7 @@ func (c *content) visibleContents() []Row {
 			items = append(items, item)
 		}
 	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].n("sort_order") == items[j].n("sort_order") {
-			return items[i].n("id") < items[j].n("id")
-		}
-		return items[i].n("sort_order") < items[j].n("sort_order")
-	})
+	sortRows(items, "sort_order", false)
 	return items
 }
 
@@ -692,13 +631,8 @@ func (c *content) listContext(view Row) (category Row, pageItems []Row, page, pa
 		pageSize = c.categoryPageSize(category)
 	}
 	pages = max(1, (total+pageSize-1)/pageSize)
-	page = view.n("list_page")
-	if page < 1 {
-		page = 1
-	}
-	if page > pages {
-		page = pages
-	}
+	page = max(1, view.n("list_page"))
+	page = min(page, pages)
 	start := min((page-1)*pageSize, total)
 	end := min(start+pageSize, total)
 	return category, allItems[start:end], page, pages, pageSize, total
@@ -708,85 +642,138 @@ func (c *content) listItems(view Row) []ListItem {
 	category, rows, _, _, _, _ := c.listContext(view)
 	items := make([]ListItem, 0, len(rows))
 	for _, row := range rows {
-		publishedAt := strings.TrimSpace(row["published_at"])
-		summary := strings.TrimSpace(row["summary"])
-		image := strings.TrimSpace(row["cover_image"])
-		if image == "" {
-			image = defaultContentImage
-		}
-		items = append(items, ListItem{
-			URL:         esc(c.contentURL(row)),
-			Title:       esc(row["title"]),
-			Summary:     esc(summary),
-			Excerpt:     esc(legacyTopic(summary, 230)),
-			PublishedAt: esc(publishedAt),
-			Date:        esc(listDate(publishedAt)),
-			Image:       esc(image),
-			Category:    esc(category["name"]),
-			RowStart:    len(items)%2 == 0,
-			RowEnd:      len(items)%2 == 1 || len(items)+1 == len(rows),
-		})
+		items = append(items, c.listItem(row, category, len(items), len(rows)))
 	}
 	return items
+}
+
+func (c *content) listItem(row, category Row, index, total int) ListItem {
+	publishedAt := strings.TrimSpace(row["published_at"])
+	summary := strings.TrimSpace(row["summary"])
+	image := strings.TrimSpace(row["cover_image"])
+	return ListItem{
+		URL:         esc(c.contentURL(row)),
+		Title:       esc(row["title"]),
+		Summary:     esc(summary),
+		Excerpt:     esc(excerpt(summary, 230)),
+		PublishedAt: esc(publishedAt),
+		Date:        esc(listDate(publishedAt)),
+		Image:       esc(image),
+		Category:    esc(category["name"]),
+		RowStart:    index%2 == 0,
+		RowEnd:      index%2 == 1 || index+1 == total,
+	}
 }
 
 func (c *content) listCategories(view Row) []ListCategory {
 	category := c.cat(view.n("category_id"))
 	root := c.listRoot(category)
-	children := make([]Row, 0)
-	for _, child := range c.tables["gocms_category"] {
-		if child.n("parent_id") == root.n("id") {
-			children = append(children, child)
-		}
-	}
-	categories := make([]ListCategory, 0, len(children))
+	children := c.children(root.n("id"))
+	items := make([]ListCategory, 0, len(children))
 	for index, child := range children {
-		categories = append(categories, ListCategory{
+		items = append(items, ListCategory{
 			URL:     esc(c.categoryListURL(child, 1)),
 			Name:    esc(child["name"]),
 			Current: child.n("id") == category.n("id"),
 			Last:    index+1 == len(children),
 		})
 	}
-	return categories
+	return items
 }
 
 func (c *content) listChildren(view Row) []ListCategory {
 	category := c.cat(view.n("category_id"))
-	children := make([]ListCategory, 0)
-	for _, child := range c.tables["gocms_category"] {
-		if child.n("parent_id") != category.n("id") {
-			continue
-		}
-		children = append(children, ListCategory{
-			URL:  esc(c.categoryListURL(child, 1)),
-			Name: esc(child["name"]),
+	children := c.children(category.n("id"))
+	items := make([]ListCategory, 0, len(children))
+	for index, child := range children {
+		items = append(items, ListCategory{
+			URL:      esc(c.categoryListURL(child, 1)),
+			Name:     esc(child["name"]),
+			Last:     index+1 == len(children),
+			RowStart: index%5 == 0,
+			RowEnd:   index%5 == 4 || index+1 == len(children),
 		})
 	}
-	for index := range children {
-		children[index].Last = index+1 == len(children)
-		children[index].RowStart = index%5 == 0
-		children[index].RowEnd = index%5 == 4 || index+1 == len(children)
-	}
-	return children
+	return items
 }
 
-func (c *content) catalogCategories(_ Row) []ListCategory {
+func (c *content) catalogCategories() []ListCategory {
 	collection := c.categoryCollectionKey(c.rootCategory())
-	categories := make([]ListCategory, 0)
+	items := make([]ListCategory, 0)
 	for _, category := range c.tables["gocms_category"] {
 		if category.n("parent_id") != 0 || c.categoryCollectionKey(category) != collection {
 			continue
 		}
-		categories = append(categories, ListCategory{
+		items = append(items, ListCategory{
 			URL:  esc(c.categoryListURL(category, 1)),
 			Name: esc(category["name"]),
 		})
 	}
-	for index := range categories {
-		categories[index].Last = index+1 == len(categories)
+	for index := range items {
+		items[index].Last = index+1 == len(items)
 	}
-	return categories
+	return items
+}
+
+func (c *content) children(parentID int) []Row {
+	children := make([]Row, 0)
+	for _, category := range c.tables["gocms_category"] {
+		if category.n("parent_id") == parentID {
+			children = append(children, category)
+		}
+	}
+	sortRows(children, "order_id", true)
+	return children
+}
+
+func (c *content) navigation() []NavigationItem {
+	items := make([]NavigationItem, 0)
+	for _, category := range c.children(0) {
+		items = append(items, c.navigationItem(category))
+	}
+	return items
+}
+
+func (c *content) navigationItem(category Row) NavigationItem {
+	children := c.children(category.n("id"))
+	items := make([]NavigationItem, 0, len(children))
+	for _, child := range children {
+		items = append(items, c.navigationItem(child))
+	}
+	return NavigationItem{URL: esc(c.categoryListURL(category, 1)), Name: esc(category["name"]), Children: items}
+}
+
+func (c *content) featuredItems(limit int) []ListItem {
+	return c.featuredItemsIn("", limit)
+}
+
+func (c *content) featuredItemsIn(collection string, limit int) []ListItem {
+	if limit < 1 {
+		return []ListItem{}
+	}
+	collection = strings.ToLower(strings.Trim(strings.TrimSpace(collection), "/"))
+	items := make([]Row, 0)
+	for _, item := range c.tables["gocms_content"] {
+		if item.n("visible") != 1 || item.n("featured") != 1 {
+			continue
+		}
+		if collection != "" && c.categoryCollectionKey(c.cat(item.n("category_id"))) != collection {
+			continue
+		}
+		items = append(items, item)
+	}
+	sort.SliceStable(items, func(left, right int) bool {
+		if items[left].n("sort_order") == items[right].n("sort_order") {
+			return items[left].n("id") > items[right].n("id")
+		}
+		return items[left].n("sort_order") < items[right].n("sort_order")
+	})
+	items = items[:min(limit, len(items))]
+	result := make([]ListItem, 0, len(items))
+	for index, item := range items {
+		result = append(result, c.listItem(item, c.cat(item.n("category_id")), index, len(items)))
+	}
+	return result
 }
 
 func (c *content) listPagination(view Row) ListPagination {
@@ -825,69 +812,70 @@ func listDate(value string) string {
 	return value
 }
 
-func legacyTopic(value string, limit int) string {
+func excerpt(value string, limit int) string {
 	value = strings.TrimSpace(value)
 	if value == "" || limit < 1 {
 		return value
 	}
 	width := 0
 	runes := []rune(value)
-	for i, r := range runes {
-		if r > 255 {
+	for index, char := range runes {
+		if char > 255 {
 			width += 2
 		} else {
 			width++
 		}
 		if width >= limit {
-			return string(runes[:i+1])
+			return string(runes[:index+1])
 		}
 	}
 	return value
 }
 
 func (c *content) categoryListTemplate(category Row) string {
-	if templatePath := strings.TrimSpace(category["list_template"]); templatePath != "" {
-		return templatePath
+	if value := strings.TrimSpace(category["list_template"]); value != "" {
+		return value
 	}
 	return templateconfig.DefaultListTemplate
 }
 
 func (c *content) categoryCoverTemplate(category Row) string {
-	if templatePath := strings.TrimSpace(category["cover_template"]); templatePath != "" {
-		return templatePath
+	if value := strings.TrimSpace(category["cover_template"]); value != "" {
+		return value
 	}
-	// Older records have no cover template. Falling back keeps those records
-	// renderable until an administrator assigns one.
-	return c.categoryListTemplate(category)
+	return templateconfig.DefaultCoverTemplate
 }
 
 func (c *content) categoryDetailTemplate(category Row) string {
-	if templatePath := strings.TrimSpace(category["detail_template"]); templatePath != "" {
-		return templatePath
+	if value := strings.TrimSpace(category["detail_template"]); value != "" {
+		return value
 	}
 	return templateconfig.DefaultDetailTemplate
 }
 
-func (c *content) contentView(r Row) Row {
-	category := c.cat(r.n("category_id"))
-	image := strings.TrimSpace(r["cover_image"])
-	if image == "" {
-		image = defaultContentImage
-	}
-	categoryRoute := c.categoryListURL(category, 1)
+func (c *content) contentView(row Row) Row {
+	category := c.cat(row.n("category_id"))
+	image := strings.TrimSpace(row["cover_image"])
 	return Row{
-		"id": esc(r["id"]), "route_key": esc(r["route_key"]),
-		"title": esc(r["title"]), "body": r["body"], "content": r["body"],
-		"code": esc(r["code"]), "summary": esc(r["summary"]),
-		"cover_image": esc(image), "image": esc(image),
-		"published_at": esc(r["published_at"]), "date": esc(r["published_at"]),
-		"source": esc(r["source"]), "keywords": esc(r["keywords"]),
-		"description": esc(r["description"]),
-		"category_id": esc(category["id"]), "category_name": esc(category["name"]),
-		"category_url": categoryRoute, "content_url": c.contentURL(r),
-		"root_category_url": c.rootCategoryURL(),
-		"categories":        c.cats(0, false),
-		"category_children": c.cats(category.n("id"), false),
+		"id":                esc(row["id"]),
+		"route_key":         esc(row["route_key"]),
+		"title":             esc(row["title"]),
+		"body":              row["body"],
+		"content":           row["body"],
+		"code":              esc(row["code"]),
+		"summary":           esc(row["summary"]),
+		"cover_image":       esc(image),
+		"image":             esc(image),
+		"published_at":      esc(row["published_at"]),
+		"date":              esc(row["published_at"]),
+		"source":            esc(row["source"]),
+		"keywords":          esc(row["keywords"]),
+		"description":       esc(row["description"]),
+		"category_id":       esc(category["id"]),
+		"category_name":     esc(category["name"]),
+		"category_url":      c.categoryListURL(category, 1),
+		"content_url":       c.contentURL(row),
+		"category_children": "",
 	}
 }
 
@@ -913,140 +901,31 @@ func (c *content) categoryView(category Row, items []Row, page, pageSize int) Ro
 		"list_root_name":    esc(rootName),
 		"list_root_url":     c.categoryListURL(root, 1),
 		"root_category_url": c.rootCategoryURL(),
-		"category_children": c.cats(category.n("id"), false),
-		"categories":        c.cats(0, false),
 		"keywords":          esc(category["keywords"]),
 		"description":       esc(category["description"]),
-		// List and cover templates receive structured content through the
-		// template functions. Keep legacy markup fields empty.
-		"body":              "",
-		"content_list":      "",
+		"body":              category["cover_content"],
+		"content":           category["cover_content"],
 		"content_count":     strconv.Itoa(len(items)),
 		"content_page_size": strconv.Itoa(pageSize),
 	}
 }
 
-func (c *content) tag(k string, r Row, depth int) (string, error) {
-	k = strings.ToLower(k)
-	if depth > 12 {
-		return "", fmt.Errorf("标签循环引用: %s", k)
-	}
-	if v, ok := r[k]; ok {
-		return v, nil
-	}
-	if v, ok := c.labels[k]; ok {
-		var err error
-		s := oldTag.ReplaceAllStringFunc(v, func(t string) string {
-			x, e := c.tag(t[1:len(t)-1], r, depth+1)
-			if e != nil {
-				err = e
-			}
-			return x
-		})
-		return s, err
-	}
-	for _, cfg := range c.tables["benming_ch_config"] {
-		m := map[string]string{"hope_webname": "webname", "hope_weburl": "weburl", "hope_address": "coadd", "hope_tel": "cophone", "hope_fax": "cofax", "hope_email": "coemail", "hope_webqq": "webqq", "hope_webmsn": "webmsn", "hope_ren": "coren", "hope_post": "copost"}
-		if col, ok := m[k]; ok {
-			return esc(cfg[col]), nil
-		}
-		break
-	}
-	if strings.HasPrefix(k, "hope_meta_") {
-		for _, meta := range c.tables["benming_ch_metatype"] {
-			for name, col := range map[string]string{"title": "title", "keywords": "meta_keywords", "description": "meta_descriptions"} {
-				if k == "hope_meta_"+name+"("+meta["id"]+")" {
-					return esc(meta[col]), nil
-				}
-			}
-		}
-		return "", nil
-	}
-	switch {
-	case k == "categories()":
-		return c.cats(0, false), nil
-	case k == "categories_plain()":
-		return c.cats(0, true), nil
-	case k == "category_children()":
-		return c.cats(r.n("category_id"), false), nil
-	case strings.HasPrefix(k, "featured_content"):
-		limit, ok := callLimit(k, "featured_content", 8)
-		if !ok {
-			break
-		}
-		return c.featuredContent(limit), nil
-	case k == "content_index()":
-		return c.featuredContent(32), nil
-	case k == "prodindex()":
-		return c.homepageProductTag(true), nil
-	case k == "prodindex1()":
-		return c.homepageProductTag(false), nil
-	case k == "newsindex()":
-		return c.homepageArticleTag("news"), nil
-	case k == "serviceindex()", k == "serviceindex2()":
-		return c.homepageArticleTag("service"), nil
-	case k == "hope_aboutcat(32)":
-		var b strings.Builder
-		for _, v := range c.tables["benming_ch_cocat"] {
-			if v.n("root") == 32 {
-				b.WriteString("<li>" + link("/about/About-"+v["id"]+".html", v["coname"]) + "</li>")
-			}
-		}
-		return b.String(), nil
-	}
-	return "", fmt.Errorf("未实现的模板标签: %s", k)
-}
-
-func callLimit(value, name string, fallback int) (int, bool) {
-	if value == name+"()" {
-		return fallback, true
-	}
-	prefix := name + "("
-	if !strings.HasPrefix(value, prefix) || !strings.HasSuffix(value, ")") {
-		return 0, false
-	}
-	limit, err := strconv.Atoi(strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(value, prefix), ")")))
-	if err != nil || limit < 1 || limit > 200 {
-		return 0, false
-	}
-	return limit, true
-}
-
-func (c *content) featuredContent(limit int) string {
-	items := make([]Row, 0, len(c.tables["gocms_content"]))
-	for _, item := range c.tables["gocms_content"] {
-		if item.n("visible") == 1 && item.n("featured") == 1 {
-			items = append(items, item)
-		}
-	}
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].n("sort_order") == items[j].n("sort_order") {
-			return items[i].n("id") > items[j].n("id")
-		}
-		return items[i].n("sort_order") < items[j].n("sort_order")
-	})
-	items = items[:min(limit, len(items))]
-	var b strings.Builder
-	for _, item := range items {
-		b.WriteString("<li>" + link(c.contentURL(item), item["title"]) + "</li>")
-	}
-	return b.String()
-}
-
 func (c *content) build() error {
-	if e := c.page("index.html", templateconfig.RoleHomeIndex, Row{
-		"root_category_url": c.rootCategoryURL(),
-		"categories":        c.cats(0, false),
-	}); e != nil {
-		return e
+	if err := c.page("index.html", templateconfig.RoleHomeIndex, Row{
+		"title":         esc(c.settings["site_name"]),
+		"site_name":     esc(c.settings["site_name"]),
+		"site_url":      esc(c.settings["site_url"]),
+		"root_category": "",
+	}); err != nil {
+		return err
 	}
 
 	visible := c.visibleContents()
-
 	for _, item := range visible {
 		category := c.cat(item.n("category_id"))
 		view := c.contentView(item)
-		view["previous"], view["next"] = "没有了", "没有了"
+		view["previous_url"], view["previous_title"] = "", ""
+		view["next_url"], view["next_title"] = "", ""
 		sameCategory := make([]Row, 0)
 		for _, candidate := range visible {
 			if candidate.n("category_id") == item.n("category_id") {
@@ -1058,14 +937,16 @@ func (c *content) build() error {
 				continue
 			}
 			if index > 0 {
-				view["previous"] = link(c.contentURL(sameCategory[index-1]), sameCategory[index-1]["title"])
+				view["previous_url"] = esc(c.contentURL(sameCategory[index-1]))
+				view["previous_title"] = esc(sameCategory[index-1]["title"])
 			}
 			if index+1 < len(sameCategory) {
-				view["next"] = link(c.contentURL(sameCategory[index+1]), sameCategory[index+1]["title"])
+				view["next_url"] = esc(c.contentURL(sameCategory[index+1]))
+				view["next_title"] = esc(sameCategory[index+1]["title"])
 			}
 		}
-		if e := c.pageTemplate(strings.TrimPrefix(c.contentURL(item), "/"), c.categoryDetailTemplate(category), view); e != nil {
-			return e
+		if err := c.pageTemplate(strings.TrimPrefix(c.contentURL(item), "/"), c.categoryDetailTemplate(category), view); err != nil {
+			return err
 		}
 	}
 
@@ -1075,8 +956,8 @@ func (c *content) build() error {
 		if c.categoryPageType(category) == routing.PageTypeCover {
 			view := c.categoryView(category, items, 1, pageSize)
 			pagePath := c.categoryListPagePath(category, 1)
-			if e := c.pageTemplate(pagePath, c.categoryCoverTemplate(category), view); e != nil {
-				return e
+			if err := c.pageTemplate(pagePath, c.categoryCoverTemplate(category), view); err != nil {
+				return err
 			}
 			continue
 		}
@@ -1084,62 +965,53 @@ func (c *content) build() error {
 		for page := 1; page <= pages; page++ {
 			view := c.categoryView(category, items, page, pageSize)
 			pagePath := c.categoryListPagePath(category, page)
-			if e := c.pageTemplate(pagePath, c.categoryListTemplate(category), view); e != nil {
-				return e
+			if err := c.pageTemplate(pagePath, c.categoryListTemplate(category), view); err != nil {
+				return err
 			}
 			if page == 1 {
 				alias := strings.TrimPrefix(c.categoryListURL(category, 1), "/")
-				c.pages[alias] = c.pages[pagePath]
-				dir := c.categoryListDir(category)
-				if category.n("id") == c.rootCategory().n("id") {
-					c.pages[dir+"/index.html"] = c.pages[pagePath]
-				} else if _, ok := c.pages[dir+"/index.html"]; !ok {
-					c.pages[dir+"/index.html"] = c.pages[pagePath]
+				if alias != "" {
+					c.pages[alias] = c.pages[pagePath]
+				}
+				directory := c.categoryListDir(category)
+				if directory != "" {
+					indexPath := directory + "/index.html"
+					// Several categories may intentionally share a list directory. The
+					// first category in the configured order owns that directory index.
+					if c.pages[indexPath] == nil {
+						c.pages[indexPath] = c.pages[pagePath]
+					}
 				}
 			}
 		}
 	}
-	for _, r := range c.tables["benming_ch_cocat"] {
-		if r.n("root") != 32 {
-			continue
-		}
-		v := Row{"hope_title": esc(r["coname"]), "hope_co_centern": r["centern"]}
-		p := "about/About-" + r["id"] + ".html"
-		if e := c.page(p, templateconfig.RoleAboutDetail, v); e != nil {
-			return e
-		}
-		if _, ok := c.pages["about/index.html"]; !ok {
-			c.pages["about/index.html"] = c.pages[p]
-		}
+
+	if err := c.page("msg.html", templateconfig.RoleMessage, Row{}); err != nil {
+		return err
 	}
-	if e := c.page("msg.html", templateconfig.RoleMessage, Row{}); e != nil {
-		return e
-	}
-	var jobs strings.Builder
-	for _, r := range c.tables["benming_ch_job"] {
-		if r.n("state") != 1 {
-			continue
-		}
-		p := "job/detail/" + r["id"] + ".html"
-		v := Row{"hope_title": esc(r["jobname"]), "hope_address": esc(r["address"]), "hope_date": esc(r["date"]), "hope_jobneed": r["jobneed"], "hope_jobnob": esc(r["jobnob"]), "hope_linkren": esc(r["linkren"]), "hope_phone": esc(r["phone"])}
-		if e := c.page(p, templateconfig.RoleJobDetail, v); e != nil {
-			return e
-		}
-		jobs.WriteString("<tr><td>" + link("/"+p, r["jobname"]) + "</td></tr>")
-	}
-	if e := c.page("job/index.html", templateconfig.RoleJobList, Row{"hope_body": jobs.String()}); e != nil {
-		return e
+	if err := c.page("search.html", templateconfig.RoleSearch, Row{}); err != nil {
+		return err
 	}
 	urls := make([]string, 0, len(c.pages))
-	for p := range c.pages {
-		urls = append(urls, p)
+	for pagePath := range c.pages {
+		urls = append(urls, pagePath)
 	}
 	sort.Strings(urls)
 	c.pages["sitemap.html"] = renderSitemapHTML(urls)
-	base := ""
-	if cfg := c.tables["benming_ch_config"]; len(cfg) > 0 {
-		base = strings.TrimRight(cfg[0]["weburl"], "/")
-	}
-	c.pages["Sitemap.xml"] = renderSitemapXML(base, urls)
+	c.pages["Sitemap.xml"] = renderSitemapXML(strings.TrimRight(c.settings["site_url"], "/"), urls)
 	return nil
+}
+
+func min(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func max(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }

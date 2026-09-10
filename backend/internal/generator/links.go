@@ -10,14 +10,12 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-
-	"gocms/internal/sitehost"
 )
 
 var resourceAttribute = regexp.MustCompile(`(?i)\b(href|src|action)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)`)
 
-// Normalize legacy resource paths to the public resource URL space and match
-// the actual case of files on disk.
+// Normalize theme and content resource references to the public URL space and
+// match the actual case of files on disk.
 func (c *content) normalizeLinks(assets, theme string) error {
 	index := map[string]string{}
 	basenames := map[string]string{}
@@ -89,21 +87,6 @@ func (c *content) normalizeLinks(assets, theme string) error {
 				return attr
 			}
 			external := u.IsAbs() || u.Host != ""
-			if external && !sitehost.Matches(u.Hostname(), c.publicHost) {
-				return attr
-			}
-			legacy := strings.HasPrefix(strings.ToLower(strings.TrimPrefix(strings.ReplaceAll(u.Path, `\`, "/"), "/")), "uploadfile/") ||
-				strings.HasPrefix(strings.ToLower(strings.TrimPrefix(strings.ReplaceAll(u.Path, `\`, "/"), "/")), "produppic/")
-			if legacy {
-				filename := path.Base(strings.ReplaceAll(u.Path, `\`, "/"))
-				if filename == "." || filename == "/" || filename == "" {
-					return attr
-				}
-				u.Scheme, u.Host, u.Opaque = "", "", ""
-				u.User = nil
-				u.Path = "/images/" + filename
-				return m[1] + `="` + esc(u.String()) + `"`
-			}
 			if external {
 				return attr
 			}
@@ -117,12 +100,6 @@ func (c *content) normalizeLinks(assets, theme string) error {
 				ok = resolved != ""
 			}
 			if !ok {
-				if isImagePath(target) {
-					if fallback, exists := index["images/content-placeholder.jpg"]; exists {
-						u.Path = "/" + fallback
-						return m[1] + `="` + esc(u.String()) + `"`
-					}
-				}
 				return attr
 			}
 			u.Path = "/" + resolved
@@ -133,22 +110,4 @@ func (c *content) normalizeLinks(assets, theme string) error {
 		}))
 	}
 	return nil
-}
-
-func configuredPublicHost(rows []Row) string {
-	for _, row := range rows {
-		if host := sitehost.FromURL(row["weburl"]); host != "" {
-			return host
-		}
-	}
-	return ""
-}
-
-func isImagePath(value string) bool {
-	switch strings.ToLower(path.Ext(value)) {
-	case ".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp":
-		return true
-	default:
-		return false
-	}
 }

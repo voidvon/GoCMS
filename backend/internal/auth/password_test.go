@@ -17,7 +17,7 @@ func TestPasswordHash(t *testing.T) {
 		t.Fatal("wrong password verified")
 	}
 	if ComparePassword("123123", "bb412a706b8e114d") {
-		t.Fatal("legacy hash was accepted")
+		t.Fatal("unsupported password hash was accepted")
 	}
 }
 

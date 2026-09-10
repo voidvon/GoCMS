@@ -20,17 +20,16 @@ const (
 )
 
 const (
-	RoleHomeIndex   = "home_index"
-	RoleAboutDetail = "about_detail"
-	RoleMessage     = "message"
-	RoleJobList     = "job_list"
-	RoleJobDetail   = "job_detail"
+	RoleHomeIndex = "home_index"
+	RoleMessage   = "message"
+	RoleSearch    = "search"
 )
 
 const (
 	// Categories choose their own templates. These are only the initial values
 	// for a newly created category.
 	DefaultListTemplate   = "category_list.html"
+	DefaultCoverTemplate  = "category_cover.html"
 	DefaultDetailTemplate = "content_detail.html"
 )
 
@@ -45,10 +44,8 @@ type Assignment struct {
 
 var defaults = []Assignment{
 	{Key: RoleHomeIndex, Label: "首页模板", Dimension: DimensionHome, DimensionName: "首页", TemplatePath: "index.html", SortOrder: 10},
-	{Key: RoleJobList, Label: "招聘列表模板", Dimension: DimensionList, DimensionName: "列表模板", TemplatePath: "job_sort.html", SortOrder: 20},
-	{Key: RoleAboutDetail, Label: "公司介绍详情模板", Dimension: DimensionDetail, DimensionName: "详情模板", TemplatePath: "corporation.html", SortOrder: 30},
-	{Key: RoleJobDetail, Label: "招聘详情模板", Dimension: DimensionDetail, DimensionName: "详情模板", TemplatePath: "job_detail.html", SortOrder: 40},
-	{Key: RoleMessage, Label: "留言模板", Dimension: DimensionMessage, DimensionName: "留言模板", TemplatePath: "msg.html", SortOrder: 50},
+	{Key: RoleMessage, Label: "留言模板", Dimension: DimensionMessage, DimensionName: "留言", TemplatePath: "msg.html", SortOrder: 20},
+	{Key: RoleSearch, Label: "搜索模板", Dimension: DimensionOther, DimensionName: "其他模板", TemplatePath: "search.html", SortOrder: 30},
 }
 
 type queryer interface {

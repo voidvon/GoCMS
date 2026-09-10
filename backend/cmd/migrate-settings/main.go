@@ -7,6 +7,7 @@ import (
 	"log"
 
 	"gocms/internal/db"
+	"gocms/internal/legacyimport"
 )
 
 func main() {
@@ -18,8 +19,13 @@ func main() {
 		log.Fatal(err)
 	}
 	defer database.Close()
-	if err := db.NormalizeImagePaths(context.Background(), database); err != nil {
+
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("normalized image paths in %s\n", *databasePath)
+	if err := legacyimport.MigrateExistingSettings(ctx, database); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("migrated existing site settings into %s\n", *databasePath)
 }

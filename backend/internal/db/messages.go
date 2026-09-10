@@ -8,8 +8,7 @@ import (
 
 const unifiedMessageTable = "gocms_message"
 
-// EnsureMessages creates the runtime message model. Historical message rows
-// are imported once by MigrateLegacyMessages and are not read by the server.
+// EnsureMessages creates the message model used by the public form and admin.
 func EnsureMessages(ctx context.Context, database *sql.DB) error {
 	if _, err := database.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS "`+unifiedMessageTable+`" (
@@ -35,24 +34,6 @@ func EnsureMessages(ctx context.Context, database *sql.DB) error {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create unified message index: %w", err)
 		}
-	}
-	return nil
-}
-
-// MigrateLegacyMessages is used only by the one-time Access import.
-func MigrateLegacyMessages(ctx context.Context, database *sql.DB) error {
-	if err := EnsureMessages(ctx, database); err != nil {
-		return err
-	}
-	_, err := database.ExecContext(ctx, `
-		INSERT OR IGNORE INTO "gocms_message"
-		("id", "title", "name", "phone", "mobile", "fax", "email", "address", "content", "created_at", "state", "content_id")
-		SELECT "id", COALESCE("Title", ''), COALESCE("linkren", ''), COALESCE("phone", ''),
-		       COALESCE("mobile", ''), COALESCE("fax", ''), COALESCE("email", ''), COALESCE("address", ''),
-		       COALESCE("content", ''), COALESCE("date", ''), COALESCE("state", 0), COALESCE("prodid", 0)
-		FROM "benming_ch_Msg"`)
-	if err != nil {
-		return fmt.Errorf("migrate legacy messages: %w", err)
 	}
 	return nil
 }

@@ -1,0 +1,81 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<title>{{.category_name}}_{{setting "site_name"}}</title>
+<meta name="keywords" content="{{.keywords}}" />
+<meta name="description" content="{{.description}}" />
+<meta http-equiv="X-UA-Compatible" content="IE=EmulateIE7" />
+<link href="/css/c.css" rel="stylesheet" type="text/css" />
+</head>
+{{include "site-header.html" .}}
+<div id="page_main" class="clearfix">
+  <div class="page-right">
+    <div class="site-nav"><span>当前位置 : </span><a href="/index.html" class="F_a">公司主页</a> - <a href="{{.root_category_url}}" class="F_a">产品展示</a> - <b><font color="#ff0000">{{.category_name}}</font></b></div>
+    <table width="100%" border="0" cellpadding="0" cellspacing="0">
+      <tr><td>
+        <table width="99%" border="0" align="center" cellpadding="0" cellspacing="0">
+          {{range listChildren .}}
+          {{if .RowStart}}<tr width="708">{{end}}
+            <td width="120" height="23"><a href="{{.URL}}">{{.Name}}</a></td>
+          {{if .RowEnd}}</tr>{{end}}
+          {{end}}
+        </table>
+      </td></tr>
+    </table>
+    <div class="page-products">
+      <ul class="clearfix">
+        <table width="98%" border="0" cellpadding="0" cellspacing="0" align="center">
+          {{range listItems .}}
+          {{if .RowStart}}<tr>{{end}}
+            <td width="50%" valign="top" class="in6" height="100">
+              <table width="100%" height="100" border="0" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td width="39%" rowspan="2"><img src="{{.Image}}" alt="{{.Title}}" width="180" height="138" /></td>
+                  <td width="61%" height="20"><a href="{{.URL}}" class="Font_2E4690_a in4">{{.Title}}</a></td>
+                </tr>
+                <tr><td valign="top">{{.Summary}}</td></tr>
+              </table>
+            </td>
+          {{if .RowEnd}}
+            {{if .RowStart}}<td width="50%" valign="top" class="in6" height="100">&nbsp;</td>{{end}}
+          </tr>
+          {{end}}
+          {{end}}
+        </table>
+        {{with listPagination .}}
+        <table width="90%" border="0" align="center" cellpadding="0" cellspacing="0">
+          <tr><td height="45" align="center">
+            共 <strong>{{.Total}}</strong> 条信息
+            <a href="{{.FirstURL}}" class="0a">首页</a>
+            {{if .HasPrevious}}<a href="{{.PreviousURL}}" class="0a">上一页</a>{{else}}<span class="0a">上一页</span>{{end}}
+            {{if .HasNext}}<a href="{{.NextURL}}" class="0a">下一页</a>{{else}}<span class="0a">下一页</span>{{end}}
+            <a href="{{.LastURL}}" class="0a">尾页</a>
+            页次：<strong>{{.Page}}/{{.Pages}}</strong> 页 <strong>{{.PageSize}}</strong>条信息/页
+          </td></tr>
+        </table>
+        {{end}}
+      </ul>
+      <div class="page_list"><div class="list_info"></div></div>
+    </div>
+  </div>
+  <div class="page-left">
+    <div class="left-products">
+      <h2><span>产品展示</span></h2>
+      <div id="LeftMenu" class="ddsmoothmenu-v">
+        <ul>{{range catalogCategories .}}<li><a href="{{.URL}}">{{.Name}}</a></li>{{end}}</ul>
+      </div>
+    </div>
+    <div class="left-search">
+      <h2><span>站内搜索</span></h2>
+      <form id="form2" name="form2" method="get" action="/search.html">
+        <p>
+          <input name="q" type="text" id="ProductsName" value="找找看" size="18" class="Font_666666_a" onfocus="this.value='';" />
+          <input name="searchbutton" type="submit" id="searchbutton" value="" />
+        </p>
+      </form>
+    </div>
+    <div class="index-contact"></div>
+  </div>
+</div>
+{{include "site-footer.html" .}}

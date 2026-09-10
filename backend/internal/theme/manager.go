@@ -117,9 +117,9 @@ func SaveActive(dataRoot, id string) error {
 	return atomicWrite(filepath.Join(dataRoot, ActiveThemeFile), b, 0600)
 }
 
-func Resolve(themesRoot, dataRoot, override, fallbackTemplates string) (Definition, error) {
+func Resolve(themesRoot, dataRoot, override, defaultTemplates string) (Definition, error) {
 	if strings.TrimSpace(override) != "" {
-		return definitionFromRoot(filepath.Clean(override), fallbackTemplates)
+		return definitionFromRoot(filepath.Clean(override))
 	}
 	activeID, err := LoadActive(dataRoot)
 	if err != nil {
@@ -130,7 +130,7 @@ func Resolve(themesRoot, dataRoot, override, fallbackTemplates string) (Definiti
 		return Definition{}, err
 	}
 	if len(items) == 0 {
-		return Definition{TemplatesRoot: fallbackTemplates}, nil
+		return Definition{TemplatesRoot: defaultTemplates}, nil
 	}
 	selectedID := items[0].ID
 	for _, item := range items {
@@ -144,7 +144,7 @@ func Resolve(themesRoot, dataRoot, override, fallbackTemplates string) (Definiti
 			return Definition{}, err
 		}
 	}
-	return Find(themesRoot, selectedID, fallbackTemplates)
+	return Find(themesRoot, selectedID)
 }
 
 func List(themesRoot, activeID string) ([]Info, error) {
@@ -164,7 +164,7 @@ func List(themesRoot, activeID string) ([]Info, error) {
 		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
-		definition, err := definitionFromRoot(filepath.Join(themesRoot, entry.Name()), "")
+		definition, err := definitionFromRoot(filepath.Join(themesRoot, entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("read theme %s: %w", entry.Name(), err)
 		}
@@ -184,7 +184,7 @@ func List(themesRoot, activeID string) ([]Info, error) {
 	return items, nil
 }
 
-func Find(themesRoot, id, fallbackTemplates string) (Definition, error) {
+func Find(themesRoot, id string) (Definition, error) {
 	if !ValidID(id) {
 		return Definition{}, fmt.Errorf("invalid theme id")
 	}
@@ -200,7 +200,7 @@ func Find(themesRoot, id, fallbackTemplates string) (Definition, error) {
 			continue
 		}
 		root := filepath.Join(themesRoot, entry.Name())
-		definition, err := definitionFromRoot(root, fallbackTemplates)
+		definition, err := definitionFromRoot(root)
 		if err != nil {
 			return Definition{}, fmt.Errorf("read theme %s: %w", entry.Name(), err)
 		}
@@ -311,11 +311,11 @@ func ImportArchive(themesRoot string, source io.Reader) (Definition, error) {
 	if err := json.Unmarshal(manifestData, &manifest); err != nil {
 		return Definition{}, fmt.Errorf("invalid theme manifest: %w", err)
 	}
-	manifest, err = normalizeManifest(manifest, "")
+	manifest, err = normalizeManifest(manifest)
 	if err != nil {
 		return Definition{}, err
 	}
-	if !hasHTMLFile(temporary, "templates") {
+	if !hasHTMLFile(filepath.Join(temporary, "templates")) {
 		return Definition{}, fmt.Errorf("theme archive is missing templates")
 	}
 	target := filepath.Join(themesRoot, manifest.ID)
@@ -328,11 +328,11 @@ func ImportArchive(themesRoot string, source io.Reader) (Definition, error) {
 		return Definition{}, fmt.Errorf("install theme: %w", err)
 	}
 	keep = true
-	return definitionFromRoot(target, "")
+	return definitionFromRoot(target)
 }
 
 func WriteArchive(destination io.Writer, definition Definition) error {
-	manifest, err := normalizeManifest(definition.Manifest, filepath.Base(filepath.Clean(definition.Root)))
+	manifest, err := normalizeManifest(definition.Manifest)
 	if err != nil {
 		return err
 	}
@@ -364,7 +364,7 @@ func WriteArchive(destination io.Writer, definition Definition) error {
 	return archive.Close()
 }
 
-func definitionFromRoot(root, fallbackTemplates string) (Definition, error) {
+func definitionFromRoot(root string) (Definition, error) {
 	info, err := os.Stat(root)
 	if err != nil {
 		return Definition{}, err
@@ -376,28 +376,27 @@ func definitionFromRoot(root, fallbackTemplates string) (Definition, error) {
 	if err != nil {
 		return Definition{}, err
 	}
-	manifest, err = normalizeManifest(manifest, filepath.Base(filepath.Clean(root)))
+	manifest, err = normalizeManifest(manifest)
 	if err != nil {
 		return Definition{}, err
 	}
-	assetsRoot := root
-	if isDirectory(filepath.Join(root, "assets")) {
-		assetsRoot = filepath.Join(root, "assets")
-	}
+	assetsRoot := filepath.Join(root, "assets")
 	templatesRoot := filepath.Join(root, "templates")
 	if !isDirectory(templatesRoot) {
-		templatesRoot = fallbackTemplates
+		return Definition{}, fmt.Errorf("theme is missing templates directory")
+	}
+	if !hasHTMLFile(templatesRoot) {
+		return Definition{}, fmt.Errorf("theme templates directory contains no HTML files")
 	}
 	return Definition{Manifest: manifest, Root: root, AssetsRoot: assetsRoot, TemplatesRoot: templatesRoot}, nil
 }
 
 func readManifest(root string) (Manifest, error) {
 	b, err := os.ReadFile(filepath.Join(root, ManifestFile))
-	if os.IsNotExist(err) {
-		id := filepath.Base(filepath.Clean(root))
-		return Manifest{ID: id, Name: id}, nil
-	}
 	if err != nil {
+		if os.IsNotExist(err) {
+			return Manifest{}, fmt.Errorf("theme is missing %s", ManifestFile)
+		}
 		return Manifest{}, err
 	}
 	var manifest Manifest
@@ -407,11 +406,8 @@ func readManifest(root string) (Manifest, error) {
 	return manifest, nil
 }
 
-func normalizeManifest(manifest Manifest, fallbackID string) (Manifest, error) {
+func normalizeManifest(manifest Manifest) (Manifest, error) {
 	manifest.ID = strings.TrimSpace(manifest.ID)
-	if manifest.ID == "" {
-		manifest.ID = strings.TrimSpace(fallbackID)
-	}
 	if !ValidID(manifest.ID) {
 		return Manifest{}, fmt.Errorf("invalid theme id")
 	}
@@ -453,9 +449,9 @@ func readZipFile(item *zip.File, limit int64) ([]byte, error) {
 	return b, nil
 }
 
-func hasHTMLFile(root, directory string) bool {
+func hasHTMLFile(root string) bool {
 	found := false
-	_ = filepath.WalkDir(filepath.Join(root, directory), func(_ string, entry os.DirEntry, err error) error {
+	_ = filepath.WalkDir(root, func(_ string, entry os.DirEntry, err error) error {
 		if err != nil || found {
 			return err
 		}

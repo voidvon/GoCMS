@@ -71,6 +71,19 @@ func (s *Server) startPublishLocked(p *publication, queue bool) (generator.Repor
 
 	return p.report, true
 }
+
+func (s *Server) publicationReport(p *publication) generator.Report {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.report.State != "running" {
+		var persisted generator.Report
+		if data, err := os.ReadFile(filepath.Join(p.publisher.Data, "publish.json")); err == nil && json.Unmarshal(data, &persisted) == nil && persisted.Finished.After(p.report.Finished) {
+			p.report = persisted
+		}
+	}
+	return p.report
+}
+
 func (s *Server) adminPublish(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		methodNotAllowed(w)
@@ -92,9 +105,7 @@ func (s *Server) adminPublish(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, code, report)
 		return
 	}
-	s.publication.mu.Lock()
-	report := s.publication.report
-	s.publication.mu.Unlock()
+	report := s.publicationReport(s.publication)
 	writeJSON(w, 200, report)
 }
 

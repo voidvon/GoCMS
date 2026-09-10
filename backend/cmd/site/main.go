@@ -53,16 +53,7 @@ func main() {
 		log.Fatal(err)
 	}
 	defer database.Close()
-	if err := db.EnsureUnifiedCategories(context.Background(), database); err != nil {
-		log.Fatal(err)
-	}
-	if err := db.EnsureContent(context.Background(), database); err != nil {
-		log.Fatal(err)
-	}
-	if err := db.EnsureMessages(context.Background(), database); err != nil {
-		log.Fatal(err)
-	}
-	if err := db.EnsureTemplateAssignments(context.Background(), database); err != nil {
+	if err := db.CreateSchema(context.Background(), database); err != nil {
 		log.Fatal(err)
 	}
 	if err := database.Ping(); err != nil {
@@ -78,7 +69,7 @@ func main() {
 		log.Fatal(err)
 	}
 	server.ConfigurePublishing(themeDefinition.TemplatesRoot, *data, *frontend, *assets, themeDefinition.AssetsRoot)
-	server.ConfigureThemeCatalog(filepath.Join(*assets, "theme"), *data, themeDefinition, *templates)
+	server.ConfigureThemeCatalog(filepath.Join(*assets, "theme"), *data, themeDefinition)
 	if embeddedFrontend != nil {
 		server.ConfigureEmbeddedFrontend(embeddedFrontend)
 	}

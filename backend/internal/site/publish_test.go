@@ -22,7 +22,7 @@ func TestAdminSitemapGeneration(t *testing.T) {
 	if err := db.CreateSchema(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO "benming_ch_config" ("id", "WebUrl") VALUES (1, 'https://example.com/')`); err != nil {
+	if _, err := database.Exec(`INSERT INTO "gocms_site_setting" ("key", "value") VALUES ('site_url', 'https://example.com/')`); err != nil {
 		t.Fatal(err)
 	}
 	server, err := New(database, t.TempDir())

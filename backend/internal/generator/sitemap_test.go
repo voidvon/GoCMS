@@ -19,7 +19,7 @@ func TestGenerateSitemapFromPublishedPages(t *testing.T) {
 	if err := db.CreateSchema(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO "benming_ch_config" ("id", "WebUrl") VALUES (1, 'https://example.com/')`); err != nil {
+	if _, err := database.Exec(`INSERT INTO "gocms_site_setting" ("key", "value") VALUES ('site_url', 'https://example.com/')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -27,7 +27,7 @@ func TestGenerateSitemapFromPublishedPages(t *testing.T) {
 	web := filepath.Join(root, "web")
 	for name, body := range map[string]string{
 		"index.html":        "home",
-		"news/item.htm":     "news",
+		"catalog/item.htm":  "catalog",
 		"sitemap.html":      "old html map",
 		"Sitemap.xml":       "old xml map",
 		"assets/ignored.js": "asset",
@@ -49,7 +49,7 @@ func TestGenerateSitemapFromPublishedPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(html), `href="/index.html"`) || !strings.Contains(string(html), `href="/news/item.htm"`) || strings.Contains(string(html), "old html map") || strings.Contains(string(html), "Sitemap.xml") {
+	if !strings.Contains(string(html), `href="/index.html"`) || !strings.Contains(string(html), `href="/catalog/item.htm"`) || strings.Contains(string(html), "old html map") || strings.Contains(string(html), "Sitemap.xml") {
 		t.Fatalf("unexpected html sitemap: %s", html)
 	}
 
@@ -60,7 +60,7 @@ func TestGenerateSitemapFromPublishedPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(xml), "https://example.com/news/item.htm") || strings.Contains(string(xml), "ignored.js") || strings.Contains(string(xml), "Sitemap.xml") {
+	if !strings.Contains(string(xml), "https://example.com/catalog/item.htm") || strings.Contains(string(xml), "ignored.js") || strings.Contains(string(xml), "Sitemap.xml") {
 		t.Fatalf("unexpected xml sitemap: %s", xml)
 	}
 }

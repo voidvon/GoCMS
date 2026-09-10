@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"gocms/internal/db"
 )
 
 const (
@@ -121,22 +123,18 @@ func configuredSiteURL(ctx context.Context, database *sql.DB) (string, error) {
 	if database == nil {
 		return "", nil
 	}
-	var value sql.NullString
-	err := database.QueryRowContext(ctx, `SELECT "WebUrl" FROM "benming_ch_config" ORDER BY "id" LIMIT 1`).Scan(&value)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
-	}
+	settings, err := db.LoadSiteSettings(ctx, database)
 	if err != nil {
 		return "", fmt.Errorf("读取网站地址失败: %w", err)
 	}
-	return strings.TrimRight(strings.TrimSpace(value.String), "/"), nil
+	return strings.TrimRight(strings.TrimSpace(settings["site_url"]), "/"), nil
 }
 
 func renderSitemapHTML(urls []string) []byte {
 	var b strings.Builder
 	b.WriteString(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>网站地图</title><ul>`)
 	for _, value := range urls {
-		b.WriteString("<li>" + link("/"+value, value) + "</li>")
+		b.WriteString(`<li><a href="` + esc("/"+value) + `">` + esc(value) + `</a></li>`)
 	}
 	b.WriteString("</ul></html>")
 	return []byte(b.String())

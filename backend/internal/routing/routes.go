@@ -42,7 +42,7 @@ func NormalizeDirectory(value string) (string, error) {
 }
 
 // NormalizeOptionalDirectory accepts the site root as a valid category route.
-// It is used by cover pages such as a fixed /contact.html endpoint.
+// It is used by cover pages such as a fixed landing.html endpoint.
 func NormalizeOptionalDirectory(value string) (string, error) {
 	return normalizeDirectory(value, true)
 }
@@ -127,7 +127,7 @@ func normalizeFilePattern(value string, requireID, allowPage bool) (string, erro
 	return value, nil
 }
 
-func DefaultListPath(_ int64) string {
+func DefaultListPath() string {
 	return DefaultCategoryPath
 }
 

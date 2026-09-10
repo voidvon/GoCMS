@@ -1,0 +1,29 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<title>{{.category_name}} - {{setting "site_name"}}</title>
+<meta name="keywords" content="{{.keywords}}" />
+<meta name="description" content="{{.description}}" />
+<link href="/css/c.css" rel="stylesheet" type="text/css" />
+</head>
+{{include "site-header.html" .}}
+<div id="page_main" class="clearfix">
+  <div class="page-right">
+    <div class="site-nav"><span>当前位置 : </span><a href="/index.html">公司主页</a> - {{if .list_root_name}}<a href="{{.list_root_url}}">{{.list_root_name}}</a> - {{end}}<b><font color="#ff0000">{{.category_name}}</font></b></div>
+    <div class="page-content content-list">
+      <div class="category-children">{{range listChildren .}}<a href="{{.URL}}">{{.Name}}</a> {{end}}</div>
+      <ul>
+        {{range listItems .}}<li><a href="{{.URL}}">{{.Title}}</a><time>{{.Date}}</time>{{if .Excerpt}}<p>{{.Excerpt}}</p>{{end}}</li>{{end}}
+      </ul>
+      {{with listPagination .}}
+      <div class="page_list"><div class="list_info">共 <strong>{{.Total}}</strong> 条信息 <a href="{{.FirstURL}}">首页</a> {{if .HasPrevious}}<a href="{{.PreviousURL}}">上一页</a>{{else}}<span>上一页</span>{{end}} {{if .HasNext}}<a href="{{.NextURL}}">下一页</a>{{else}}<span>下一页</span>{{end}} <a href="{{.LastURL}}">尾页</a> 页次：<strong>{{.Page}}/{{.Pages}}</strong> 页</div></div>
+      {{end}}
+    </div>
+  </div>
+  <div class="page-left">
+    <div class="left-content"><h2><span>栏目</span></h2><div id="LeftMenu" class="ddsmoothmenu-v"><ul>{{range navigation .}}<li><a href="{{.URL}}">{{.Name}}</a></li>{{end}}</ul></div></div>
+    <div class="left-search"><h2><span>站内搜索</span></h2><form id="form2" name="form2" method="get" action="/search.html"><p><input name="q" type="text" id="q" value="找找看" size="18" class="Font_666666_a" onfocus="this.value='';" /><input name="searchbutton" type="submit" id="searchbutton" value="" /></p></form></div>
+  </div>
+</div>
+{{include "site-footer.html" .}}

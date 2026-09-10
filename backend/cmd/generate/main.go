@@ -25,16 +25,7 @@ func main() {
 		log.Fatal(e)
 	}
 	defer d.Close()
-	if e = db.EnsureUnifiedCategories(context.Background(), d); e != nil {
-		log.Fatal(e)
-	}
-	if e = db.EnsureContent(context.Background(), d); e != nil {
-		log.Fatal(e)
-	}
-	if e = db.EnsureMessages(context.Background(), d); e != nil {
-		log.Fatal(e)
-	}
-	if e = db.EnsureTemplateAssignments(context.Background(), d); e != nil {
+	if e = db.CreateSchema(context.Background(), d); e != nil {
 		log.Fatal(e)
 	}
 	themeDefinition, e := theme.Resolve(filepath.Join(*assets, "theme"), *data, *themeOverride, *templates)

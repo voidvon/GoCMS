@@ -2,43 +2,10 @@ package site
 
 import (
 	"net/http"
-	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
-
-	"gocms/internal/sitehost"
 )
-
-func canonicalImageURL(value, publicHost string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return value
-	}
-	u, err := url.Parse(value)
-	if err != nil || u.Path == "" {
-		return value
-	}
-	if u.Host != "" && !sitehost.Matches(u.Hostname(), publicHost) {
-		return value
-	}
-	normalized := strings.ReplaceAll(u.Path, `\`, "/")
-	trimmed := strings.TrimPrefix(normalized, "/")
-	lower := strings.ToLower(trimmed)
-	if strings.HasPrefix(lower, "uploadfile/") || strings.HasPrefix(lower, "produppic/") {
-		filename := path.Base(trimmed)
-		if filename == "." || filename == "/" || filename == "" {
-			return value
-		}
-		u.Scheme, u.Host, u.Opaque = "", "", ""
-		u.User = nil
-		u.RawPath = ""
-		u.Path = "/images/" + filename
-		return u.String()
-	}
-	return value
-}
 
 func (s *Server) resourceRoots(requestPath string) ([]string, string, bool) {
 	themeRoot, _ := s.themePaths()

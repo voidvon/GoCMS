@@ -3,18 +3,13 @@ package site
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"html"
 	"net/http"
-	"net/url"
 	"path"
 	"strconv"
 	"strings"
 
 	"gocms/internal/routing"
 )
-
-const defaultContentImage = "/images/content-placeholder.jpg"
 
 // Content is the runtime content model. Historical source rows are imported
 // into this shape once and are never read by the runtime afterward.
@@ -34,6 +29,7 @@ type Content struct {
 	OrderID     int64  `json:"order_id"`
 	Featured    int64  `json:"featured"`
 	Visible     int64  `json:"visible"`
+	URL         string `json:"url,omitempty"`
 }
 
 type ContentPage struct {
@@ -85,7 +81,22 @@ func (s *Server) adminContent(response http.ResponseWriter, request *http.Reques
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
+	if err := s.populateContentURLs(request.Context(), &result); err != nil {
+		http.Error(response, "content route error", http.StatusInternalServerError)
+		return
+	}
 	writeJSON(response, http.StatusOK, result)
+}
+
+func (s *Server) populateContentURLs(ctx context.Context, page *ContentPage) error {
+	for index := range page.Items {
+		url, err := s.contentDetailURL(ctx, page.Items[index].Category, page.Items[index].RouteKey)
+		if err != nil {
+			return err
+		}
+		page.Items[index].URL = url
+	}
+	return nil
 }
 
 func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Request, rawID string) {
@@ -151,7 +162,6 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	}
 	payload.Featured = normalizeFlag(payload.Featured)
 	payload.Visible = normalizeFlag(payload.Visible)
-	payload.CoverImage = canonicalImageURL(payload.CoverImage, s.publicHost)
 	payload.PublishedAt = normalizeContentDate(payload.PublishedAt)
 	if err := s.validateContentCategory(request.Context(), payload.Category); err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
@@ -237,12 +247,10 @@ func (s *Server) queryContent(ctx context.Context, query string, categoryID int6
 		where += ` AND "category_id" = ?`
 		args = append(args, categoryID)
 	}
-	if query != "" && query != "输入内容名称" {
+	if query != "" {
 		where += ` AND ("title" LIKE ? OR "code" LIKE ? OR "keywords" LIKE ? OR "summary" LIKE ?)`
 		pattern := "%" + query + "%"
 		args = append(args, pattern, pattern, pattern, pattern)
-	} else if query == "输入内容名称" {
-		query = ""
 	}
 	var total int64
 	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "gocms_content" WHERE `+where, args...).Scan(&total); err != nil {
@@ -364,48 +372,4 @@ func (s *Server) contentDetailURL(ctx context.Context, categoryID int64, routeKe
 		return "", err
 	}
 	return path.Join("/", directory, filename), nil
-}
-
-func (s *Server) searchHTML(response http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodGet && request.Method != http.MethodPost {
-		methodNotAllowed(response)
-		return
-	}
-	if err := request.ParseForm(); err != nil {
-		http.Error(response, "invalid form", http.StatusBadRequest)
-		return
-	}
-	query := strings.TrimSpace(request.FormValue("q"))
-	result, err := s.queryContent(request.Context(), query, 0, positiveInt(request.FormValue("page"), 1), 12, true)
-	if err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	response.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(response, `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>站内搜索</title><link rel="stylesheet" href="/css/c.css"><style>body{font-family:Arial,"Microsoft YaHei",sans-serif;margin:0;color:#333}.wrap{width:min(980px,calc(100% - 32px));margin:32px auto}.search{display:flex;gap:8px;margin:20px 0}.search input{flex:1;padding:10px;border:1px solid #ccc}.search button{padding:10px 20px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}.item{display:flex;gap:12px;border-bottom:1px dashed #ccc;padding:12px 0}.item img{width:120px;height:90px;object-fit:contain}.item h2{font-size:16px;margin:0 0 8px}.item p{font-size:13px;line-height:1.6;margin:0}.pages{margin:24px 0}.pages a{margin-right:12px}</style></head><body><main class="wrap"><a href="/">返回首页</a><h1>站内搜索</h1><form class="search" method="post" action="/search.asp?action=search"><input name="q" value="`)
-	fmt.Fprint(response, html.EscapeString(query))
-	fmt.Fprint(response, `" placeholder="输入内容名称"><button type="submit">搜索</button></form>`)
-	fmt.Fprintf(response, `<p>“%s”共找到 %d 条内容</p>`, html.EscapeString(query), result.Total)
-	fmt.Fprint(response, `<section class="grid">`)
-	for _, item := range result.Items {
-		image := item.CoverImage
-		if image == "" {
-			image = defaultContentImage
-		}
-		contentURL, err := s.contentDetailURL(request.Context(), item.Category, item.RouteKey)
-		if err != nil {
-			http.Error(response, "content route error", http.StatusInternalServerError)
-			return
-		}
-		fmt.Fprintf(response, `<article class="item"><img src="%s" alt="%s"><div><h2><a href="%s">%s</a></h2><p>%s</p></div></article>`, html.EscapeString(image), html.EscapeString(item.Title), html.EscapeString(contentURL), html.EscapeString(item.Title), html.EscapeString(snippet(item.Summary, 150)))
-	}
-	fmt.Fprint(response, `</section><nav class="pages">`)
-	lastPage := (result.Total + int64(result.PageSize) - 1) / int64(result.PageSize)
-	if result.Page > 1 {
-		fmt.Fprintf(response, `<a href="/search.asp?q=%s&page=%d">上一页</a>`, url.QueryEscape(query), result.Page-1)
-	}
-	if int64(result.Page) < lastPage {
-		fmt.Fprintf(response, `<a href="/search.asp?q=%s&page=%d">下一页</a>`, url.QueryEscape(query), result.Page+1)
-	}
-	fmt.Fprint(response, `</nav></main></body></html>`)
 }

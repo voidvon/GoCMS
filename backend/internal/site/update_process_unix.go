@@ -21,5 +21,5 @@ func waitForProcessExit(pid int, timeout time.Duration) error {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return fmt.Errorf("等待旧进程退出超时")
+	return fmt.Errorf("等待父进程退出超时")
 }

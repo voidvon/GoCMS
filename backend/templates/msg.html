@@ -1,38 +1,41 @@
+{{define "nav"}}
+{{range .}}
+<li><a href="{{.URL}}">{{.Name}}</a>{{if .Children}}<ul>{{template "nav" .Children}}</ul>{{end}}</li>
+{{end}}
+{{end}}
 <!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>在线留言 - {{tag "hope_webname" .}}</title>
-  <meta name="keywords" content="{{tag "hope_meta_keywords(12)" .}}">
-  <meta name="description" content="{{tag "hope_meta_description(12)" .}}">
+  <title>{{.title}} - {{setting "site_name"}}</title>
   <link rel="stylesheet" href="/css/c.css">
 </head>
 <body>
-{{tag "bm_indextop" .}}
-<main id="page_main" class="clearfix">
-  <article class="page-right page-content">
-    <nav class="site-nav"><a href="/">首页</a> - 在线留言</nav>
-    <h1>在线留言</h1>
-    <form id="message-form" class="message-form" method="post" action="/api/messages">
-      <p><label for="message-name">姓名</label><input id="message-name" name="name" required></p>
-      <p><label for="message-phone">电话</label><input id="message-phone" name="phone" required></p>
-      <p><label for="message-mobile">手机</label><input id="message-mobile" name="mobile"></p>
-      <p><label for="message-email">邮箱</label><input id="message-email" name="email" type="email"></p>
-      <p><label for="message-address">地址</label><input id="message-address" name="address"></p>
-      <p><label for="message-title">主题</label><input id="message-title" name="title" required></p>
-      <p><label for="message-content">内容</label><textarea id="message-content" name="content" rows="7"></textarea></p>
-      <p><button type="submit">提交留言</button><span id="message-status" role="status"></span></p>
-    </form>
-  </article>
-  <aside class="page-left">
-    <section class="left-content">
-      <h2><span>栏目</span></h2>
-      <ul class="ddsmoothmenu-v">{{tag "categories()" .}}</ul>
-    </section>
-  </aside>
-</main>
-{{tag "bm_botten" .}}
+<div id="wrapper">
+  <header class="top"><h1><a href="/">{{setting "site_name"}}</a></h1></header>
+  <nav id="MainMenu" aria-label="网站导航"><ul>{{template "nav" (navigation .)}}</ul></nav>
+  <main id="page_main" class="clearfix">
+    <aside class="page-left"><section class="left-content"><h2><span>栏目</span></h2><ul>{{range navigation .}}<li><a href="{{.URL}}">{{.Name}}</a></li>{{end}}</ul></section></aside>
+    <article class="page-right page-guestbook">
+      <nav class="site-nav"><a href="/">首页</a> - {{.title}}</nav>
+      <h1>{{.title}}</h1>
+      <form id="message-form" method="post" action="/api/messages">
+        <dl>
+          <dt><label for="message-name">姓名</label></dt><dd><input id="message-name" name="name" required></dd>
+          <dt><label for="message-phone">电话</label></dt><dd><input id="message-phone" name="phone" required></dd>
+          <dt><label for="message-mobile">手机</label></dt><dd><input id="message-mobile" name="mobile"></dd>
+          <dt><label for="message-email">邮箱</label></dt><dd><input id="message-email" name="email" type="email"></dd>
+          <dt><label for="message-address">地址</label></dt><dd><input id="message-address" name="address"></dd>
+          <dt><label for="message-title">主题</label></dt><dd><input id="message-title" name="title" required></dd>
+          <dt><label for="message-content">内容</label></dt><dd><textarea id="message-content" name="content" rows="7"></textarea></dd>
+        </dl>
+        <p><button type="submit">提交</button> <span id="message-status" role="status"></span></p>
+      </form>
+    </article>
+  </main>
+  <footer id="copyright">{{setting "site_copyright"}}</footer>
+</div>
 <script>
 const form = document.getElementById("message-form")
 const status = document.getElementById("message-status")
@@ -40,7 +43,7 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault()
   status.textContent = "正在提交..."
   try {
-    const response = await fetch(form.action, { method: "POST", body: new FormData(form) })
+    const response = await fetch(form.action, {method: "POST", body: new FormData(form)})
     const result = await response.json()
     if (!response.ok || !result.ok) throw new Error("submit failed")
     form.reset()

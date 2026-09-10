@@ -96,8 +96,8 @@ func (s *Server) adminLogin(response http.ResponseWriter, request *http.Request)
 	var user AdminUser
 	var storedPassword string
 	if err := s.database.QueryRowContext(request.Context(), `
-		SELECT "Id", COALESCE("UserName", ''), COALESCE("Flag", ''), COALESCE("PassWord", '')
-		FROM "benming_master" WHERE "UserName" = ?`, credentials.Username).
+		SELECT "id", COALESCE("username", ''), COALESCE("flags", ''), COALESCE("password_hash", '')
+		FROM "gocms_admin_user" WHERE "username" = ?`, credentials.Username).
 		Scan(&user.ID, &user.Username, &user.Flags, &storedPassword); err != nil || !auth.ComparePassword(credentials.Password, storedPassword) {
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "用户名或密码不正确"})
 		return
@@ -135,8 +135,8 @@ func (s *Server) adminSession(response http.ResponseWriter, request *http.Reques
 	}
 	var user AdminUser
 	err := s.database.QueryRowContext(request.Context(), `
-		SELECT "Id", COALESCE("UserName", ''), COALESCE("Flag", '')
-		FROM "benming_master" WHERE "UserName" = ?`, username).Scan(&user.ID, &user.Username, &user.Flags)
+		SELECT "id", COALESCE("username", ''), COALESCE("flags", '')
+		FROM "gocms_admin_user" WHERE "username" = ?`, username).Scan(&user.ID, &user.Username, &user.Flags)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -437,7 +437,7 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 		return err
 	}
 	if payload.ListPath == "" && payload.PageType != routing.PageTypeCover {
-		payload.ListPath = routing.DefaultListPath(payload.ParentID)
+		payload.ListPath = routing.DefaultListPath()
 		if payload.ParentID > 0 {
 			var parentPath string
 			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("list_path", '') FROM "gocms_category" WHERE "id" = ?`, payload.ParentID).Scan(&parentPath); err == nil && parentPath != "" {

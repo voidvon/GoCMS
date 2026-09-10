@@ -8,7 +8,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.title}} - {{setting "site_name"}}</title>
+  <title>{{.category_name}} - {{setting "site_name"}}</title>
   <meta name="keywords" content="{{.keywords}}">
   <meta name="description" content="{{.description}}">
   <link rel="stylesheet" href="/css/c.css">
@@ -19,15 +19,13 @@
   <nav id="MainMenu" aria-label="网站导航"><ul>{{template "nav" (navigation .)}}</ul></nav>
   <main id="page_main" class="clearfix">
     <aside class="page-left"><section class="left-content"><h2><span>栏目</span></h2><ul>{{range listCategories .}}<li><a href="{{.URL}}">{{.Name}}</a></li>{{end}}</ul></section></aside>
-    <article class="page-right page-newsdetail">
-      <nav class="site-nav"><a href="/">首页</a> - <a href="{{.category_url}}">{{.category_name}}</a> - {{.title}}</nav>
-      <h1 class="newsdetail-title">{{.title}}</h1>
-      <p class="content-meta">{{.published_at}}{{if .source}} | {{.source}}{{end}}</p>
-      {{if .summary}}<p class="content-summary">{{.summary}}</p>{{end}}
-      {{if .image}}<p><img src="{{.image}}" alt="{{.title}}" class="content-image"></p>{{end}}
-      <div class="content-body">{{.body}}</div>
-      <nav class="content-neighbors">{{if .previous_url}}<a href="{{.previous_url}}">上一条：{{.previous_title}}</a>{{end}}{{if .next_url}} <a href="{{.next_url}}">下一条：{{.next_title}}</a>{{end}}</nav>
-    </article>
+    <section class="page-right page-single">
+      <nav class="site-nav"><a href="/">首页</a> - {{.category_name}}</nav>
+      <h1>{{.category_name}}</h1>
+      {{if .body}}<div class="content-body">{{.body}}</div>{{end}}
+      <div class="category-children">{{range listChildren .}}<a href="{{.URL}}">{{.Name}}</a>{{end}}</div>
+      {{range listItems .}}<p><a href="{{.URL}}">{{.Title}}</a>{{if .Excerpt}}<span>{{.Excerpt}}</span>{{end}}</p>{{end}}
+    </section>
   </main>
   <footer id="copyright">{{setting "site_copyright"}}</footer>
 </div>

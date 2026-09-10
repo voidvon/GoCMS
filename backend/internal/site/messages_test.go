@@ -32,11 +32,11 @@ func TestMessagesUseUnifiedContentAssociation(t *testing.T) {
 	if contentID != 185 {
 		t.Fatalf("content association = %d", contentID)
 	}
-	var legacyCount int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM "benming_ch_Msg"`).Scan(&legacyCount); err != nil {
+	var messageCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM "gocms_message"`).Scan(&messageCount); err != nil {
 		t.Fatal(err)
 	}
-	if legacyCount != 0 {
-		t.Fatalf("runtime inserted into legacy message table: %d", legacyCount)
+	if messageCount != 1 {
+		t.Fatalf("message count = %d, want 1", messageCount)
 	}
 }

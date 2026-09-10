@@ -146,7 +146,7 @@ func TestAdminThemeCatalogActions(t *testing.T) {
 	first := writeTestTheme(t, themesRoot, "first", "First")
 	second := writeTestTheme(t, themesRoot, "second", "Second")
 	dataRoot := filepath.Join(t.TempDir(), "data")
-	server.ConfigureThemeCatalog(themesRoot, dataRoot, first, "")
+	server.ConfigureThemeCatalog(themesRoot, dataRoot, first)
 	token, err := server.createSession("gocms")
 	if err != nil {
 		t.Fatal(err)
@@ -285,7 +285,7 @@ func writeTestTheme(t *testing.T, themesRoot, id, name string) themepkg.Definiti
 			t.Fatal(err)
 		}
 	}
-	definition, err := themepkg.Find(themesRoot, id, "")
+	definition, err := themepkg.Find(themesRoot, id)
 	if err != nil {
 		t.Fatal(err)
 	}

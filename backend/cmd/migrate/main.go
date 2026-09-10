@@ -7,7 +7,7 @@ import (
 	"log"
 	"os"
 
-	"gocms/internal/db"
+	"gocms/internal/legacyimport"
 )
 
 func main() {
@@ -16,11 +16,11 @@ func main() {
 	force := flag.Bool("force", false, "replace an existing SQLite database")
 	flag.Parse()
 
-	report, err := db.ImportAccess(context.Background(), *accessPath, *sqlitePath, *force)
+	report, err := legacyimport.ImportAccess(context.Background(), *accessPath, *sqlitePath, *force)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for _, table := range db.AccessTables {
+	for _, table := range legacyimport.Tables {
 		fmt.Printf("%-32s %d rows\n", table.Name, report.Tables[table.Name])
 	}
 	fmt.Printf("Total: %d rows -> %s\n", report.Total, *sqlitePath)

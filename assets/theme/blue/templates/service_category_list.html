@@ -2,20 +2,19 @@
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-<title>{{tag "category_name" .}}_{{tag "hope_webname" .}}</title>
-<meta name="keywords" content="{{tag "keywords" .}}" />
-<meta name="description" content="{{tag "description" .}}" />
+<title>{{.category_name}}_{{setting "site_name"}}</title>
+<meta name="keywords" content="{{.keywords}}" />
+<meta name="description" content="{{.description}}" />
 <link href="/css/webmain.css" rel="stylesheet" type="text/css" />
 </head>
-<body oncontextmenu="return false" onmousedown="return false">
-{{tag "bm_top" .}}
+{{include "site-header.html" .}}
 <table width="972" border="0" align="center" cellpadding="0" cellspacing="0">
   <tr>
     <td width="173" valign="top">
       <table width="165" border="0" align="left" cellpadding="0" cellspacing="0">
         <tr>
           <td width="5"><img src="/images/menu_left.jpg" width="5" height="29" alt="" /></td>
-          <td width="155" align="center" background="/images/menu_bg.jpg" class="F_a Font-Weight"><span>{{tag "list_root_name" .}}</span></td>
+          <td width="155" align="center" background="/images/menu_bg.jpg" class="F_a Font-Weight"><span>{{.list_root_name}}</span></td>
           <td width="5"><img src="/images/menu_right.jpg" width="5" height="29" alt="" /></td>
         </tr>
         <tr>
@@ -39,11 +38,9 @@
           <td width="5"><img src="/images/menu_right.jpg" width="5" height="29" alt="" /></td>
         </tr>
         <tr>
-          <td colspan="3" bgcolor="#F4F4F4" class="Corporation_left">
-            <ul>
-              {{range catalogCategories .}}<li><a href="{{.URL}}">{{.Name}}</a></li>{{end}}
-            </ul>
-          </td>
+          <td colspan="3" bgcolor="#F4F4F4" class="Corporation_left"><ul>
+            {{range catalogCategories .}}<li><a href="{{.URL}}">{{.Name}}</a></li>{{end}}
+          </ul></td>
         </tr>
       </table>
       <div style="clear:both;"></div>
@@ -63,7 +60,7 @@
         <tr>
           <td width="5"><img src="/images/menu_left.jpg" width="5" height="29" alt="" /></td>
           <td width="28" align="right" background="/images/menu_bg.jpg" class="F_a Font-Weight"><img src="/images/index_01.jpg" width="12" height="5" alt="" /></td>
-          <td width="395" background="/images/menu_bg.jpg" class="F_a Font-Weight">&nbsp;<a href="/" class="F_a">首页</a> - <a href="{{tag "list_root_url" .}}" class="F_a">{{tag "list_root_name" .}}</a>{{if ne (tag "list_root_id" .) (tag "category_id" .)}} - <a href="{{tag "category_url" .}}" class="F_a">{{tag "category_name" .}}</a>{{end}}</td>
+          <td width="395" background="/images/menu_bg.jpg" class="F_a Font-Weight">&nbsp;<a href="/" class="F_a">首页</a> - <a href="{{.list_root_url}}" class="F_a">{{.list_root_name}}</a>{{if ne .list_root_id .category_id}} - <a href="{{.category_url}}" class="F_a">{{.category_name}}</a>{{end}}</td>
           <td width="395" background="/images/menu_bg.jpg" class="F_a Font-Weight"></td>
           <td width="6"><img src="/images/menu_right.jpg" width="5" height="29" alt="" /></td>
         </tr>
@@ -71,33 +68,29 @@
           <td height="465" colspan="5" valign="top" class="in4">
             <div align="left">
               <table width="810" height="58" border="0" align="center" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td width="814">
-                    {{range listItems .}}
-                    <table width="100%" border="0" align="center" cellpadding="0" cellspacing="0">
-                      <tr>
-                        <td width="19" height="20" align="center" valign="middle" class="news_bottom_line">&nbsp;<img src="/images/triangle.jpg" width="3" height="5" alt="" /></td>
-                        <td width="726" valign="middle" class="news_bottom_line Font-Weight"><a href="{{.URL}}" class="Font_2e4690_a">{{.Title}}</a> | {{.Date}}&nbsp;&nbsp;</td>
-                      </tr>
-                      <tr><td height="50" colspan="2" valign="middle" class="news_bottom_line news_sp Font_000000_a">{{.Excerpt}}</td></tr>
-                    </table>
-                    {{end}}
-                    {{with listPagination .}}
-                    <table width="90%" border="0" align="center" cellpadding="0" cellspacing="0">
-                      <tr>
-                        <td height="45" align="center">
-                          共 <strong>{{.Total}}</strong> 条信息
-                          <a href="{{.FirstURL}}" class="0a">首页</a>
-                          {{if .HasPrevious}}<a href="{{.PreviousURL}}" class="0a">上一页</a>{{else}}<span class="0a">上一页</span>{{end}}
-                          {{if .HasNext}}<a href="{{.NextURL}}" class="0a">下一页</a>{{else}}<span class="0a">下一页</span>{{end}}
-                          <a href="{{.LastURL}}" class="0a">尾页</a>
-                          页次：<strong>{{.Page}}/{{.Pages}}</strong> 页 <strong>{{.PageSize}}</strong>条信息/页
-                        </td>
-                      </tr>
-                    </table>
-                    {{end}}
-                  </td>
-                </tr>
+                <tr><td width="814">
+                  {{range listItems .}}
+                  <table width="100%" border="0" align="center" cellpadding="0" cellspacing="0">
+                    <tr>
+                      <td width="19" height="20" align="center" valign="middle" class="news_bottom_line">&nbsp;<img src="/images/triangle.jpg" width="3" height="5" alt="" /></td>
+                      <td width="726" valign="middle" class="news_bottom_line Font-Weight"><a href="{{.URL}}" class="Font_2e4690_a">{{.Title}}</a> | {{.Date}}&nbsp;&nbsp;</td>
+                    </tr>
+                    <tr><td height="50" colspan="2" valign="middle" class="news_bottom_line news_sp Font_000000_a">{{.Excerpt}}</td></tr>
+                  </table>
+                  {{end}}
+                  {{with listPagination .}}
+                  <table width="90%" border="0" align="center" cellpadding="0" cellspacing="0">
+                    <tr><td height="45" align="center">
+                      共 <strong>{{.Total}}</strong> 条信息
+                      <a href="{{.FirstURL}}" class="0a">首页</a>
+                      {{if .HasPrevious}}<a href="{{.PreviousURL}}" class="0a">上一页</a>{{else}}<span class="0a">上一页</span>{{end}}
+                      {{if .HasNext}}<a href="{{.NextURL}}" class="0a">下一页</a>{{else}}<span class="0a">下一页</span>{{end}}
+                      <a href="{{.LastURL}}" class="0a">尾页</a>
+                      页次：<strong>{{.Page}}/{{.Pages}}</strong> 页 <strong>{{.PageSize}}</strong>条信息/页
+                    </td></tr>
+                  </table>
+                  {{end}}
+                </td></tr>
               </table>
             </div>
           </td>
@@ -106,7 +99,4 @@
     </td>
   </tr>
 </table>
-{{tag "bm_botten" .}}
-</div>
-</body>
-</html>
+{{include "site-footer.html" .}}

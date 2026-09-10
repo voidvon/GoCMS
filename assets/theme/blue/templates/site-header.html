@@ -1,0 +1,73 @@
+<body oncontextmenu="return false" onmousedown="return false">
+<script type="text/javascript" src="/js/jquery-1.4.2.min.js"></script>
+<script type="text/javascript" src="/js/jquery.KinSlideshow-1.2.1.js"></script>
+<script type="text/javascript" src="/js/webtry_roll.js"></script>
+<script type="text/javascript" src="/js/ddsmoothmenu.js"></script>
+<script type="text/javascript">
+ddsmoothmenu.init({
+  mainmenuid: "MainMenu",
+  orientation: "h",
+  classname: "ddsmoothmenu",
+  contentsource: "markup"
+})
+</script>
+<style type="text/css">
+.style3 { font-size: 18px; }
+</style>
+<div id="wrapper">
+  <div class="top">
+    <img src="/images/logo.gif" width="650" height="90" alt="{{setting "site_name"}}" />
+    <div id="lang"><span class="style3">TEL:{{setting "company_phone"}} {{setting "company_mobile"}}<br></span></div>
+  </div>
+  <div id="MainMenu" class="ddsmoothmenu"><ul>
+    <li><a href="/index.html" title="公司主页" id="menu_selected"><span>公司主页</span></a></li>
+    <li><a href="/about" title="关于我们"><span>关于我们</span></a>
+      <ul class="menulevel">
+        <li><a href="/about/About-37.html" title="应用案例">应用案例</a></li>
+        <li><a href="/about/About-34.html" title="公司文化">公司文化</a></li>
+        <li><a href="/contact.html" title="联系我们">联系我们</a></li>
+      </ul>
+    </li>
+    <li><a href="/valve/" title="产品展示"><span>产品展示</span></a></li>
+    <li><a href="/news" title="新闻中心"><span>新闻中心</span></a></li>
+    <li><a href="/service/13.html" title="阀门技术"><span>阀门技术</span></a></li>
+    <li><a href="/service/" title="阀门知识"><span>阀门知识</span></a></li>
+    <li><a href="/msg.html" title="留言反馈"><span>留言反馈</span></a></li>
+    <li><a href="/contact.html" title="联系我们"><span>联系我们</span></a></li>
+    <li><a href="/sitemap.html" title="网站地图"><span>网站地图</span></a></li>
+    <li><a href="/Sitemap.xml" title="SITEMAP XML"><span>SITEMAP XML</span></a></li>
+  </ul></div>
+  <div align="center">
+    <a href="/valve/25.html">进口阀门</a> | <a href="/valve/1.html">闸阀</a> |
+    <a href="/news/4.html">新闻</a> | <a href="/valve/2.html">蝶阀</a> |
+    <a href="/valve/3.html">球阀</a> | <a href="/service/12.html">技术文章</a> |
+    <a href="/valve/4.html">截止阀</a> | <a href="/valve/5.html">放料阀</a> |
+    <a href="/valve/6.html">止回阀</a> | <a href="/valve/7.html">平衡阀</a> |
+    <a href="/valve/8.html">针型阀</a> | <a href="/valve/9.html">疏水阀</a> |
+    <a href="/valve/10.html">排气阀</a> | <a href="/valve/11.html">电磁阀</a> |
+    <a href="/valve/435.html">温控阀</a> | <a href="/valve/12.html">呼吸阀</a> |
+    <a href="/valve/13.html">旋塞阀</a> | <a href="/valve/14.html">隔膜阀</a> |
+    <a href="/valve/15.html">管夹阀</a> | <a href="/valve/17.html">减压阀</a> |
+    <a href="/valve/18.html">阻火器</a> | <a href="/valve/19.html">调节阀</a> |
+    <a href="/valve/20.html">过滤器</a> | <a href="/valve/21.html">安全阀</a> |
+    <a href="/valve/22.html">液压阀门</a> | <a href="/valve/24.html">气动角座阀</a> |
+    <a href="/valve/23.html">水力控制阀</a> | <a href="/valve/16.html">底阀</a> |
+    <a href="/about/">关于我们</a> |
+  </div>
+  <script type="text/javascript">
+  $(function(){
+    $("#banner").KinSlideshow({
+      moveStyle: "right",
+      titleBar: {titleBar_height: 32, titleBar_bgColor: "#000", titleBar_alpha: 0.7},
+      titleFont: {TitleFont_size: 12, TitleFont_color: "#FFFFFF", TitleFont_weight: "normal"},
+      btn: {btn_bgColor: "#2d2d2d", btn_bgHoverColor: "#1072aa", btn_fontColor: "#FFF", btn_fontHoverColor: "#FFF", btn_borderColor: "#4a4a4a", btn_borderHoverColor: "#1188c0", btn_borderWidth: 1}
+    });
+  });
+  </script>
+  <div id="banner">
+    <a href="#"><img src="/images/22.jpg" alt="上海彪维流体设备，多年的阀门制造经验" width="970" height="188" border="0" /></a>
+    <a href="#"><img src="/images/33.jpg" alt="彪维流体设备的阀门产品" width="970" height="188" border="0" /></a>
+    <a href="#"><img src="/images/44.jpg" alt="进口品牌阀门产品" width="970" height="188" border="0" /></a>
+    <a href="#"><img src="/images/55.jpg" alt="阀门产品应用行业" width="970" height="188" border="0" /></a>
+    <a href="#"><img src="/images/66.jpg" alt="彪维流体设备的阀门产品" width="970" height="188" border="0" /></a>
+  </div>

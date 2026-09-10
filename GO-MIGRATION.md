@@ -14,4 +14,4 @@ go run ./cmd/migrate -access '../legacy/database/kerfm!!@@##.asa' -sqlite '../da
 
 默认拒绝覆盖已有 SQLite。导入命令把旧表一次性转换为 `gocms_category`、`gocms_content` 和 `gocms_message`；Go 服务之后只读取统一表。管理员密码使用 Argon2id，Access 导入的旧 MD5 密码需要重置后才能登录。
 
-已有数据库可运行 `go run ./cmd/normalize-images`，将旧的 `/uploadfile/`、`/UploadFile/` 和 `produppic` 图片路径迁移到 `/images/`。
+运行时不会读取旧表、旧模板或旧资源路径。需要从原系统重新迁移时，请重新执行上面的导入命令；导入器会在一次性转换阶段写入统一表和 `/images/` 资源路径，生成的 SQLite 不保留源表。

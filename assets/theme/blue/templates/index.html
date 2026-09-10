@@ -1,0 +1,68 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<title>{{setting "site_title"}}</title>
+<meta name="robots" content="all" />
+<meta name="keywords" content="{{setting "site_keywords"}}" />
+<meta name="description" content="{{setting "site_description"}}" />
+<meta http-equiv="X-UA-Compatible" content="IE=EmulateIE7" />
+<link rel="icon" href="/images/favicon.svg" type="image/x-icon" />
+<link rel="shortcut icon" href="/images/favicon.svg" type="image/x-icon" />
+<link href="/css/webmain.css" rel="stylesheet" type="text/css" />
+</head>
+{{include "site-header.html" .}}
+<div id="index_main" class="clearfix">
+  <div class="index-left">
+    <div class="index-news">
+      <h2><span>新闻中心</span><a href="/news"><img src="/images/more.gif" width="32" height="5" alt="新闻中心" /></a></h2>
+      <ul>{{range featuredItemsIn "news" 8}}<li><a href="{{.URL}}">{{.Title}}</a></li>{{end}}</ul>
+    </div>
+    <div class="index-about">
+      <h2><span>关于我们</span><a href="/about"><img src="/images/more.gif" width="32" height="5" alt="关于我们" /></a></h2>
+      <p><img src="/images/index_AboutPic.jpg" alt="关于我们" width="145" height="181" />{{settingHTML "company_intro"}}</p>
+    </div>
+    <div class="index-newproducts">
+      <h2><a href="/valve"><img src="/images/more.gif" width="32" height="5" alt="产品展示" /></a></h2>
+      <div class="productsroll"><div id="LeftArr1"></div><div id="RightArr1"></div><ul id="ScrollBox" class="clearfix">
+        {{range featuredItemsIn "valve" 8}}<li><a href="{{.URL}}"><img src="{{.Image}}" alt="{{.Title}}" width="140" height="120" /><span>{{.Title}}</span></a></li>{{end}}
+      </ul>
+      <script type="text/javascript">
+      var scrollPic_01 = new ScrollPic();
+      scrollPic_01.scrollContId = "ScrollBox";
+      scrollPic_01.arrLeftId = "LeftArr1";
+      scrollPic_01.arrRightId = "RightArr1";
+      scrollPic_01.frameWidth = 648;
+      scrollPic_01.pageWidth = 324;
+      scrollPic_01.speed = 10;
+      scrollPic_01.space = 5;
+      scrollPic_01.autoPlay = true;
+      scrollPic_01.autoPlayTime = 3;
+      scrollPic_01.initialize();
+      </script>
+      </div>
+    </div>
+    <div class="index-products">
+      <h2><span>产品展示</span><a href="/valve"><img src="/images/more.gif" width="32" height="5" alt="产品展示" /></a></h2>
+      <ul class="clearfix">{{range featuredItemsIn "valve" 32}}<li><a href="{{.URL}}">{{.Title}}</a></li>{{end}}</ul>
+    </div>
+  </div>
+  <div class="index-right">
+    <div class="index-search"><h2><span>站内搜索</span></h2>
+      <form id="form2" name="form2" method="get" action="/search.html"><p>
+        <input name="q" type="text" id="ProductsName" value="找找看" size="18" class="Font_666666_a" onfocus="this.value='';" />
+        <input name="searchbutton" type="submit" id="searchbutton" value="" />
+      </p></form>
+    </div>
+    <div class="index-jobs">
+      <h2><span>阀门知识</span><a href="/service/"><img src="/images/more.gif" width="32" height="5" alt="阀门知识" /></a></h2>
+      <ul>{{range featuredItemsIn "service" 8}}<li><a href="{{.URL}}">{{.Title}}</a></li>{{end}}</ul>
+    </div>
+    <div class="index-contact"><h2><span>联系我们</span></h2><p>
+      地址: {{setting "company_address"}}<br>电话: {{setting "company_phone"}}<br>传真: {{setting "company_fax"}}<br>手机: {{setting "company_mobile"}}<br>邮箱: {{setting "company_email"}}
+    </p></div>
+    <a href="tencent://message/?uin={{setting "company_qq"}}&Site={{setting "site_name"}}&Menu=yes" target="_blank"><img alt="在线客服" src="/images/13_online.gif" border="0" /></a>
+  </div>
+</div>
+<div style="position:fixed; left:5px; top:45%; z-index:99999"><img src="/images/wx.jpg" width="180" height="247" alt="微信二维码" /></div>
+{{include "site-home-footer.html" .}}
