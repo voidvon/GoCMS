@@ -1,0 +1,56 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<title>{{.title}} - {{setting "site_name"}}</title>
+<meta name="keywords" content="{{.keywords}}" />
+<meta name="description" content="{{.description}}" />
+<meta http-equiv="X-UA-Compatible" content="IE=EmulateIE7" />
+<link href="/css/c.css" rel="stylesheet" type="text/css" />
+</head>
+{{include "site-header.html" .}}
+<div id="page_main" class="clearfix">
+  <div class="page-right">
+    <div class="site-nav"><span>当前位置 : </span><a href="/index.html">公司主页</a> - <a href="{{.category_root_url}}">{{.category_root_name}}</a> - {{.title}}</div>
+    <table width="100%" border="0" cellpadding="0" cellspacing="0" class="in4">
+      <tr>
+        <td width="19%" height="151" align="center" valign="top" class="in5">
+          {{if and .image (ne .image "/images/nopicture.gif")}}<img src="{{.image}}" alt="{{.title}}" width="160" height="134" />{{end}}
+        </td>
+        <td width="41%" valign="top" class="in5">
+          <table width="100%" height="151" border="0" cellpadding="0" cellspacing="0">
+            <tr><td width="24%" height="20" class="Font-Weight">产品名称：</td><td width="76%" class="Font_2E4690_a Font-Weight">{{.title}}</td></tr>
+            {{if .code}}<tr><td height="20" class="Font-Weight">产品型号：</td><td class="Font-Weight Font_2E4690_a">{{.code}}</td></tr>{{end}}
+            <tr><td height="27" colspan="2" align="left"><a href="tencent://message/?uin={{setting "company_qq"}}&amp;Site={{setting "site_name"}}&amp;Menu=yes" target="_blank"><img src="/images/gmzx.gif" border="0" alt="在线咨询" /></a></td></tr>
+            {{if setting "company_phone"}}<tr><td height="26" colspan="2" align="left"><span class="Font_FF0000_a Font-Weight">咨询电话：{{setting "company_phone"}}</span></td></tr>{{end}}
+            {{if setting "company_fax"}}<tr><td height="22" colspan="2" align="left"><span class="Font_FF0000_a Font-Weight">传真：{{setting "company_fax"}}</span></td></tr>{{end}}
+          </table>
+        </td>
+        <td width="40%" valign="top">
+          {{with relatedItems . 4}}<table width="100%" border="0" cellpadding="0" cellspacing="0">
+            {{range .}}{{if .RowStart}}<tr>{{end}}<td width="50%" height="90" align="center" valign="middle" class="in5"><table width="100%" border="0" cellpadding="0" cellspacing="0"><tr><td width="100%" height="47" align="center" valign="middle" class="in5">{{if .Image}}<img src="{{.Image}}" alt="{{.Title}}" width="95" height="70" />{{end}}</td></tr><tr><td align="center" height="20">&nbsp;<a href="{{.URL}}" class="Font_2E4690_a Font-Weight">{{.Title}}</a></td></tr></table></td>{{if .RowEnd}}</tr>{{end}}{{end}}
+          </table>{{end}}
+        </td>
+      </tr>
+    </table>
+    <div class="page-products">
+      <table width="100%" border="0" cellpadding="0" cellspacing="0">
+        <tr><td height="30" class="prod_bottom_dasheds">产品介绍</td></tr>
+        <tr><td height="15" align="left" valign="top" class="prod_sp">{{.body}}</td></tr>
+      </table>
+      <div class="page_list"><div class="list_info"></div></div>
+    </div>
+  </div>
+  <div class="page-left">
+    <div class="left-products">
+      <h2><span>{{.category_root_name}}</span></h2>
+      <div id="LeftMenu" class="ddsmoothmenu-v"><ul>{{range catalogCategories .}}<li><a href="{{.URL}}">{{.Name}}</a></li>{{end}}</ul></div>
+    </div>
+    <div class="left-search">
+      <h2><span>站内搜索</span></h2>
+      <form id="form2" name="form2" method="get" action="/search.html"><p><input name="q" type="text" id="ProductsName" value="找找看" size="18" class="Font_666666_a" onfocus="this.value='';" /><input name="searchbutton" type="submit" id="searchbutton" value="" /></p></form>
+    </div>
+    <div class="index-contact"></div>
+  </div>
+</div>
+{{include "site-footer.html" .}}

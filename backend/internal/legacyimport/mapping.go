@@ -250,14 +250,18 @@ func importCategories(ctx context.Context, transaction *sql.Tx, source categoryS
 			continue
 		}
 		listPath, detailPath, pageSize := categoryRoutes(source, row, rows)
+		detailTemplate := "content_detail.html"
+		if source == productCategories {
+			detailTemplate = "product_detail.html"
+		}
 		resultID, err := transaction.ExecContext(ctx, `
 			INSERT INTO "gocms_category"
 			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id",
 			 "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path",
 			 "detail_file_pattern", "detail_template", "keywords", "description", "cover_content")
-			VALUES (?, 0, ?, ?, 'list', ?, ?, '{id}.html', 'category_list.html', '', ?, '{id}.html', 'content_detail.html', ?, ?, '')`,
+			VALUES (?, 0, ?, ?, 'list', ?, ?, '{id}.html', 'category_list.html', '', ?, '{id}.html', ?, ?, ?, '')`,
 			row.text("CatName", "coname"), row.number("Orderid", "ORderID", "orderid"), pageSize, oldID,
-			listPath, detailPath, row.text("key"), normalizeImageText(row.text("desc"), publicHost))
+			listPath, detailPath, detailTemplate, row.text("key"), normalizeImageText(row.text("desc"), publicHost))
 		if err != nil {
 			return nil, fmt.Errorf("import %s category %d: %w", source, oldID, err)
 		}

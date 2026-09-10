@@ -116,6 +116,9 @@ func (c *content) templateFuncs() template.FuncMap {
 		"featuredItemsIn": func(collection string, limit int) []ListItem {
 			return c.featuredItemsIn(collection, limit)
 		},
+		"relatedItems": func(row Row, limit int) []ListItem {
+			return c.relatedItems(row, limit)
+		},
 		"listPagination": func(row Row) ListPagination {
 			return c.listPagination(row)
 		},
@@ -776,6 +779,32 @@ func (c *content) featuredItemsIn(collection string, limit int) []ListItem {
 	return result
 }
 
+func (c *content) relatedItems(view Row, limit int) []ListItem {
+	if limit < 1 {
+		return []ListItem{}
+	}
+	category := c.cat(view.n("category_id"))
+	if category["id"] == "" {
+		return []ListItem{}
+	}
+	items := make([]Row, 0, limit)
+	for _, item := range c.tables["gocms_content"] {
+		if item.n("visible") != 1 || item.n("id") == view.n("id") || item.n("category_id") != category.n("id") {
+			continue
+		}
+		items = append(items, item)
+	}
+	sortRows(items, "sort_order", false)
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	result := make([]ListItem, 0, len(items))
+	for index, item := range items {
+		result = append(result, c.listItem(item, category, index, len(items)))
+	}
+	return result
+}
+
 func (c *content) listPagination(view Row) ListPagination {
 	category, _, page, pages, pageSize, total := c.listContext(view)
 	pagination := ListPagination{
@@ -855,27 +884,31 @@ func (c *content) categoryDetailTemplate(category Row) string {
 
 func (c *content) contentView(row Row) Row {
 	category := c.cat(row.n("category_id"))
+	root := c.listRoot(category)
 	image := strings.TrimSpace(row["cover_image"])
 	return Row{
-		"id":                esc(row["id"]),
-		"route_key":         esc(row["route_key"]),
-		"title":             esc(row["title"]),
-		"body":              row["body"],
-		"content":           row["body"],
-		"code":              esc(row["code"]),
-		"summary":           esc(row["summary"]),
-		"cover_image":       esc(image),
-		"image":             esc(image),
-		"published_at":      esc(row["published_at"]),
-		"date":              esc(row["published_at"]),
-		"source":            esc(row["source"]),
-		"keywords":          esc(row["keywords"]),
-		"description":       esc(row["description"]),
-		"category_id":       esc(category["id"]),
-		"category_name":     esc(category["name"]),
-		"category_url":      c.categoryListURL(category, 1),
-		"content_url":       c.contentURL(row),
-		"category_children": "",
+		"id":                 esc(row["id"]),
+		"route_key":          esc(row["route_key"]),
+		"title":              esc(row["title"]),
+		"body":               row["body"],
+		"content":            row["body"],
+		"code":               esc(row["code"]),
+		"summary":            esc(row["summary"]),
+		"cover_image":        esc(image),
+		"image":              esc(image),
+		"published_at":       esc(row["published_at"]),
+		"date":               esc(row["published_at"]),
+		"source":             esc(row["source"]),
+		"keywords":           esc(row["keywords"]),
+		"description":        esc(row["description"]),
+		"category_id":        esc(category["id"]),
+		"category_name":      esc(category["name"]),
+		"category_url":       c.categoryListURL(category, 1),
+		"category_root_id":   esc(root["id"]),
+		"category_root_name": esc(root["name"]),
+		"category_root_url":  c.categoryListURL(root, 1),
+		"content_url":        c.contentURL(row),
+		"category_children":  "",
 	}
 }
 

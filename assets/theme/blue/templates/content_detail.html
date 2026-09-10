@@ -15,7 +15,7 @@
       <h1 class="content-title">{{.title}}</h1>
       <p class="content-meta">{{.published_at}}{{if .source}} | {{.source}}{{end}}</p>
       {{if .summary}}<div class="content-summary">{{.summary}}</div>{{end}}
-      {{if .image}}<p><img src="{{.image}}" alt="{{.title}}" class="content-image" /></p>{{end}}
+      {{if and .image (ne .image "/images/nopicture.gif")}}<p><img src="{{.image}}" alt="{{.title}}" class="content-image" /></p>{{end}}
       <div class="content-body">{{.body}}</div>
       <div class="content-neighbors">{{if .previous_url}}上一条：<a href="{{.previous_url}}">{{.previous_title}}</a>{{end}}{{if .next_url}}　下一条：<a href="{{.next_url}}">{{.next_title}}</a>{{end}}</div>
     </div>

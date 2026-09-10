@@ -55,7 +55,7 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 	writeTemplate(t, templates, "msg.html", `message`)
 	writeTemplate(t, templates, "search.html", `search`)
 	writeTemplate(t, templates, "lists/section.html", `list={{.category_name}} page={{.list_page}}/{{.content_count}} items={{range listItems .}}{{.Title}}={{.URL}};{{end}}{{with listPagination .}}pages={{.Pages}} current={{.Page}}{{end}}`)
-	writeTemplate(t, templates, "details/item.html", `detail={{.title}} category={{.category_name}} body={{.body}} previous={{.previous_url}} next={{.next_url}}`)
+	writeTemplate(t, templates, "details/item.html", `detail={{.title}} category={{.category_name}} root={{.category_root_name}} body={{.body}} previous={{.previous_url}} next={{.next_url}} related={{range relatedItems . 2}}{{.Title}}={{.URL}};{{end}}`)
 	writeTemplate(t, templates, "covers/landing.html", `cover={{.category_name}} children={{range listChildren .}}{{.Name}}={{.URL}};{{end}}`)
 
 	root := t.TempDir()
@@ -86,7 +86,7 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 		t.Fatalf("unexpected configured list output: %s", listBody)
 	}
 	detailBody := readGenerated(t, web, "entries/second.html")
-	if !strings.Contains(detailBody, "detail=第二条 category=任意内容") || !strings.Contains(detailBody, "previous=/entries/first.html") || !strings.Contains(detailBody, "next=/entries/third.html") {
+	if !strings.Contains(detailBody, "detail=第二条 category=任意内容 root=任意内容") || !strings.Contains(detailBody, "previous=/entries/first.html") || !strings.Contains(detailBody, "next=/entries/third.html") || !strings.Contains(detailBody, "related=第一条=/entries/first.html;第三条=/entries/third.html;") {
 		t.Fatalf("unexpected configured detail output: %s", detailBody)
 	}
 	coverBody := readGenerated(t, web, "landing/index.html")
