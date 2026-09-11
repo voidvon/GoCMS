@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   AlignCenter,
   AlignJustify,
@@ -14,6 +14,7 @@ import {
   Link2,
   List,
   ListOrdered,
+  Library,
   Minus,
   Quote,
   Redo2,
@@ -31,12 +32,15 @@ import StarterKit from "@tiptap/starter-kit"
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react"
 
 import { IconButton } from "@/components/app/app-ui"
+import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
+import { uploadMedia, type MediaAsset } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type RichTextEditorProps = {
   id?: string
   value: string
   onChange: (value: string) => void
+  onUploadingChange?: (uploading: boolean) => void
   className?: string
 }
 
@@ -74,18 +78,24 @@ function Divider() {
   return <span className="mx-0.5 h-5 w-px bg-border" aria-hidden="true" />
 }
 
-function RichTextToolbar({ editor, state }: { editor: NonNullable<ReturnType<typeof useEditor>>; state: EditorState }) {
+function RichTextToolbar({
+  editor,
+  state,
+  imageUploading,
+  onUploadImage,
+  onSelectMedia,
+}: {
+  editor: NonNullable<ReturnType<typeof useEditor>>
+  state: EditorState
+  imageUploading: boolean
+  onUploadImage: () => void
+  onSelectMedia: () => void
+}) {
   function setLink() {
     const currentHref = editor.getAttributes("link").href as string | undefined
     const href = window.prompt("链接地址", currentHref ?? "https://")?.trim()
     if (!href) return
     editor.chain().focus().extendMarkRange("link").setLink({ href }).run()
-  }
-
-  function insertImage() {
-    const src = window.prompt("图片地址", "/images/")?.trim()
-    if (!src) return
-    editor.chain().focus().setImage({ src }).run()
   }
 
   return (
@@ -258,8 +268,11 @@ function RichTextToolbar({ editor, state }: { editor: NonNullable<ReturnType<typ
       >
         <Unlink2 />
       </IconButton>
-      <IconButton label="插入图片" variant="ghost" size="icon-sm" onClick={insertImage}>
+      <IconButton label="上传图片" variant="ghost" size="icon-sm" disabled={imageUploading} onClick={onUploadImage}>
         <ImagePlus />
+      </IconButton>
+      <IconButton label="选择图片素材" variant="ghost" size="icon-sm" disabled={imageUploading} onClick={onSelectMedia}>
+        <Library />
       </IconButton>
       <IconButton
         label="插入表格"
@@ -283,8 +296,13 @@ function RichTextToolbar({ editor, state }: { editor: NonNullable<ReturnType<typ
   )
 }
 
-export function RichTextEditor({ id, value, onChange, className }: RichTextEditorProps) {
+export function RichTextEditor({ id, value, onChange, onUploadingChange, className }: RichTextEditorProps) {
   const onChangeRef = useRef(onChange)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const imageSelectionRef = useRef<{ from: number; to: number } | null>(null)
+  const [imageUploading, setImageUploading] = useState(false)
+  const [imageError, setImageError] = useState("")
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false)
 
   useEffect(() => {
     onChangeRef.current = onChange
@@ -342,10 +360,98 @@ export function RichTextEditor({ id, value, onChange, className }: RichTextEdito
     },
   })
 
+  function rememberSelection() {
+    if (!editor || imageUploading) return
+    imageSelectionRef.current = {
+      from: editor.state.selection.from,
+      to: editor.state.selection.to,
+    }
+    return true
+  }
+
+  function chooseImage() {
+    if (!rememberSelection()) return
+    imageInputRef.current?.click()
+  }
+
+  function chooseMedia() {
+    if (!rememberSelection()) return
+    setMediaPickerOpen(true)
+  }
+
+  function insertImage(asset: Pick<MediaAsset, "url" | "original_name">) {
+    if (!editor) return
+    const selection = imageSelectionRef.current
+    const chain = editor.chain().focus()
+    if (selection) chain.setTextSelection(selection)
+    chain.setImage({ src: asset.url, alt: asset.original_name }).run()
+    imageSelectionRef.current = null
+  }
+
+  async function handleImageUpload(file: File, preserveSelection = false) {
+    if (!editor || imageUploading) return
+    if (!preserveSelection && !rememberSelection()) return
+    setImageUploading(true)
+    setImageError("")
+    onUploadingChange?.(true)
+    try {
+      const result = await uploadMedia(file)
+      insertImage({ url: result.asset.url, original_name: file.name })
+    } catch (uploadError) {
+      setImageError(uploadError instanceof Error ? uploadError.message : "图片上传失败")
+    } finally {
+      imageSelectionRef.current = null
+      setImageUploading(false)
+      onUploadingChange?.(false)
+    }
+  }
+
+  function uploadDroppedImage(file: File) {
+    if (!file.type.startsWith("image/")) return
+    void handleImageUpload(file)
+  }
+
   return (
     <div id={id} className={cn("rich-text-editor overflow-hidden rounded-lg border border-input bg-background", className)}>
-      {editor ? <RichTextToolbar editor={editor} state={state ?? emptyEditorState} /> : null}
-      <EditorContent editor={editor} />
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ""
+          if (file) void handleImageUpload(file, true)
+        }}
+      />
+      {editor ? <RichTextToolbar editor={editor} state={state ?? emptyEditorState} imageUploading={imageUploading} onUploadImage={chooseImage} onSelectMedia={chooseMedia} /> : null}
+      <div
+        onDragOver={(event) => {
+          if ([...event.dataTransfer.types].includes("Files")) event.preventDefault()
+        }}
+        onDrop={(event) => {
+          const file = event.dataTransfer.files[0]
+          if (!file || !file.type.startsWith("image/")) return
+          event.preventDefault()
+          uploadDroppedImage(file)
+        }}
+        onPaste={(event) => {
+          const file = [...event.clipboardData.files].find((candidate) => candidate.type.startsWith("image/"))
+          if (!file) return
+          event.preventDefault()
+          uploadDroppedImage(file)
+        }}
+      >
+        <EditorContent editor={editor} />
+      </div>
+      {imageError ? <p role="alert" className="border-t px-3 py-2 text-xs text-destructive">{imageError}</p> : null}
+      <MediaPickerDialog
+        open={mediaPickerOpen}
+        onOpenChange={setMediaPickerOpen}
+        onSelect={insertImage}
+        title="插入图片素材"
+        description="从已上传的图片中插入到当前光标位置。"
+      />
     </div>
   )
 }

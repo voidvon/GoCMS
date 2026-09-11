@@ -194,12 +194,22 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
+		if err := syncContentMediaRefs(request.Context(), transaction, newID, payload.Content, payload.CoverImage); err != nil {
+			http.Error(response, "media reference error", http.StatusInternalServerError)
+			return
+		}
 		if err := transaction.Commit(); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
 	} else {
-		result, err := s.database.ExecContext(request.Context(), `
+		transaction, err := s.database.BeginTx(request.Context(), nil)
+		if err != nil {
+			http.Error(response, "database error", http.StatusInternalServerError)
+			return
+		}
+		defer transaction.Rollback()
+		result, err := transaction.ExecContext(request.Context(), `
 			UPDATE "gocms_content" SET "category_id" = ?, "title" = ?, "code" = ?, "summary" = ?, "body" = ?,
 			"cover_image" = ?, "published_at" = ?, "source" = ?, "keywords" = ?, "description" = ?,
 			"sort_order" = ?, "featured" = ?, "visible" = ? WHERE "id" = ?`,
@@ -216,6 +226,14 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		}
 		if affected == 0 {
 			http.Error(response, "content not found", http.StatusNotFound)
+			return
+		}
+		if err := syncContentMediaRefs(request.Context(), transaction, id, payload.Content, payload.CoverImage); err != nil {
+			http.Error(response, "media reference error", http.StatusInternalServerError)
+			return
+		}
+		if err := transaction.Commit(); err != nil {
+			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
 	}

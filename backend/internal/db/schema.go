@@ -20,6 +20,7 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 		{name: "admin users", fn: EnsureAdminUsers},
 		{name: "categories", fn: EnsureUnifiedCategories},
 		{name: "content", fn: EnsureContent},
+		{name: "media", fn: EnsureMedia},
 		{name: "messages", fn: EnsureMessages},
 		{name: "template assignments", fn: templateconfig.Ensure},
 	}

@@ -26,6 +26,8 @@ func TestCreateSchemaContainsOnlyRuntimeTables(t *testing.T) {
 		"gocms_admin_user":          false,
 		"gocms_category":            false,
 		"gocms_content":             false,
+		"gocms_media":               false,
+		"gocms_media_ref":           false,
 		"gocms_message":             false,
 		"gocms_template_assignment": false,
 	}

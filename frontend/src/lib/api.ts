@@ -31,6 +31,28 @@ export type Content = {
 
 export type ContentInput = Omit<Content, "id" | "route_key">
 
+export type MediaAsset = {
+  id: number
+  kind: "image"
+  url: string
+  original_name: string
+  mime_type: string
+  size_bytes: number
+  width: number
+  height: number
+  sha256: string
+  status: string
+  uploaded_by: string
+  created_at: string
+}
+
+export type MediaPage = {
+  page: number
+  page_size: number
+  total: number
+  items: MediaAsset[]
+}
+
 export type ContentPage = {
   query: string
   page: number
@@ -255,6 +277,21 @@ export function deleteContent(id: number, publish = false) {
   return request<SaveResponse>(`/api/admin/content/${id}${publish ? "?publish=1" : ""}`, {
     method: "DELETE",
   })
+}
+
+export function uploadMedia(file: File) {
+  const body = new FormData()
+  body.append("file", file)
+  return request<{ ok: boolean; asset: MediaAsset }>("/api/admin/media", {
+    method: "POST",
+    body,
+  })
+}
+
+export function getMedia(page = 1, pageSize = 24, search = "", contentID = 0) {
+  return request<MediaPage>(
+    `/api/admin/media${query({ page, page_size: pageSize, q: search, content_id: contentID || undefined })}`,
+  )
 }
 
 export function getMessages(page: number, pageSize: number) {

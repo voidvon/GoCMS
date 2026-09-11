@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react"
-import { FileText, LoaderCircle, Pencil, Plus, Search, Trash2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react"
+import { FileText, ImagePlus, Library, LoaderCircle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react"
 
 import {
   createContent,
@@ -7,9 +7,11 @@ import {
   getCategories,
   getContent,
   getContentItem,
+  uploadMedia,
   type CategoryItem,
   type Content,
   type ContentInput,
+  type MediaAsset,
   type SaveResponse,
   updateContent,
 } from "@/lib/api"
@@ -23,6 +25,7 @@ import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog, IconButton, InlineAlert, SearchField, TablePagination } from "@/components/app/app-ui"
+import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
 import { RichTextEditor } from "@/components/app/rich-text-editor"
 import { flattenCategoryTree } from "@/lib/category-tree"
 
@@ -82,9 +85,40 @@ function ContentEditor({
   saving: boolean
 }) {
   const [form, setForm] = useState(content)
+  const coverInputRef = useRef<HTMLInputElement>(null)
+  const [coverUploading, setCoverUploading] = useState(false)
+  const [bodyUploading, setBodyUploading] = useState(false)
+  const [coverError, setCoverError] = useState("")
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false)
+  const uploading = coverUploading || bodyUploading
 
   function update<K extends keyof ContentInput>(key: K, value: ContentInput[K]) {
     setForm((current) => ({ ...current, [key]: value }))
+  }
+
+  function chooseCoverImage() {
+    if (!coverUploading) coverInputRef.current?.click()
+  }
+
+  async function handleCoverUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ""
+    if (!file) return
+    setCoverUploading(true)
+    setCoverError("")
+    try {
+      const result = await uploadMedia(file)
+      update("cover_image", result.asset.url)
+    } catch (uploadError) {
+      setCoverError(uploadError instanceof Error ? uploadError.message : "封面上传失败")
+    } finally {
+      setCoverUploading(false)
+    }
+  }
+
+  function selectCover(asset: MediaAsset) {
+    setCoverError("")
+    update("cover_image", asset.url)
   }
 
   return (
@@ -130,11 +164,42 @@ function ContentEditor({
         </div>
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="content-body">正文</Label>
-          <RichTextEditor id="content-body" value={form.content} onChange={(value) => update("content", value)} />
+          <RichTextEditor id="content-body" value={form.content} onChange={(value) => update("content", value)} onUploadingChange={setBodyUploading} />
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="content-cover-image">封面图片</Label>
-          <Input id="content-cover-image" value={form.cover_image} onChange={(event) => update("cover_image", event.target.value)} placeholder="/images/..." />
+        <div className="space-y-3 sm:col-span-2">
+          <Label>封面图片</Label>
+          <input
+            ref={coverInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/gif"
+            className="hidden"
+            onChange={(event) => void handleCoverUpload(event)}
+          />
+          <div className="overflow-hidden rounded-lg border bg-muted">
+            {form.cover_image ? (
+              <img src={form.cover_image} alt="内容封面预览" className="aspect-[3/1] max-h-52 w-full object-contain" />
+            ) : (
+              <div className="flex aspect-[3/1] max-h-52 items-center justify-center gap-2 text-sm text-muted-foreground">
+                <ImagePlus className="size-5" />
+                暂未选择封面
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="outline" onClick={chooseCoverImage} disabled={coverUploading}>
+              {coverUploading ? <LoaderCircle className="animate-spin" /> : <Upload />}
+              {coverUploading ? "上传中" : "上传封面"}
+            </Button>
+            <Button type="button" variant="outline" onClick={() => setMediaPickerOpen(true)} disabled={coverUploading}>
+              <Library />素材库
+            </Button>
+            {form.cover_image ? (
+              <IconButton label="清除封面" variant="ghost" size="icon-sm" onClick={() => update("cover_image", "")}>
+                <X />
+              </IconButton>
+            ) : null}
+          </div>
+          {coverError ? <p role="alert" className="text-xs text-destructive">{coverError}</p> : null}
         </div>
         <div className="space-y-2">
           <Label htmlFor="content-order">排序值</Label>
@@ -164,13 +229,14 @@ function ContentEditor({
         </div>
       </div>
       <DialogFooter>
-        <Button variant="outline" onClick={onCancel} disabled={saving}>取消</Button>
-        <Button onClick={() => onSave(form)} disabled={saving || !form.title.trim()}>
+        <Button variant="outline" onClick={onCancel} disabled={saving || uploading}>取消</Button>
+        <Button onClick={() => onSave(form)} disabled={saving || uploading || !form.title.trim()}>
           {saving ? <LoaderCircle className="animate-spin" /> : null}
           仅保存
         </Button>
-        <Button onClick={() => onSave(form, true)} disabled={saving || !form.title.trim()}>保存并发布</Button>
+        <Button onClick={() => onSave(form, true)} disabled={saving || uploading || !form.title.trim()}>保存并发布</Button>
       </DialogFooter>
+      <MediaPickerDialog open={mediaPickerOpen} onOpenChange={setMediaPickerOpen} onSelect={selectCover} />
     </>
   )
 }

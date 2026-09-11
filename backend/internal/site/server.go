@@ -97,6 +97,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminStats(response, request)
 	case "/api/admin/content":
 		s.adminContent(response, request)
+	case "/api/admin/media":
+		s.adminMedia(response, request)
 	case "/api/admin/messages":
 		s.adminMessages(response, request)
 	case "/api/admin/categories":
@@ -125,6 +127,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		lowerPath := strings.ToLower(cleanPath)
 		if strings.HasPrefix(lowerPath, "/api/admin/content/") {
 			s.adminContentItem(response, request, cleanPath[len("/api/admin/content/"):])
+			return
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/media/") {
+			s.adminMediaItem(response, request, cleanPath[len("/api/admin/media/"):])
 			return
 		}
 		if strings.HasPrefix(lowerPath, "/api/admin/messages/") {
