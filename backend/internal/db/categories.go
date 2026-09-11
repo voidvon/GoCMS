@@ -6,7 +6,11 @@ import (
 	"fmt"
 )
 
-const unifiedCategoryTable = "gocms_category"
+const (
+	CategoryTable            = "gocms_category"
+	CategoryTranslationTable = "gocms_category_translation"
+	unifiedCategoryTable     = CategoryTable
+)
 
 // EnsureUnifiedCategories creates the category model used by the CMS. A
 // category owns its route and template bindings, which keeps presentation
@@ -62,6 +66,30 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		WHERE TRIM(COALESCE("page_type", '')) = ''`); err != nil {
 		return fmt.Errorf("initialize category page types: %w", err)
 	}
+
+	if _, err := database.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS "`+CategoryTranslationTable+`" (
+			"id" INTEGER PRIMARY KEY AUTOINCREMENT,
+			"category_id" INTEGER NOT NULL,
+			"lang" TEXT NOT NULL,
+			"name" TEXT NOT NULL DEFAULT '',
+			"keywords" TEXT NOT NULL DEFAULT '',
+			"description" TEXT NOT NULL DEFAULT '',
+			"cover_content" TEXT NOT NULL DEFAULT '',
+			UNIQUE("category_id", "lang")
+		)`); err != nil {
+		return fmt.Errorf("create category translation table: %w", err)
+	}
+	if _, err := database.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_gocms_category_trans ON "`+CategoryTranslationTable+`" ("category_id", "lang")`); err != nil {
+		return fmt.Errorf("create category translation index: %w", err)
+	}
+
+	_, _ = database.ExecContext(ctx, `
+		INSERT OR IGNORE INTO "`+CategoryTranslationTable+`" ("category_id", "lang", "name", "keywords", "description", "cover_content")
+		SELECT "id", 'zh-CN', "name", "keywords", "description", "cover_content"
+		FROM "`+unifiedCategoryTable+`"
+	`)
+
 	return nil
 }
 

@@ -6,7 +6,11 @@ import (
 	"fmt"
 )
 
-const unifiedContentTable = "gocms_content"
+const (
+	ContentTable            = "gocms_content"
+	ContentTranslationTable = "gocms_content_translation"
+	unifiedContentTable     = ContentTable
+)
 
 func EnsureContent(ctx context.Context, database *sql.DB) error {
 	if _, err := database.ExecContext(ctx, `
@@ -49,6 +53,33 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 			return fmt.Errorf("create content index: %w", err)
 		}
 	}
+
+	if _, err := database.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS "`+ContentTranslationTable+`" (
+			"id" INTEGER PRIMARY KEY AUTOINCREMENT,
+			"content_id" INTEGER NOT NULL,
+			"lang" TEXT NOT NULL,
+			"title" TEXT NOT NULL DEFAULT '',
+			"summary" TEXT NOT NULL DEFAULT '',
+			"body" TEXT NOT NULL DEFAULT '',
+			"keywords" TEXT NOT NULL DEFAULT '',
+			"description" TEXT NOT NULL DEFAULT '',
+			"extra_data" TEXT NOT NULL DEFAULT '{}',
+			"publish_status" TEXT NOT NULL DEFAULT 'published',
+			UNIQUE("content_id", "lang")
+		)`); err != nil {
+		return fmt.Errorf("create content translation table: %w", err)
+	}
+	if _, err := database.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_gocms_content_trans ON "`+ContentTranslationTable+`" ("content_id", "lang")`); err != nil {
+		return fmt.Errorf("create content translation index: %w", err)
+	}
+
+	_, _ = database.ExecContext(ctx, `
+		INSERT OR IGNORE INTO "`+ContentTranslationTable+`" ("content_id", "lang", "title", "summary", "body", "keywords", "description", "extra_data", "publish_status")
+		SELECT "id", 'zh-CN', "title", "summary", "body", "keywords", "description", '{}', 'published'
+		FROM "`+unifiedContentTable+`"
+	`)
+
 	if err := MigrateCategoryAndContentModels(ctx, database); err != nil {
 		return err
 	}

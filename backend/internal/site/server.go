@@ -53,6 +53,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		if err := db.EnsureAdminUsers(context.Background(), database); err != nil {
 			return nil, err
 		}
+		if err := db.EnsureApiKeys(context.Background(), database); err != nil {
+			return nil, err
+		}
 		if err := templateconfig.Ensure(context.Background(), database); err != nil {
 			return nil, err
 		}
@@ -119,6 +122,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminModels(response, request)
 	case "/api/admin/categories":
 		s.adminCategories(response, request)
+	case "/api/admin/languages":
+		s.adminLanguages(response, request)
+	case "/api/admin/api-keys":
+		s.adminApiKeys(response, request)
 	case "/api/admin/theme/activate":
 		s.adminThemeActivate(response, request)
 	case "/api/admin/template/activate", "/api/admin/templates/activate":
@@ -199,6 +206,14 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 			s.adminCategory(response, request, cleanPath[len("/api/admin/categories/"):])
 			return
 		}
+		if strings.HasPrefix(lowerPath, "/api/admin/languages/") {
+			s.adminLanguageItem(response, request, cleanPath[len("/api/admin/languages/"):])
+			return
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/api-keys/") {
+			s.adminApiKeyRoute(response, request, cleanPath[len("/api/admin/api-keys/"):])
+			return
+		}
 		if strings.HasPrefix(lowerPath, "/api/admin/theme/assignments/") {
 			s.adminThemeAssignment(response, request, cleanPath[len("/api/admin/theme/assignments/"):])
 			return
@@ -260,7 +275,8 @@ func (s *Server) searchJSON(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
-	result, err := s.queryContent(request.Context(), query, 0, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
+	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
+	result, err := s.queryContent(request.Context(), query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return

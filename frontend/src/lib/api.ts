@@ -11,6 +11,16 @@ export type AdminStats = {
   pending_messages: number
 }
 
+export type ContentTranslationItem = {
+  title?: string
+  summary?: string
+  content?: string
+  keywords?: string
+  description?: string
+  extra_data?: Record<string, any>
+  publish_status?: string
+}
+
 export type Content = {
   id: number
   route_key: string
@@ -29,9 +39,14 @@ export type Content = {
   visible: number
   model_id?: number
   extra_data?: Record<string, any>
+  is_fallback?: boolean
+  fallback_lang?: string
+  translations?: Record<string, ContentTranslationItem>
 }
 
-export type ContentInput = Omit<Content, "id" | "route_key">
+export type ContentInput = Omit<Content, "id" | "route_key"> & {
+  translations?: Record<string, ContentTranslationItem>
+}
 
 export type MediaAsset = {
   id: number
@@ -111,7 +126,21 @@ export type ModelField = {
   description: string
   sort_order: number
   is_system: number
+  is_translatable?: number
 }
+
+export type Language = {
+  id: number
+  code: string
+  name: string
+  is_default: number
+  is_fallback: number
+  is_enabled: number
+  sort_order: number
+  path_prefix: string
+}
+
+export type LanguageInput = Omit<Language, "id">
 
 export type SystemModel = {
   id: number
@@ -148,6 +177,13 @@ export type FeedbackField = {
   is_system: number
 }
 
+export type CategoryTranslationItem = {
+  name?: string
+  keywords?: string
+  description?: string
+  cover_content?: string
+}
+
 export type CategoryItem = {
   id: number
   name: string
@@ -164,10 +200,18 @@ export type CategoryItem = {
   detail_path: string
   detail_file_pattern: string
   detail_template: string
+  keywords?: string
+  description?: string
+  cover_content?: string
   model_id?: number
+  is_fallback?: boolean
+  fallback_lang?: string
+  translations?: Record<string, CategoryTranslationItem>
 }
 
-export type CategoryInput = Omit<CategoryItem, "id" | "route_id" | "content_count">
+export type CategoryInput = Omit<CategoryItem, "id" | "route_id" | "content_count"> & {
+  translations?: Record<string, CategoryTranslationItem>
+}
 
 export type ThemeFileKind = "css" | "js" | "image" | "template"
 export type CustomFileKind = Exclude<ThemeFileKind, "template">
@@ -370,29 +414,53 @@ export function getStats() {
   return request<AdminStats>("/api/admin/stats")
 }
 
-export function getContent(page: number, pageSize: number, search: string, categoryID = 0) {
+export function getContent(page: number, pageSize: number, search: string, categoryID = 0, lang?: string) {
   return request<ContentPage>(
-    `/api/admin/content${query({ page, page_size: pageSize, q: search, category_id: categoryID || undefined })}`,
+    `/api/admin/content${query({ page, page_size: pageSize, q: search, category_id: categoryID || undefined, lang: lang || undefined })}`,
   )
 }
 
-export function getContentItem(id: number) {
-  return request<Content>(`/api/admin/content/${id}`)
+export function getContentItem(id: number, lang?: string) {
+  return request<Content>(`/api/admin/content/${id}${query({ lang: lang || undefined })}`)
 }
 
-export function getCategories() {
-  return request<CategoryItem[]>("/api/admin/categories")
+export function getCategories(lang?: string) {
+  return request<CategoryItem[]>(`/api/admin/categories${query({ lang: lang || undefined })}`)
 }
 
-export function createCategory(payload: CategoryInput, publish = false) {
-  return request<SaveResponse>(`/api/admin/categories${publish ? "?publish=1" : ""}`, {
+export function getLanguages() {
+  return request<Language[]>("/api/admin/languages")
+}
+
+export function createLanguage(payload: LanguageInput) {
+  return request<{ ok: boolean; id: number }>("/api/admin/languages", {
     method: "POST",
     body: JSON.stringify(payload),
   })
 }
 
-export function updateCategory(id: number, payload: CategoryInput, publish = false) {
-  return request<SaveResponse>(`/api/admin/categories/${id}${publish ? "?publish=1" : ""}`, {
+export function updateLanguage(id: number, payload: LanguageInput) {
+  return request<{ ok: boolean }>(`/api/admin/languages/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteLanguage(id: number) {
+  return request<{ ok: boolean }>(`/api/admin/languages/${id}`, {
+    method: "DELETE",
+  })
+}
+
+export function createCategory(payload: CategoryInput, publish = false, lang?: string) {
+  return request<SaveResponse>(`/api/admin/categories${query({ publish: publish ? 1 : undefined, lang: lang || undefined })}`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateCategory(id: number, payload: CategoryInput, publish = false, lang?: string) {
+  return request<SaveResponse>(`/api/admin/categories/${id}${query({ publish: publish ? 1 : undefined, lang: lang || undefined })}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   })
@@ -404,15 +472,15 @@ export function deleteCategory(id: number, publish = false) {
   })
 }
 
-export function createContent(payload: ContentInput, publish = false) {
-  return request<SaveResponse>(`/api/admin/content${publish ? "?publish=1" : ""}`, {
+export function createContent(payload: ContentInput, publish = false, lang?: string) {
+  return request<SaveResponse>(`/api/admin/content${query({ publish: publish ? 1 : undefined, lang: lang || undefined })}`, {
     method: "POST",
     body: JSON.stringify(payload),
   })
 }
 
-export function updateContent(id: number, payload: ContentInput, publish = false) {
-  return request<SaveResponse>(`/api/admin/content/${id}${publish ? "?publish=1" : ""}`, {
+export function updateContent(id: number, payload: ContentInput, publish = false, lang?: string) {
+  return request<SaveResponse>(`/api/admin/content/${id}${query({ publish: publish ? 1 : undefined, lang: lang || undefined })}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   })
@@ -724,3 +792,67 @@ export function installUpdate(currentVersion: string) {
     body: JSON.stringify({ current_version: currentVersion }),
   })
 }
+
+export type ApiKeyStatus = "active" | "revoked" | "expired"
+
+export type ApiKey = {
+  id: number
+  admin_id: number
+  admin_username: string
+  name: string
+  key_prefix: string
+  expires_at?: string | null
+  revoked_at?: string | null
+  revoked_by_admin_id?: number | null
+  created_by_admin_id?: number | null
+  created_by_username?: string
+  last_used_at?: string | null
+  last_used_ip?: string
+  created_at: string
+  updated_at: string
+  status: ApiKeyStatus
+}
+
+export type ApiKeyWithSecret = ApiKey & {
+  key: string
+}
+
+export type ApiKeyEvent = {
+  id: number
+  api_key_id: number | null
+  actor_admin_id: number | null
+  actor_username?: string
+  event_type: "created" | "revoked" | "rotated" | string
+  client_ip: string
+  metadata?: Record<string, any>
+  created_at: string
+}
+
+export function getApiKeys() {
+  return request<{ ok: boolean; success: boolean; data: ApiKey[] }>("/api/admin/api-keys")
+}
+
+export function createApiKey(data: { name: string; expires_at?: string | null }) {
+  return request<{ ok: boolean; success: boolean; data: ApiKeyWithSecret; message?: string }>("/api/admin/api-keys", {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+}
+
+export function rotateApiKey(id: number) {
+  return request<{ ok: boolean; success: boolean; data: ApiKeyWithSecret; message?: string }>(`/api/admin/api-keys/${id}/rotate`, {
+    method: "POST",
+  })
+}
+
+export function revokeApiKey(id: number, reason?: string) {
+  return request<{ ok: boolean; success: boolean; data: ApiKey; message?: string }>(`/api/admin/api-keys/${id}/revoke`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  })
+}
+
+export function getApiKeyEvents(id: number) {
+  return request<{ ok: boolean; success: boolean; data: ApiKeyEvent[] }>(`/api/admin/api-keys/${id}/events`)
+}
+

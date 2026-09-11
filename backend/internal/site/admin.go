@@ -12,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"gocms/internal/apikey"
 	"gocms/internal/auth"
+	"gocms/internal/db"
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
 )
@@ -50,38 +52,50 @@ type MessageItem struct {
 }
 
 type CategoryItem struct {
-	ID                int64  `json:"id"`
-	Name              string `json:"name"`
-	ParentID          int64  `json:"parent_id"`
-	OrderID           int64  `json:"order_id"`
-	ListPageSize      int64  `json:"list_page_size"`
-	PageType          string `json:"page_type"`
-	RouteID           int64  `json:"route_id"`
-	ContentCount      int64  `json:"content_count"`
-	ListPath          string `json:"list_path"`
-	ListFilePattern   string `json:"list_file_pattern"`
-	ListTemplate      string `json:"list_template"`
-	CoverTemplate     string `json:"cover_template"`
-	DetailPath        string `json:"detail_path"`
-	DetailFilePattern string `json:"detail_file_pattern"`
-	DetailTemplate    string `json:"detail_template"`
-	ModelID           int64  `json:"model_id"`
+	ID                int64                            `json:"id"`
+	Name              string                           `json:"name"`
+	ParentID          int64                            `json:"parent_id"`
+	OrderID           int64                            `json:"order_id"`
+	ListPageSize      int64                            `json:"list_page_size"`
+	PageType          string                           `json:"page_type"`
+	RouteID           int64                            `json:"route_id"`
+	ContentCount      int64                            `json:"content_count"`
+	ListPath          string                           `json:"list_path"`
+	ListFilePattern   string                           `json:"list_file_pattern"`
+	ListTemplate      string                           `json:"list_template"`
+	CoverTemplate     string                           `json:"cover_template"`
+	DetailPath        string                           `json:"detail_path"`
+	DetailFilePattern string                           `json:"detail_file_pattern"`
+	DetailTemplate    string                           `json:"detail_template"`
+	Keywords          string                           `json:"keywords,omitempty"`
+	Description       string                           `json:"description,omitempty"`
+	CoverContent      string                           `json:"cover_content,omitempty"`
+	ModelID           int64                            `json:"model_id"`
+	Lang              string                           `json:"lang,omitempty"`
+	IsFallback        bool                             `json:"is_fallback,omitempty"`
+	FallbackLang      string                           `json:"fallback_lang,omitempty"`
+	Translations      map[string]CategoryTranslationItem `json:"translations,omitempty"`
 }
 
 type categoryPayload struct {
-	Name              string `json:"name"`
-	ParentID          int64  `json:"parent_id"`
-	OrderID           int64  `json:"order_id"`
-	ListPageSize      int64  `json:"list_page_size"`
-	PageType          string `json:"page_type"`
-	ListPath          string `json:"list_path"`
-	ListFilePattern   string `json:"list_file_pattern"`
-	ListTemplate      string `json:"list_template"`
-	CoverTemplate     string `json:"cover_template"`
-	DetailPath        string `json:"detail_path"`
-	DetailFilePattern string `json:"detail_file_pattern"`
-	DetailTemplate    string `json:"detail_template"`
-	ModelID           int64  `json:"model_id"`
+	Lang              string                            `json:"lang,omitempty"`
+	Translations      map[string]CategoryTranslationItem `json:"translations,omitempty"`
+	Name              string                            `json:"name"`
+	ParentID          int64                             `json:"parent_id"`
+	OrderID           int64                             `json:"order_id"`
+	ListPageSize      int64                             `json:"list_page_size"`
+	PageType          string                            `json:"page_type"`
+	ListPath          string                            `json:"list_path"`
+	ListFilePattern   string                            `json:"list_file_pattern"`
+	ListTemplate      string                            `json:"list_template"`
+	CoverTemplate     string                            `json:"cover_template"`
+	DetailPath        string                            `json:"detail_path"`
+	DetailFilePattern string                            `json:"detail_file_pattern"`
+	DetailTemplate    string                            `json:"detail_template"`
+	Keywords          string                            `json:"keywords"`
+	Description       string                            `json:"description"`
+	CoverContent      string                            `json:"cover_content"`
+	ModelID           int64                             `json:"model_id"`
 }
 
 func (s *Server) adminLogin(response http.ResponseWriter, request *http.Request) {
@@ -130,20 +144,12 @@ func (s *Server) adminSession(response http.ResponseWriter, request *http.Reques
 		methodNotAllowed(response)
 		return
 	}
-	username, ok := s.adminUsername(request)
-	if !ok {
+	user, ok, _ := s.authenticateRequest(request)
+	if !ok || user == nil {
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 		return
 	}
-	var user AdminUser
-	err := s.database.QueryRowContext(request.Context(), `
-		SELECT "id", COALESCE("username", ''), COALESCE("flags", '')
-		FROM "gocms_admin_user" WHERE "username" = ?`, username).Scan(&user.ID, &user.Username, &user.Flags)
-	if err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"user": user})
+	writeJSON(response, http.StatusOK, map[string]any{"user": *user})
 }
 
 func (s *Server) adminStats(response http.ResponseWriter, request *http.Request) {
@@ -267,11 +273,18 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		s.saveCategory(response, request, 0)
 		return
 	}
+	requestedLang := strings.TrimSpace(request.URL.Query().Get("lang"))
+	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(request.Context())
+	if requestedLang == "" {
+		requestedLang = defaultLang
+	}
+
 	rows, err := s.database.QueryContext(request.Context(), `
 		SELECT c."id", c."name", c."parent_id", c."order_id", c."list_page_size", c."page_type", c."route_id",
 		       (SELECT COUNT(*) FROM "gocms_content" content WHERE content."category_id" = c."id"),
 		       c."list_path", c."list_file_pattern", c."list_template", c."cover_template", c."detail_path",
-		       c."detail_file_pattern", c."detail_template", COALESCE(c."model_id", 1)
+		       c."detail_file_pattern", c."detail_template", COALESCE(c."keywords", ''), COALESCE(c."description", ''),
+		       COALESCE(c."cover_content", ''), COALESCE(c."model_id", 1)
 		FROM "gocms_category" c
 		ORDER BY c."parent_id", c."order_id", c."id"`)
 	if err != nil {
@@ -284,11 +297,51 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		var item CategoryItem
 		if err := rows.Scan(&item.ID, &item.Name, &item.ParentID, &item.OrderID, &item.ListPageSize, &item.PageType, &item.RouteID,
 			&item.ContentCount, &item.ListPath, &item.ListFilePattern, &item.ListTemplate,
-			&item.CoverTemplate, &item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate, &item.ModelID); err != nil {
+			&item.CoverTemplate, &item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate,
+			&item.Keywords, &item.Description, &item.CoverContent, &item.ModelID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
 		items = append(items, item)
+	}
+	_ = rows.Close()
+
+	allTranslations, _ := s.loadAllCategoryTranslations(request.Context())
+	for i := range items {
+		translations := allTranslations[items[i].ID]
+		if translations == nil {
+			translations = make(map[string]CategoryTranslationItem)
+		}
+		if _, ok := translations[defaultLang]; !ok {
+			translations[defaultLang] = CategoryTranslationItem{
+				Name:         items[i].Name,
+				Keywords:     items[i].Keywords,
+				Description:  items[i].Description,
+				CoverContent: items[i].CoverContent,
+			}
+		}
+
+		if trans, ok := translations[requestedLang]; ok && strings.TrimSpace(trans.Name) != "" {
+			items[i].Name = trans.Name
+			items[i].Keywords = trans.Keywords
+			items[i].Description = trans.Description
+			items[i].CoverContent = trans.CoverContent
+		} else {
+			// FALLBACK to fallback language
+			fallbackTrans := translations[fallbackLang]
+			if strings.TrimSpace(fallbackTrans.Name) != "" {
+				items[i].Name = fallbackTrans.Name
+				items[i].Keywords = fallbackTrans.Keywords
+				items[i].Description = fallbackTrans.Description
+				items[i].CoverContent = fallbackTrans.CoverContent
+				if requestedLang != fallbackLang {
+					items[i].IsFallback = true
+					items[i].FallbackLang = fallbackLang
+				}
+			}
+		}
+		items[i].Lang = requestedLang
+		items[i].Translations = translations
 	}
 	if err := rows.Err(); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
@@ -345,6 +398,15 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
+	requestedLang := strings.TrimSpace(payload.Lang)
+	if requestedLang == "" {
+		requestedLang = strings.TrimSpace(request.URL.Query().Get("lang"))
+	}
+	defaultLang, _ := s.getDefaultAndFallbackLang(request.Context())
+	if requestedLang == "" {
+		requestedLang = defaultLang
+	}
+
 	if id == 0 {
 		if err := s.nextCategoryOrder(request.Context(), payload.ParentID, &payload.OrderID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
@@ -352,9 +414,9 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		}
 		result, err := s.database.ExecContext(request.Context(), `
 			INSERT INTO "gocms_category"
-			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", "model_id")
-			VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.ModelID)
+			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", "keywords", "description", "cover_content", "model_id")
+			VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -368,23 +430,56 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
+		if payload.Translations != nil && len(payload.Translations) > 0 {
+			_ = s.saveCategoryTranslations(request.Context(), s.database, newID, payload.Translations)
+		} else {
+			_ = s.saveCategoryTranslations(request.Context(), s.database, newID, map[string]CategoryTranslationItem{
+				requestedLang: {Name: payload.Name, Keywords: payload.Keywords, Description: payload.Description, CoverContent: payload.CoverContent},
+			})
+		}
 	} else {
-		result, err := s.database.ExecContext(request.Context(), `
-			UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "list_page_size" = ?, "page_type" = ?,
-			"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "model_id" = ? WHERE "id" = ?`,
-			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.ModelID, id)
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
+		if payload.Translations != nil && len(payload.Translations) > 0 {
+			_ = s.saveCategoryTranslations(request.Context(), s.database, id, payload.Translations)
+			if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Name) != "" {
+				payload.Name = def.Name
+				payload.Keywords = def.Keywords
+				payload.Description = def.Description
+				payload.CoverContent = def.CoverContent
+			}
+		} else {
+			_ = s.saveCategoryTranslations(request.Context(), s.database, id, map[string]CategoryTranslationItem{
+				requestedLang: {Name: payload.Name, Keywords: payload.Keywords, Description: payload.Description, CoverContent: payload.CoverContent},
+			})
 		}
-		affected, err := result.RowsAffected()
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		if affected == 0 {
-			http.Error(response, "category not found", http.StatusNotFound)
-			return
+
+		if requestedLang == defaultLang || payload.Translations != nil {
+			result, err := s.database.ExecContext(request.Context(), `
+				UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "list_page_size" = ?, "page_type" = ?,
+				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "keywords" = ?, "description" = ?, "cover_content" = ?, "model_id" = ? WHERE "id" = ?`,
+				payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID, id)
+			if err != nil {
+				http.Error(response, "database error", http.StatusInternalServerError)
+				return
+			}
+			affected, err := result.RowsAffected()
+			if err != nil || affected == 0 {
+				http.Error(response, "category not found", http.StatusNotFound)
+				return
+			}
+		} else {
+			result, err := s.database.ExecContext(request.Context(), `
+				UPDATE "gocms_category" SET "parent_id" = ?, "order_id" = ?, "list_page_size" = ?, "page_type" = ?,
+				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "model_id" = ? WHERE "id" = ?`,
+				payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.ModelID, id)
+			if err != nil {
+				http.Error(response, "database error", http.StatusInternalServerError)
+				return
+			}
+			affected, err := result.RowsAffected()
+			if err != nil || affected == 0 {
+				http.Error(response, "category not found", http.StatusNotFound)
+				return
+			}
 		}
 	}
 	s.contentSaved(response, request)
@@ -566,6 +661,7 @@ func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Requ
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
+	_, _ = s.database.ExecContext(request.Context(), `DELETE FROM "`+db.CategoryTranslationTable+`" WHERE "category_id" = ?`, id)
 	s.contentSaved(response, request)
 }
 
@@ -625,6 +721,75 @@ func (s *Server) validateContentCategory(ctx context.Context, id int64) error {
 	return nil
 }
 
+func (s *Server) resolveApiKeyToken(request *http.Request) string {
+	if headerValue := strings.TrimSpace(request.Header.Get("X-API-Key")); headerValue != "" {
+		return headerValue
+	}
+	authHeader := strings.TrimSpace(request.Header.Get("Authorization"))
+	if authHeader != "" {
+		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+			token := strings.TrimSpace(authHeader[7:])
+			if strings.HasPrefix(token, apikey.KeyPrefix) || strings.HasPrefix(token, "gocms_live_") {
+				return token
+			}
+		}
+	}
+	return ""
+}
+
+func (s *Server) adminSessionUser(request *http.Request) (*AdminUser, bool) {
+	cookie, err := request.Cookie("gocms_admin")
+	if err != nil || cookie.Value == "" || s.database == nil {
+		return nil, false
+	}
+	var username string
+	err = s.database.QueryRowContext(request.Context(), `
+		SELECT "username" FROM "gocms_admin_session"
+		WHERE "token" = ? AND "expires_at" > ?`, cookie.Value, time.Now().Unix()).
+		Scan(&username)
+	if err != nil || username == "" {
+		return nil, false
+	}
+	var user AdminUser
+	err = s.database.QueryRowContext(request.Context(), `
+		SELECT "id", COALESCE("username", ''), COALESCE("flags", '')
+		FROM "gocms_admin_user"
+		WHERE "username" = ?`, username).
+		Scan(&user.ID, &user.Username, &user.Flags)
+	if err != nil {
+		user = AdminUser{
+			ID:       1,
+			Username: username,
+			Flags:    "all",
+		}
+	}
+	return &user, true
+}
+
+func (s *Server) authenticateRequest(request *http.Request) (*AdminUser, bool, bool) {
+	if s.database == nil {
+		return nil, false, false
+	}
+	if token := s.resolveApiKeyToken(request); token != "" {
+		ident, err := apikey.Authenticate(request.Context(), s.database, token)
+		if err == nil && ident != nil {
+			go apikey.TouchUsage(context.Background(), s.database, ident.ApiKeyID, clientIP(request))
+			return &AdminUser{
+				ID:       ident.AdminID,
+				Username: ident.Username,
+				Flags:    ident.Flags,
+			}, true, false
+		}
+		return nil, false, false
+	}
+
+	user, ok := s.adminSessionUser(request)
+	if ok {
+		return user, true, true
+	}
+	return nil, false, false
+}
+
 func (s *Server) requireAdmin(response http.ResponseWriter, request *http.Request) bool {
 	if _, ok := s.adminUsername(request); ok {
 		return true
@@ -633,19 +798,21 @@ func (s *Server) requireAdmin(response http.ResponseWriter, request *http.Reques
 	return false
 }
 
+func (s *Server) requireAdminSession(response http.ResponseWriter, request *http.Request) (*AdminUser, bool) {
+	user, ok, isSession := s.authenticateRequest(request)
+	if !ok || !isSession || user == nil {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "请通过管理员后台登录操作"})
+		return nil, false
+	}
+	return user, true
+}
+
 func (s *Server) adminUsername(request *http.Request) (string, bool) {
-	cookie, err := request.Cookie("gocms_admin")
-	if err != nil || cookie.Value == "" || s.database == nil {
+	user, ok, _ := s.authenticateRequest(request)
+	if !ok || user == nil {
 		return "", false
 	}
-	var username string
-	err = s.database.QueryRowContext(request.Context(), `
-		SELECT "username" FROM "gocms_admin_session"
-		WHERE "token" = ? AND "expires_at" > ?`, cookie.Value, time.Now().Unix()).Scan(&username)
-	if err != nil {
-		return "", false
-	}
-	return username, true
+	return user.Username, true
 }
 
 func (s *Server) createSession(username string) (string, error) {

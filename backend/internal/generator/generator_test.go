@@ -262,3 +262,110 @@ func TestParseMorepicAndMultiValue(t *testing.T) {
 		t.Fatalf("unexpected parseMultiValue text: %+v", mv2)
 	}
 }
+
+func TestMultiLanguageStaticGeneration(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_site_setting" ("key", "value") VALUES
+			('site_name', '测试多语言站点'), ('site_url', 'https://example.test/')`); err != nil {
+		t.Fatal(err)
+	}
+	// Add secondary language 'en'
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_language" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix")
+		VALUES ('en', 'English', 0, 0, 1, 10, 'en')`); err != nil {
+		t.Fatal(err)
+	}
+	// Add category
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_category"
+			("id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id",
+			 "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path",
+			 "detail_file_pattern", "detail_template")
+		VALUES
+			(1, '中文新闻', 0, 1, 10, 'list', 1, 'news', '{id}.html', 'lists/news.html', '', 'news', '{id}.html', 'details/news.html')`); err != nil {
+		t.Fatal(err)
+	}
+	// Add category translation for en
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_category_translation" ("category_id", "lang", "name", "keywords")
+		VALUES (1, 'en', 'English News', 'news, english')`); err != nil {
+		t.Fatal(err)
+	}
+	// Add content 10 (has en translation) and 11 (no translation, falls back)
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_content"
+			("id", "category_id", "route_key", "title", "summary", "body", "sort_order", "visible")
+		VALUES
+			(10, 1, 'first', '第一篇中文', '摘要一', '<p>正文一</p>', 1, 1),
+			(11, 1, 'second', '第二篇中文', '摘要二', '<p>正文二</p>', 2, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_content_translation" ("content_id", "lang", "title", "summary", "body")
+		VALUES (10, 'en', 'First English Title', 'English Summary 1', '<p>English Body 1</p>')`); err != nil {
+		t.Fatal(err)
+	}
+
+	templates := filepath.Join(t.TempDir(), "templates")
+	writeTemplate(t, templates, "index.html", `site={{setting "site_name"}} lang={{currentLang}} langs={{range languages .}}{{.Code}}:{{.URL}};{{end}}`)
+	writeTemplate(t, templates, "msg.html", `msg lang={{currentLang}}`)
+	writeTemplate(t, templates, "search.html", `search lang={{currentLang}}`)
+	writeTemplate(t, templates, "lists/news.html", `cat={{.category_name}} items={{range listItems .}}{{.Title}}={{.URL}};{{end}}`)
+	writeTemplate(t, templates, "details/news.html", `title={{.title}} home={{.home_url}} lang={{.lang}}`)
+
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	publisher := Publisher{DB: database, Web: web, Templates: templates, Data: filepath.Join(root, "data")}
+	report, err := publisher.Generate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Contents != 2 {
+		t.Fatalf("visible content count = %d, want 2", report.Contents)
+	}
+
+	// 1. Verify default language pages exist at root
+	zhHome := readGenerated(t, web, "index.html")
+	if !strings.Contains(zhHome, "lang=zh-CN") || !strings.Contains(zhHome, "zh-CN:/;") || !strings.Contains(zhHome, "en:/en/;") {
+		t.Fatalf("unexpected zh home: %s", zhHome)
+	}
+	zhList := readGenerated(t, web, "news/1.html")
+	if !strings.Contains(zhList, "cat=中文新闻") || !strings.Contains(zhList, "第一篇中文=/news/first.html;") {
+		t.Fatalf("unexpected zh list: %s", zhList)
+	}
+	zhDetail := readGenerated(t, web, "news/first.html")
+	if !strings.Contains(zhDetail, "title=第一篇中文") || !strings.Contains(zhDetail, "home=/") || !strings.Contains(zhDetail, "lang=zh-CN") {
+		t.Fatalf("unexpected zh detail: %s", zhDetail)
+	}
+
+	// 2. Verify secondary language pages exist under en/
+	enHome := readGenerated(t, web, "en/index.html")
+	if !strings.Contains(enHome, "lang=en") || !strings.Contains(enHome, "zh-CN:/;") || !strings.Contains(enHome, "en:/en/;") {
+		t.Fatalf("unexpected en home: %s", enHome)
+	}
+	enList := readGenerated(t, web, "en/news/1.html")
+	// Content 10 has translation "First English Title", Content 11 fell back to "第二篇中文"
+	if !strings.Contains(enList, "cat=English News") || !strings.Contains(enList, "First English Title=/en/news/first.html;") || !strings.Contains(enList, "第二篇中文=/en/news/second.html;") {
+		t.Fatalf("unexpected en list: %s", enList)
+	}
+	enDetail := readGenerated(t, web, "en/news/first.html")
+	if !strings.Contains(enDetail, "title=First English Title") || !strings.Contains(enDetail, "home=/en/") || !strings.Contains(enDetail, "lang=en") {
+		t.Fatalf("unexpected en detail: %s", enDetail)
+	}
+
+	// 3. Verify sitemap has both languages
+	sitemap := readGenerated(t, web, "Sitemap.xml")
+	if !strings.Contains(sitemap, "https://example.test/news/first.html") || !strings.Contains(sitemap, "https://example.test/en/news/first.html") {
+		t.Fatalf("unexpected sitemap: %s", sitemap)
+	}
+}
+

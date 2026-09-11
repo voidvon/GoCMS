@@ -30,6 +30,7 @@ type ModelFieldItem struct {
 	Description  string `json:"description"`
 	SortOrder    int    `json:"sort_order"`
 	IsSystem     int    `json:"is_system"`
+	IsTranslatable int  `json:"is_translatable"`
 }
 
 type SystemModelItem struct {
@@ -174,7 +175,7 @@ func (s *Server) adminModelFields(response http.ResponseWriter, request *http.Re
 	switch request.Method {
 	case http.MethodGet:
 		tableID := parseIntOrZero(request.URL.Query().Get("table_id"))
-		query := `SELECT "id", "table_id", "field_name", "field_label", "field_type", "field_options", "description", "sort_order", "is_system"
+		query := `SELECT "id", "table_id", "field_name", "field_label", "field_type", "field_options", "description", "sort_order", "is_system", "is_translatable"
 		          FROM "` + db.ModelFieldTable + `"`
 		var args []any
 		if tableID > 0 {
@@ -192,7 +193,7 @@ func (s *Server) adminModelFields(response http.ResponseWriter, request *http.Re
 		items := make([]ModelFieldItem, 0)
 		for rows.Next() {
 			var item ModelFieldItem
-			if err := rows.Scan(&item.ID, &item.TableID, &item.FieldName, &item.FieldLabel, &item.FieldType, &item.FieldOptions, &item.Description, &item.SortOrder, &item.IsSystem); err != nil {
+			if err := rows.Scan(&item.ID, &item.TableID, &item.FieldName, &item.FieldLabel, &item.FieldType, &item.FieldOptions, &item.Description, &item.SortOrder, &item.IsSystem, &item.IsTranslatable); err != nil {
 				http.Error(response, "database error", http.StatusInternalServerError)
 				return
 			}
@@ -202,13 +203,14 @@ func (s *Server) adminModelFields(response http.ResponseWriter, request *http.Re
 
 	case http.MethodPost:
 		var payload struct {
-			TableID      int64  `json:"table_id"`
-			FieldName    string `json:"field_name"`
-			FieldLabel   string `json:"field_label"`
-			FieldType    string `json:"field_type"`
-			FieldOptions string `json:"field_options"`
-			Description  string `json:"description"`
-			SortOrder    int    `json:"sort_order"`
+			TableID        int64  `json:"table_id"`
+			FieldName      string `json:"field_name"`
+			FieldLabel     string `json:"field_label"`
+			FieldType      string `json:"field_type"`
+			FieldOptions   string `json:"field_options"`
+			Description    string `json:"description"`
+			SortOrder      int    `json:"sort_order"`
+			IsTranslatable int    `json:"is_translatable"`
 		}
 		if err := decodeRequest(request, &payload); err != nil {
 			http.Error(response, "invalid payload", http.StatusBadRequest)
@@ -224,9 +226,9 @@ func (s *Server) adminModelFields(response http.ResponseWriter, request *http.Re
 			payload.FieldType = "text"
 		}
 		res, err := s.database.ExecContext(request.Context(), `
-			INSERT INTO "`+db.ModelFieldTable+`" ("table_id", "field_name", "field_label", "field_type", "field_options", "description", "sort_order", "is_system")
-			VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
-			payload.TableID, payload.FieldName, payload.FieldLabel, payload.FieldType, payload.FieldOptions, payload.Description, payload.SortOrder)
+			INSERT INTO "`+db.ModelFieldTable+`" ("table_id", "field_name", "field_label", "field_type", "field_options", "description", "sort_order", "is_system", "is_translatable")
+			VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+			payload.TableID, payload.FieldName, payload.FieldLabel, payload.FieldType, payload.FieldOptions, payload.Description, payload.SortOrder, payload.IsTranslatable)
 		if err != nil {
 			http.Error(response, "database error or duplicate field name", http.StatusBadRequest)
 			return
@@ -251,11 +253,12 @@ func (s *Server) adminModelFieldItem(response http.ResponseWriter, request *http
 	switch request.Method {
 	case http.MethodPut:
 		var payload struct {
-			FieldLabel   string `json:"field_label"`
-			FieldType    string `json:"field_type"`
-			FieldOptions string `json:"field_options"`
-			Description  string `json:"description"`
-			SortOrder    int    `json:"sort_order"`
+			FieldLabel     string `json:"field_label"`
+			FieldType      string `json:"field_type"`
+			FieldOptions   string `json:"field_options"`
+			Description    string `json:"description"`
+			SortOrder      int    `json:"sort_order"`
+			IsTranslatable int    `json:"is_translatable"`
 		}
 		if err := decodeRequest(request, &payload); err != nil {
 			http.Error(response, "invalid payload", http.StatusBadRequest)
@@ -268,9 +271,9 @@ func (s *Server) adminModelFieldItem(response http.ResponseWriter, request *http
 		}
 		if _, err := s.database.ExecContext(request.Context(), `
 			UPDATE "`+db.ModelFieldTable+`"
-			SET "field_label" = ?, "field_type" = ?, "field_options" = ?, "description" = ?, "sort_order" = ?
+			SET "field_label" = ?, "field_type" = ?, "field_options" = ?, "description" = ?, "sort_order" = ?, "is_translatable" = ?
 			WHERE "id" = ?`,
-			payload.FieldLabel, payload.FieldType, payload.FieldOptions, payload.Description, payload.SortOrder, id); err != nil {
+			payload.FieldLabel, payload.FieldType, payload.FieldOptions, payload.Description, payload.SortOrder, payload.IsTranslatable, id); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}

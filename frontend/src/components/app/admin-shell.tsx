@@ -2,6 +2,7 @@ import { useState, type ComponentType } from "react"
 import {
   BarChart3,
   Boxes,
+  Check,
   ChevronsUpDown,
   FolderTree,
   LayoutDashboard,
@@ -10,10 +11,13 @@ import {
   MessageSquareText,
   FileText,
   Globe,
+  KeyRound,
+  Languages,
   Palette,
 } from "lucide-react"
 
 import { logout, type AdminUser } from "@/lib/api"
+import { LanguageProvider, useLanguage } from "@/lib/language-context"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -39,9 +43,11 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { DashboardPage } from "@/components/app/dashboard-page"
 import { CategoriesPage } from "@/components/app/categories-page"
 import { ModelsPage } from "@/components/app/models-page"
+import { LanguagesPage } from "@/components/app/languages-page"
 import { MessagesPage } from "@/components/app/messages-page"
 import { ContentPage } from "@/components/app/content-page"
 import { ThemePage } from "@/components/app/theme-page"
+import { ApiKeysPage } from "@/components/app/api-keys-page"
 
 import { PublishPage } from "@/components/app/publish-page"
 import { SettingsDialog } from "@/components/app/settings-dialog"
@@ -68,10 +74,12 @@ const navigationItems: NavigationItem[] = [
   { id: "overview", label: "仪表盘", icon: LayoutDashboard },
   { id: "content", label: "内容", icon: FileText },
   { id: "categories", label: "分类", icon: FolderTree },
+  { id: "languages", label: "多语言", icon: Languages },
   { id: "messages", label: "信息反馈", icon: MessageSquareText },
   { id: "publish", label: "网站发布", icon: Globe },
   { id: "theme", label: "模板管理", icon: Palette },
   { id: "models", label: "系统模型", icon: Boxes },
+  { id: "api-keys", label: "API Key", icon: KeyRound },
 ]
 
 function Navigation({ activeView, onNavigate, onClose }: NavigationProps) {
@@ -186,8 +194,12 @@ function viewMeta(view: AdminView) {
       return { title: "分类", description: "维护统一的栏目树和页面生成规则" }
     case "models":
       return { title: "系统模型", description: "管理数据表、扩展字段与系统内容模型" }
+    case "languages":
+      return { title: "多语言配置", description: "配置网站多语言、主站与兜底语言回退机制" }
     case "messages":
       return { title: "信息反馈", description: "管理自定义反馈分类、字段及用户提交信息" }
+    case "api-keys":
+      return { title: "API Key", description: "管理用于外部系统调用接口的 API 凭据" }
     default:
       return { title: "仪表盘", description: "站点内容和运营数据" }
   }
@@ -205,14 +217,78 @@ function ViewContent({ view }: { view: AdminView }) {
       return <CategoriesPage />
     case "models":
       return <ModelsPage />
+    case "languages":
+      return <LanguagesPage />
     case "messages":
       return <MessagesPage />
+    case "api-keys":
+      return <ApiKeysPage />
     default:
       return <DashboardPage />
   }
 }
 
+function HeaderLanguageSwitcher() {
+  const { languages, activeLang, setActiveLang } = useLanguage()
+
+  if (languages.length <= 1) {
+    return null
+  }
+
+  const current = languages.find((l) => l.code === activeLang) || languages[0]
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 border-dashed text-xs px-2.5">
+            <Languages className="size-3.5 text-primary" />
+            <span className="font-medium">{current?.name || activeLang}</span>
+            {current?.is_default === 1 && (
+              <span className="text-[10px] bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400 px-1 rounded font-normal">主站</span>
+            )}
+            <ChevronsUpDown className="size-3 text-muted-foreground opacity-60" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">切换显示与编辑语言</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {languages.map((lang) => (
+          <DropdownMenuItem
+            key={lang.id}
+            onClick={() => setActiveLang(lang.code)}
+            className="flex items-center justify-between text-xs cursor-pointer py-1.5"
+          >
+            <div className="flex items-center gap-2">
+              <span className="font-medium">{lang.name}</span>
+              <span className="text-[11px] text-muted-foreground">({lang.code})</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {lang.is_default === 1 && (
+                <span className="text-[10px] text-blue-600 bg-blue-50 dark:bg-blue-950 px-1 rounded">主站</span>
+              )}
+              {lang.is_fallback === 1 && (
+                <span className="text-[10px] text-amber-600 bg-amber-50 dark:bg-amber-950 px-1 rounded">兜底</span>
+              )}
+              {lang.code === activeLang && <Check className="size-3.5 text-primary ml-1" />}
+            </div>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 export function AdminShell({ user, onLogout }: AdminShellProps) {
+  return (
+    <LanguageProvider>
+      <AdminShellInner user={user} onLogout={onLogout} />
+    </LanguageProvider>
+  )
+}
+
+function AdminShellInner({ user, onLogout }: AdminShellProps) {
   const { view: activeView, navigate } = useAdminRoute()
   const [mobileOpen, setMobileOpen] = useState(false)
   const meta = viewMeta(activeView)
@@ -275,6 +351,9 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
               <h1 className="text-sm font-semibold tracking-tight">{meta.title}</h1>
               <p className="hidden text-xs text-muted-foreground sm:block">{meta.description}</p>
             </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <HeaderLanguageSwitcher />
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6 lg:overflow-hidden">

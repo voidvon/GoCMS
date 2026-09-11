@@ -23,9 +23,12 @@ func TestCreateSchemaContainsOnlyRuntimeTables(t *testing.T) {
 	defer rows.Close()
 	want := map[string]bool{
 		"gocms_site_setting":            false,
+		"gocms_language":                false,
 		"gocms_admin_user":              false,
 		"gocms_category":                false,
+		"gocms_category_translation":    false,
 		"gocms_content":                 false,
+		"gocms_content_translation":     false,
 		"gocms_media":                   false,
 		"gocms_media_ref":               false,
 		"gocms_model_table":             false,
@@ -34,6 +37,8 @@ func TestCreateSchemaContainsOnlyRuntimeTables(t *testing.T) {
 		"gocms_feedback_class":          false,
 		"gocms_feedback_field":          false,
 		"gocms_message":                 false,
+		"gocms_api_key":                 false,
+		"gocms_api_key_event":           false,
 		"gocms_template_assignment":     false,
 		"gocms_template_label_category": false,
 		"gocms_template_label":          false,

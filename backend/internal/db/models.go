@@ -41,9 +41,14 @@ func EnsureModels(ctx context.Context, database *sql.DB) error {
 			"description" TEXT NOT NULL DEFAULT '',
 			"sort_order" INTEGER NOT NULL DEFAULT 0,
 			"is_system" INTEGER NOT NULL DEFAULT 0,
+			"is_translatable" INTEGER NOT NULL DEFAULT 0,
 			UNIQUE("table_id", "field_name")
 		)`); err != nil {
 		return fmt.Errorf("create model field table: %w", err)
+	}
+
+	if err := ensureModelFieldColumn(ctx, database, "is_translatable", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
 	}
 
 	if _, err := database.ExecContext(ctx, `
@@ -83,6 +88,12 @@ func seedDefaultModels(ctx context.Context, database *sql.DB) error {
 	if _, err := ensureProductModel(ctx, database, now); err != nil {
 		return fmt.Errorf("ensure product model: %w", err)
 	}
+
+	_, _ = database.ExecContext(ctx, `
+		UPDATE "`+ModelFieldTable+`"
+		SET "is_translatable" = 1
+		WHERE "field_name" IN ('title', 'summary', 'body', 'keywords', 'description')
+	`)
 
 	if err := MigrateCategoryAndContentModels(ctx, database); err != nil {
 		return fmt.Errorf("migrate category and content models: %w", err)
@@ -454,3 +465,17 @@ func extractLegacyProductParameters(ctx context.Context, database *sql.DB, produ
 
 	return nil
 }
+
+func ensureModelFieldColumn(ctx context.Context, database *sql.DB, name, definition string) error {
+	var exists int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('`+ModelFieldTable+`') WHERE name = ?`, name).Scan(&exists); err != nil {
+		return fmt.Errorf("inspect model field %s column: %w", name, err)
+	}
+	if exists == 0 {
+		if _, err := database.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE "%s" ADD COLUMN "%s" %s`, ModelFieldTable, name, definition)); err != nil {
+			return fmt.Errorf("add model field column %s: %w", name, err)
+		}
+	}
+	return nil
+}
+

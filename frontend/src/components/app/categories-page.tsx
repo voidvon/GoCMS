@@ -3,6 +3,7 @@ import {
   ChevronDown,
   ChevronRight,
   FolderTree,
+  Languages,
   LoaderCircle,
   Plus,
   Trash2,
@@ -22,7 +23,9 @@ import {
   type ThemeFile,
   type ThemeTemplateGroup,
 } from "@/lib/api"
+import { useLanguage } from "@/lib/language-context"
 import { buildCategoryTree, flattenCategoryTree, type CategoryNode } from "@/lib/category-tree"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -185,7 +188,14 @@ function CategoryRow({
       >
         <FolderTree className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{node.name}</span>
+          <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+            {node.name}
+            {node.is_fallback ? (
+              <span className="rounded border border-amber-500/30 bg-amber-500/10 px-1 py-0.2 text-[10px] font-normal text-amber-600">
+                兜底
+              </span>
+            ) : null}
+          </span>
           <span className="block truncate text-xs text-muted-foreground">{node.content_count} 条直接内容 · {node.page_type === "cover" ? "封面式" : "列表式"} · 排序 {node.order_id} · #{node.route_id}</span>
         </span>
       </button>
@@ -224,11 +234,13 @@ export function CategoriesPage() {
   const [deleting, setDeleting] = useState<CategoryItem | null>(null)
   const [deleteSaving, setDeleteSaving] = useState(false)
 
+  const { activeLang, setActiveLang, languages, defaultLang, currentLanguage } = useLanguage()
+
   const tree = useMemo(() => buildCategoryTree(categories), [categories])
   const parentOptions = useMemo(() => flattenCategoryTree(categories, editing?.id), [categories, editing?.id])
 
   async function refreshCategories() {
-    const nextCategories = await getCategories()
+    const nextCategories = await getCategories(activeLang)
     setCategories(nextCategories)
     setExpanded((current) => {
       const availableIDs = new Set(nextCategories.map((category) => category.id))
@@ -239,15 +251,24 @@ export function CategoriesPage() {
 
   useEffect(() => {
     let active = true
-    Promise.all([getCategories(), getThemeFiles(), getSystemModels()])
+    Promise.all([getCategories(activeLang), getThemeFiles(), getSystemModels()])
       .then(([nextCategories, theme, nextModels]) => {
         if (!active) return
         setCategories(nextCategories)
         setModels(nextModels)
         setTemplateFiles(theme.template_files)
         setTemplateGroups(theme.template_groups)
-        setExpanded(new Set())
         setError("")
+        setEditing((prevEditing) => {
+          if (prevEditing) {
+            const updated = nextCategories.find((category) => category.id === prevEditing.id)
+            if (updated) {
+              setForm(categoryInput(updated, theme.template_groups, theme.template_files))
+              return updated
+            }
+          }
+          return prevEditing
+        })
       })
       .catch((loadError) => {
         if (active) setError(loadError instanceof Error ? loadError.message : "分类加载失败")
@@ -261,7 +282,7 @@ export function CategoriesPage() {
     return () => {
       active = false
     }
-  }, [])
+  }, [activeLang])
 
   function update<K extends keyof CategoryInput>(key: K, value: CategoryInput[K]) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -345,8 +366,8 @@ export function CategoriesPage() {
     try {
       const payload = { ...form, name }
       const result = editing
-        ? await updateCategory(editing.id, payload, publish)
-        : await createCategory(payload, publish)
+        ? await updateCategory(editing.id, payload, publish, activeLang)
+        : await createCategory(payload, publish, activeLang)
       setNotice(publicationMessage(result, "栏目"))
       const nextCategories = await refreshCategories()
       if (editing) {
@@ -419,8 +440,34 @@ export function CategoriesPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div>
+        <div className="flex flex-wrap items-center gap-3">
           <p className="text-sm text-muted-foreground">{categories.length.toLocaleString("zh-CN")} 个栏目，所有内容共用一棵树。</p>
+          {languages.length > 1 && (
+            <Select
+              value={activeLang}
+              onValueChange={(val) => {
+                if (val) setActiveLang(val)
+              }}
+            >
+              <SelectTrigger className="w-36 h-8 text-xs" aria-label="选择语言">
+                <Languages className="size-3.5 mr-1 shrink-0 text-muted-foreground" />
+                <SelectValue>
+                  {currentLanguage?.name || activeLang}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {languages.map((lang) => (
+                  <SelectItem key={lang.code} value={lang.code} className="text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span>{lang.name}</span>
+                      {lang.is_default === 1 && <span className="text-[10px] text-muted-foreground">(主站)</span>}
+                      {lang.is_fallback === 1 && <span className="text-[10px] text-muted-foreground">(兜底)</span>}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
         <Button onClick={() => openNew()}><Plus />新增顶级栏目</Button>
       </div>
@@ -454,9 +501,24 @@ export function CategoriesPage() {
           {editorActive ? (
             <>
               <CardHeader className="border-b">
-                <CardTitle>{editing ? `编辑：${editing.name}` : "新增栏目"}</CardTitle>
-                <CardDescription>栏目用于归类内容，并配置列表、详情模板与静态路径。</CardDescription>
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <CardTitle>{editing ? `编辑：${editing.name}` : "新增栏目"}</CardTitle>
+                    <CardDescription>栏目用于归类内容，并配置列表、详情模板与静态路径。</CardDescription>
+                  </div>
+                  {activeLang && (
+                    <Badge variant="outline" className="shrink-0 text-xs">
+                      {currentLanguage?.name || activeLang}
+                    </Badge>
+                  )}
+                </div>
               </CardHeader>
+              {activeLang !== defaultLang && (
+                <div className="bg-amber-500/10 text-amber-900 dark:text-amber-200 border-b border-amber-500/20 px-6 py-2.5 text-xs flex items-center gap-2">
+                  <Languages className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  <span>当前正在编辑 <strong>{currentLanguage?.name || activeLang}</strong> 语言的栏目翻译。名称、关键词、描述等翻译字段留空时，将自动使用兜底语言内容。</span>
+                </div>
+              )}
               <CardContent className="grid gap-5 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="category-name">分类名称</Label>

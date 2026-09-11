@@ -18,12 +18,14 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 		fn   func(context.Context, *sql.DB) error
 	}{
 		{name: "site settings", fn: EnsureSiteSettings},
+		{name: "languages", fn: EnsureLanguages},
 		{name: "admin users", fn: EnsureAdminUsers},
 		{name: "categories", fn: EnsureUnifiedCategories},
 		{name: "models", fn: EnsureModels},
 		{name: "content", fn: EnsureContent},
 		{name: "media", fn: EnsureMedia},
 		{name: "messages", fn: EnsureMessages},
+		{name: "api keys", fn: EnsureApiKeys},
 		{name: "template assignments", fn: templateconfig.Ensure},
 		{name: "template labels", fn: templatelabel.Ensure},
 	}

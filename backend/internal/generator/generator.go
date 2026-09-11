@@ -46,6 +46,15 @@ type Publisher struct {
 	HomeTemplate         string
 }
 
+type LanguageInfo struct {
+	Code       string `json:"code"`
+	Name       string `json:"name"`
+	URL        string `json:"url"`
+	IsCurrent  bool   `json:"is_current"`
+	IsDefault  bool   `json:"is_default"`
+	PathPrefix string `json:"path_prefix,omitempty"`
+}
+
 type content struct {
 	tables           map[string][]Row
 	settings         map[string]string
@@ -55,6 +64,9 @@ type content struct {
 	pages            map[string][]byte
 	homeTemplatePath string
 	labelDepth       int
+	lang             string
+	langPrefix       string
+	languages        []LanguageInfo
 }
 
 // ListItem, ListCategory, ListPagination, and NavigationItem are the data
@@ -257,6 +269,8 @@ func (c *content) templateFuncs() template.FuncMap {
 		"listPagination": func(row Row) ListPagination {
 			return c.listPagination(row)
 		},
+		"currentLang": func() string { return c.lang },
+		"languages":   func(_ ...any) []LanguageInfo { return c.languagesNav() },
 		"morepic": func(val any) []PhotoItem {
 			if val == nil {
 				return nil
@@ -270,6 +284,28 @@ func (c *content) templateFuncs() template.FuncMap {
 			return parseMultiValue(fmt.Sprint(val))
 		},
 	}
+}
+
+func (c *content) homeURL() string {
+	if c.langPrefix != "" {
+		return "/" + c.langPrefix + "/"
+	}
+	return "/"
+}
+
+func (c *content) languagesNav() []LanguageInfo {
+	res := make([]LanguageInfo, len(c.languages))
+	for i, l := range c.languages {
+		res[i] = LanguageInfo{
+			Code:       l.Code,
+			Name:       l.Name,
+			URL:        l.URL,
+			IsCurrent:  l.Code == c.lang,
+			IsDefault:  l.IsDefault,
+			PathPrefix: l.PathPrefix,
+		}
+	}
+	return res
 }
 
 type PhotoItem struct {
@@ -388,6 +424,163 @@ func readTable(ctx context.Context, tx *sql.Tx, name string) ([]Row, error) {
 	return items, rows.Err()
 }
 
+func readOptionalTable(ctx context.Context, tx *sql.Tx, name string) ([]Row, error) {
+	rows, err := readTable(ctx, tx, name)
+	if err != nil {
+		if strings.Contains(err.Error(), "no such table") {
+			return []Row{}, nil
+		}
+		return nil, err
+	}
+	return rows, nil
+}
+
+func prepareTranslatedCategories(baseRows, transRows []Row, targetLang, fallbackLang string) []Row {
+	transMap := make(map[string]Row)
+	for _, tr := range transRows {
+		key := tr["category_id"] + "_" + tr["lang"]
+		transMap[key] = tr
+	}
+
+	result := make([]Row, len(baseRows))
+	for i, base := range baseRows {
+		row := make(Row, len(base))
+		for k, v := range base {
+			row[k] = v
+		}
+
+		catID := base["id"]
+		targetTrans := transMap[catID+"_"+targetLang]
+		fallbackTrans := transMap[catID+"_"+fallbackLang]
+
+		if v := strings.TrimSpace(targetTrans["name"]); v != "" {
+			row["name"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["name"]); v != "" {
+			row["name"] = v
+		}
+
+		if v := strings.TrimSpace(targetTrans["seo_title"]); v != "" {
+			row["seo_title"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["seo_title"]); v != "" {
+			row["seo_title"] = v
+		}
+
+		if v := strings.TrimSpace(targetTrans["keywords"]); v != "" {
+			row["keywords"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["keywords"]); v != "" {
+			row["keywords"] = v
+		}
+
+		if v := strings.TrimSpace(targetTrans["description"]); v != "" {
+			row["description"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["description"]); v != "" {
+			row["description"] = v
+		}
+
+		if v := strings.TrimSpace(targetTrans["cover_content"]); v != "" {
+			row["cover_content"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["cover_content"]); v != "" {
+			row["cover_content"] = v
+		}
+
+		result[i] = row
+	}
+	return result
+}
+
+func prepareTranslatedContent(baseRows, transRows []Row, targetLang, fallbackLang string, transFields map[string]bool) []Row {
+	transMap := make(map[string]Row)
+	for _, tr := range transRows {
+		key := tr["content_id"] + "_" + tr["lang"]
+		transMap[key] = tr
+	}
+
+	result := make([]Row, len(baseRows))
+	for i, base := range baseRows {
+		row := make(Row, len(base))
+		for k, v := range base {
+			row[k] = v
+		}
+
+		contentID := base["id"]
+		targetTrans := transMap[contentID+"_"+targetLang]
+		fallbackTrans := transMap[contentID+"_"+fallbackLang]
+
+		if v := strings.TrimSpace(targetTrans["title"]); v != "" {
+			row["title"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["title"]); v != "" {
+			row["title"] = v
+		}
+
+		if v := strings.TrimSpace(targetTrans["summary"]); v != "" {
+			row["summary"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["summary"]); v != "" {
+			row["summary"] = v
+		}
+
+		bodyVal := strings.TrimSpace(targetTrans["body"])
+		if bodyVal == "" {
+			bodyVal = strings.TrimSpace(targetTrans["content"])
+		}
+		if bodyVal != "" {
+			row["body"] = bodyVal
+		} else {
+			fbBodyVal := strings.TrimSpace(fallbackTrans["body"])
+			if fbBodyVal == "" {
+				fbBodyVal = strings.TrimSpace(fallbackTrans["content"])
+			}
+			if fbBodyVal != "" {
+				row["body"] = fbBodyVal
+			}
+		}
+
+		if v := strings.TrimSpace(targetTrans["keywords"]); v != "" {
+			row["keywords"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["keywords"]); v != "" {
+			row["keywords"] = v
+		}
+
+		if v := strings.TrimSpace(targetTrans["description"]); v != "" {
+			row["description"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["description"]); v != "" {
+			row["description"] = v
+		}
+
+		var extraMap map[string]any
+		if baseExtra := strings.TrimSpace(base["extra_data"]); baseExtra != "" && baseExtra != "{}" {
+			_ = json.Unmarshal([]byte(baseExtra), &extraMap)
+		}
+		if extraMap == nil {
+			extraMap = make(map[string]any)
+		}
+		if fbExtraStr := strings.TrimSpace(fallbackTrans["extra_data"]); fbExtraStr != "" && fbExtraStr != "{}" {
+			var fbExtra map[string]any
+			if err := json.Unmarshal([]byte(fbExtraStr), &fbExtra); err == nil {
+				for k, v := range fbExtra {
+					if transFields[k] && strings.TrimSpace(fmt.Sprint(v)) != "" {
+						extraMap[k] = v
+					}
+				}
+			}
+		}
+		if tgExtraStr := strings.TrimSpace(targetTrans["extra_data"]); tgExtraStr != "" && tgExtraStr != "{}" {
+			var tgExtra map[string]any
+			if err := json.Unmarshal([]byte(tgExtraStr), &tgExtra); err == nil {
+				for k, v := range tgExtra {
+					if transFields[k] && strings.TrimSpace(fmt.Sprint(v)) != "" {
+						extraMap[k] = v
+					}
+				}
+			}
+		}
+		extraBytes, _ := json.Marshal(extraMap)
+		row["extra_data"] = string(extraBytes)
+
+		result[i] = row
+	}
+	return result
+}
+
 func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	report = Report{State: "running", Started: time.Now()}
 	if err = os.MkdirAll(p.Data, 0755); err != nil {
@@ -435,6 +628,10 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		}
 		c.tables[name] = rows
 	}
+	for _, name := range []string{"gocms_category_translation", "gocms_content_translation", "gocms_language", "gocms_model_field"} {
+		rows, _ := readOptionalTable(ctx, tx, name)
+		c.tables[name] = rows
+	}
 	c.settings, err = db.LoadSiteSettings(ctx, tx)
 	if err != nil {
 		_ = tx.Rollback()
@@ -453,6 +650,74 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	if err = tx.Commit(); err != nil {
 		return report, err
 	}
+
+	var enabledLanguages []LanguageInfo
+	defaultLang := ""
+	fallbackLang := ""
+
+	for _, lr := range c.tables["gocms_language"] {
+		if lr.n("is_enabled") == 1 {
+			isDef := lr.n("is_default") == 1
+			isFb := lr.n("is_fallback") == 1
+			prefix := strings.Trim(lr["path_prefix"], "/")
+			if isDef {
+				defaultLang = lr["code"]
+				prefix = ""
+			} else if prefix == "" {
+				prefix = strings.ToLower(lr["code"])
+			}
+			if isFb {
+				fallbackLang = lr["code"]
+			}
+			url := "/"
+			if prefix != "" {
+				url = "/" + prefix + "/"
+			}
+			enabledLanguages = append(enabledLanguages, LanguageInfo{
+				Code:       lr["code"],
+				Name:       lr["name"],
+				URL:        url,
+				IsDefault:  isDef,
+				PathPrefix: prefix,
+			})
+		}
+	}
+	if len(enabledLanguages) == 0 {
+		enabledLanguages = append(enabledLanguages, LanguageInfo{
+			Code:       "zh-CN",
+			Name:       "中文",
+			URL:        "/",
+			IsDefault:  true,
+			PathPrefix: "",
+		})
+		defaultLang = "zh-CN"
+		fallbackLang = "zh-CN"
+	}
+	if defaultLang == "" {
+		defaultLang = enabledLanguages[0].Code
+		enabledLanguages[0].IsDefault = true
+		enabledLanguages[0].PathPrefix = ""
+		enabledLanguages[0].URL = "/"
+	}
+	if fallbackLang == "" {
+		fallbackLang = defaultLang
+	}
+	c.languages = enabledLanguages
+
+	transFields := map[string]bool{
+		"title":       true,
+		"summary":     true,
+		"body":        true,
+		"content":     true,
+		"keywords":    true,
+		"description": true,
+	}
+	for _, f := range c.tables["gocms_model_field"] {
+		if f.n("is_translatable") == 1 {
+			transFields[strings.ToLower(strings.TrimSpace(f["field_name"]))] = true
+		}
+	}
+
 	for _, label := range labels {
 		parsed, parseErr := template.New("label:" + label.Key).Funcs(c.templateFuncs()).Parse(label.Content)
 		if parseErr != nil {
@@ -461,8 +726,8 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		c.labelTemplates[label.Key] = parsed
 	}
 
-	sortRows(c.tables["gocms_category"], "order_id", true)
-	sortRows(c.tables["gocms_content"], "sort_order", false)
+	baseCategories := c.tables["gocms_category"]
+	baseContents := c.tables["gocms_content"]
 	err = filepath.WalkDir(p.Templates, func(filePath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -498,10 +763,27 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	if err != nil {
 		return report, err
 	}
-	if err = c.build(); err != nil {
-		return report, err
+	for _, lang := range enabledLanguages {
+		c.lang = lang.Code
+		c.langPrefix = lang.PathPrefix
+		c.tables["gocms_category"] = prepareTranslatedCategories(baseCategories, c.tables["gocms_category_translation"], lang.Code, fallbackLang)
+		c.tables["gocms_content"] = prepareTranslatedContent(baseContents, c.tables["gocms_content_translation"], lang.Code, fallbackLang, transFields)
+		sortRows(c.tables["gocms_category"], "order_id", true)
+		sortRows(c.tables["gocms_content"], "sort_order", false)
+		if err = c.buildForLang(); err != nil {
+			return report, err
+		}
 	}
-	for _, row := range c.tables["gocms_content"] {
+
+	urls := make([]string, 0, len(c.pages))
+	for pagePath := range c.pages {
+		urls = append(urls, pagePath)
+	}
+	sort.Strings(urls)
+	c.pages["sitemap.html"] = renderSitemapHTML(urls)
+	c.pages["Sitemap.xml"] = renderSitemapXML(strings.TrimRight(c.settings["site_url"], "/"), urls)
+
+	for _, row := range baseContents {
 		if row.n("visible") == 1 {
 			report.Contents++
 		}
@@ -771,11 +1053,21 @@ func (c *content) categoryListURL(row Row, page int) string {
 	directory := c.categoryListDir(row)
 	if c.categoryPageType(row) == routing.PageTypeCover && isIndexFilename(filename) {
 		if directory == "" {
+			if c.langPrefix != "" {
+				return "/" + c.langPrefix + "/"
+			}
 			return "/"
+		}
+		if c.langPrefix != "" {
+			return "/" + c.langPrefix + "/" + strings.Trim(directory, "/") + "/"
 		}
 		return "/" + strings.Trim(directory, "/") + "/"
 	}
-	return "/" + strings.Trim(directory+"/"+filename, "/")
+	target := strings.Trim(directory+"/"+filename, "/")
+	if c.langPrefix != "" {
+		return "/" + c.langPrefix + "/" + target
+	}
+	return "/" + target
 }
 
 func (c *content) categoryListPagePath(row Row, page int) string {
@@ -796,7 +1088,11 @@ func (c *content) categoryListPagePath(row Row, page int) string {
 	if err != nil {
 		filename = fmt.Sprintf("%d-%d.html", routeID, page)
 	}
-	return strings.Trim(c.categoryListDir(row)+"/"+filename, "/")
+	target := strings.Trim(c.categoryListDir(row)+"/"+filename, "/")
+	if c.langPrefix != "" {
+		return c.langPrefix + "/" + target
+	}
+	return target
 }
 
 func isIndexFilename(value string) bool {
@@ -810,7 +1106,11 @@ func (c *content) contentURL(row Row) string {
 	if err != nil {
 		filename = row["route_key"] + ".html"
 	}
-	return "/" + strings.Trim(c.categoryDetailDir(category)+"/"+filename, "/")
+	target := strings.Trim(c.categoryDetailDir(category)+"/"+filename, "/")
+	if c.langPrefix != "" {
+		return "/" + c.langPrefix + "/" + target
+	}
+	return "/" + target
 }
 
 func (c *content) listRoot(category Row) Row {
@@ -844,11 +1144,20 @@ func (c *content) rootCategory() Row {
 func (c *content) rootCategoryURL() string {
 	root := c.rootCategory()
 	if root["id"] == "" {
+		if c.langPrefix != "" {
+			return "/" + c.langPrefix + "/" + routing.DefaultListPath() + "/"
+		}
 		return "/" + routing.DefaultListPath() + "/"
 	}
 	directory := c.categoryListDir(root)
 	if directory == "" {
+		if c.langPrefix != "" {
+			return "/" + c.langPrefix + "/"
+		}
 		return "/"
+	}
+	if c.langPrefix != "" {
+		return "/" + c.langPrefix + "/" + strings.Trim(directory, "/") + "/"
 	}
 	return "/" + strings.Trim(directory, "/") + "/"
 }
@@ -1177,6 +1486,8 @@ func (c *content) contentView(row Row) Row {
 		"category_root_name": esc(root["name"]),
 		"category_root_url":  c.categoryListURL(root, 1),
 		"content_url":        c.contentURL(row),
+		"home_url":           c.homeURL(),
+		"lang":               c.lang,
 		"category_children":  "",
 		"model_id":           esc(row["model_id"]),
 	}
@@ -1220,6 +1531,8 @@ func (c *content) categoryView(category Row, items []Row, page, pageSize int) Ro
 		"list_root_name":    esc(rootName),
 		"list_root_url":     c.categoryListURL(root, 1),
 		"root_category_url": c.rootCategoryURL(),
+		"home_url":          c.homeURL(),
+		"lang":              c.lang,
 		"keywords":          esc(category["keywords"]),
 		"description":       esc(category["description"]),
 		"body":              category["cover_content"],
@@ -1229,12 +1542,18 @@ func (c *content) categoryView(category Row, items []Row, page, pageSize int) Ro
 	}
 }
 
-func (c *content) build() error {
-	if err := c.pageTemplate("index.html", c.homeTemplate(), Row{
+func (c *content) buildForLang() error {
+	homePagePath := "index.html"
+	if c.langPrefix != "" {
+		homePagePath = c.langPrefix + "/index.html"
+	}
+	if err := c.pageTemplate(homePagePath, c.homeTemplate(), Row{
 		"title":         esc(c.settings["site_name"]),
 		"site_name":     esc(c.settings["site_name"]),
 		"site_url":      esc(c.settings["site_url"]),
 		"root_category": "",
+		"home_url":      c.homeURL(),
+		"lang":          c.lang,
 	}); err != nil {
 		return err
 	}
@@ -1289,12 +1608,15 @@ func (c *content) build() error {
 			}
 			if page == 1 {
 				alias := strings.TrimPrefix(c.categoryListURL(category, 1), "/")
-				if alias != "" {
+				if alias != "" && !strings.HasSuffix(alias, "/") {
 					c.pages[alias] = c.pages[pagePath]
 				}
 				directory := c.categoryListDir(category)
 				if directory != "" {
 					indexPath := directory + "/index.html"
+					if c.langPrefix != "" {
+						indexPath = c.langPrefix + "/" + indexPath
+					}
 					// Several categories may intentionally share a list directory. The
 					// first category in the configured order owns that directory index.
 					if c.pages[indexPath] == nil {
@@ -1305,19 +1627,18 @@ func (c *content) build() error {
 		}
 	}
 
-	if err := c.page("msg.html", templateconfig.RoleMessage, Row{}); err != nil {
+	msgPath := "msg.html"
+	searchPath := "search.html"
+	if c.langPrefix != "" {
+		msgPath = c.langPrefix + "/msg.html"
+		searchPath = c.langPrefix + "/search.html"
+	}
+	if err := c.page(msgPath, templateconfig.RoleMessage, Row{"home_url": c.homeURL(), "lang": c.lang}); err != nil {
 		return err
 	}
-	if err := c.page("search.html", templateconfig.RoleSearch, Row{}); err != nil {
+	if err := c.page(searchPath, templateconfig.RoleSearch, Row{"home_url": c.homeURL(), "lang": c.lang}); err != nil {
 		return err
 	}
-	urls := make([]string, 0, len(c.pages))
-	for pagePath := range c.pages {
-		urls = append(urls, pagePath)
-	}
-	sort.Strings(urls)
-	c.pages["sitemap.html"] = renderSitemapHTML(urls)
-	c.pages["Sitemap.xml"] = renderSitemapXML(strings.TrimRight(c.settings["site_url"], "/"), urls)
 	return nil
 }
 

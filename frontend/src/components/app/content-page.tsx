@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react"
-import { ArrowDown, ArrowUp, FileText, ImagePlus, Library, LoaderCircle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react"
+import { ArrowDown, ArrowUp, FileText, ImagePlus, Languages, Library, LoaderCircle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react"
 
 import {
   createContent,
@@ -19,6 +19,7 @@ import {
   type SystemModel,
   updateContent,
 } from "@/lib/api"
+import { useLanguage } from "@/lib/language-context"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -33,6 +34,40 @@ import { ConfirmDialog, IconButton, InlineAlert, SearchField, TablePagination } 
 import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
 import { RichTextEditor } from "@/components/app/rich-text-editor"
 import { flattenCategoryTree } from "@/lib/category-tree"
+
+function FieldLabel({
+  label,
+  isRequired,
+  isTranslatable,
+  isMultiLangActive,
+  htmlFor,
+}: {
+  label: string
+  isRequired?: boolean
+  isTranslatable?: boolean
+  isMultiLangActive?: boolean
+  htmlFor?: string
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Label htmlFor={htmlFor} className="cursor-pointer">
+        {label}
+        {isRequired ? <span className="text-destructive"> *</span> : null}
+      </Label>
+      {isMultiLangActive && (
+        isTranslatable ? (
+          <span className="text-[10px] leading-tight text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 px-1 py-0.5 rounded border border-blue-200/60 dark:border-blue-800/60 font-normal">
+            多语言
+          </span>
+        ) : (
+          <span className="text-[10px] leading-tight text-muted-foreground bg-muted px-1 py-0.5 rounded font-normal">
+            通用
+          </span>
+        )
+      )}
+    </div>
+  )
+}
 
 const pageSize = 20
 
@@ -142,11 +177,13 @@ function MultiImageField({
   field,
   value,
   isRequired,
+  isMultiLangActive,
   onChange,
 }: {
-  field: { field_name: string; field_label: string; description?: string }
+  field: { field_name: string; field_label: string; description?: string; is_translatable?: boolean }
   value: any
   isRequired: boolean
+  isMultiLangActive?: boolean
   onChange: (value: PhotoItem[]) => void
 }) {
   const photos = useMemo(() => parsePhotos(value), [value])
@@ -202,12 +239,14 @@ function MultiImageField({
     <div className="space-y-3 rounded-md border bg-background/50 p-3 sm:col-span-2">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
         <div>
-          <Label className="text-sm font-medium">
-            {field.field_label}
-            {isRequired ? <span className="text-destructive"> *</span> : null}
-          </Label>
+          <FieldLabel
+            label={field.field_label}
+            isRequired={isRequired}
+            isTranslatable={field.is_translatable}
+            isMultiLangActive={isMultiLangActive}
+          />
           {field.description ? (
-            <p className="text-xs text-muted-foreground">{field.description}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{field.description}</p>
           ) : null}
         </div>
         <div className="flex items-center gap-2">
@@ -362,11 +401,13 @@ function MultiValueField({
   field,
   value,
   isRequired,
+  isMultiLangActive,
   onChange,
 }: {
-  field: { field_name: string; field_label: string; description?: string }
+  field: { field_name: string; field_label: string; description?: string; is_translatable?: boolean }
   value: any
   isRequired: boolean
+  isMultiLangActive?: boolean
   onChange: (value: string[]) => void
 }) {
   const items = useMemo(() => parseMultiValue(value), [value])
@@ -388,12 +429,14 @@ function MultiValueField({
     <div className="space-y-2 rounded-md border bg-background/50 p-3 sm:col-span-2">
       <div className="flex items-center justify-between border-b pb-2">
         <div>
-          <Label className="text-sm font-medium">
-            {field.field_label}
-            {isRequired ? <span className="text-destructive"> *</span> : null}
-          </Label>
+          <FieldLabel
+            label={field.field_label}
+            isRequired={isRequired}
+            isTranslatable={field.is_translatable}
+            isMultiLangActive={isMultiLangActive}
+          />
           {field.description ? (
-            <p className="text-xs text-muted-foreground">{field.description}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{field.description}</p>
           ) : null}
         </div>
         <Button type="button" variant="outline" size="sm" onClick={addItem}>
@@ -475,12 +518,16 @@ function SingleImageField({
   value,
   isRequired,
   description,
+  isTranslatable,
+  isMultiLangActive,
   onChange,
 }: {
   label: string
   value: string
   isRequired: boolean
   description?: string
+  isTranslatable?: boolean
+  isMultiLangActive?: boolean
   onChange: (url: string) => void
 }) {
   const [uploading, setUploading] = useState(false)
@@ -507,10 +554,12 @@ function SingleImageField({
   return (
     <div className="space-y-2 sm:col-span-2">
       <div className="flex items-center justify-between">
-        <Label>
-          {label}
-          {isRequired ? <span className="text-destructive"> *</span> : null}
-        </Label>
+        <FieldLabel
+          label={label}
+          isRequired={isRequired}
+          isTranslatable={isTranslatable}
+          isMultiLangActive={isMultiLangActive}
+        />
         {description ? <span className="text-xs text-muted-foreground">{description}</span> : null}
       </div>
       <input
@@ -578,6 +627,8 @@ function ContentEditor({
   const [customError, setCustomError] = useState("")
   const categoryOptions = flattenCategoryTree(categories)
   const [bodyUploading, setBodyUploading] = useState(false)
+  const { activeLang, defaultLang, currentLanguage } = useLanguage()
+  const isMultiLangActive = activeLang !== defaultLang
 
   function update<K extends keyof ContentInput>(key: K, value: ContentInput[K]) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -606,6 +657,13 @@ function ContentEditor({
     const tableFields = modelFields.filter((f) => f.table_id === currentModel.table_id)
     const tableFieldMap = new Map(tableFields.map((f) => [f.field_name, f]))
 
+    const checkTranslatable = (fieldName: string, fieldDef?: ModelField) => {
+      if (fieldDef?.is_translatable !== undefined) {
+        return fieldDef.is_translatable === 1
+      }
+      return ["title", "summary", "body", "content", "keywords", "description"].includes(fieldName)
+    }
+
     if (currentModel.entry_fields && currentModel.entry_fields.length > 0) {
       return currentModel.entry_fields.map((ef) => {
         const fieldDef = tableFieldMap.get(ef.field)
@@ -616,6 +674,7 @@ function ContentEditor({
           field_options: fieldDef?.field_options || "",
           description: fieldDef?.description || "",
           is_system: fieldDef?.is_system ?? (isSystemField(ef.field) ? 1 : 0),
+          is_translatable: checkTranslatable(ef.field, fieldDef),
         }
       })
     }
@@ -627,6 +686,7 @@ function ContentEditor({
       field_options: f.field_options,
       description: f.description,
       is_system: f.is_system,
+      is_translatable: checkTranslatable(f.field_name, f),
     }))
   }, [currentModel, modelFields])
 
@@ -677,7 +737,14 @@ function ContentEditor({
     <>
       <DialogHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <DialogTitle>{content.title ? "编辑内容" : "新增内容"}</DialogTitle>
+          <div className="flex items-center gap-2">
+            <DialogTitle>{content.title ? "编辑内容" : "新增内容"}</DialogTitle>
+            {activeLang && (
+              <Badge variant="outline" className="text-xs">
+                {currentLanguage?.name || activeLang}
+              </Badge>
+            )}
+          </div>
           <Badge variant="outline" className="text-xs font-normal">
             模型：{currentModel?.name || "通用模型"}
           </Badge>
@@ -686,6 +753,13 @@ function ContentEditor({
           根据所属分类绑定的系统模型动态配置录入表单。
         </DialogDescription>
       </DialogHeader>
+
+      {isMultiLangActive && (
+        <div className="bg-amber-500/10 text-amber-900 dark:text-amber-200 border border-amber-500/20 rounded-md px-4 py-2.5 text-xs flex items-center gap-2">
+          <Languages className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span>当前正在编辑 <strong>{currentLanguage?.name || activeLang}</strong> 语言的内容。标有“多语言”的字段独立保存并支持兜底；标有“通用”的字段在所有语言间共享。</span>
+        </div>
+      )}
 
       <div className="space-y-4 py-2">
         {customError ? <InlineAlert>{customError}</InlineAlert> : null}
@@ -748,6 +822,7 @@ function ContentEditor({
                   field={field}
                   value={val}
                   isRequired={isRequired}
+                  isMultiLangActive={isMultiLangActive}
                   onChange={(nextVal) => setFieldValue(field.field_name, nextVal)}
                 />
               )
@@ -760,6 +835,7 @@ function ContentEditor({
                   field={field}
                   value={val}
                   isRequired={isRequired}
+                  isMultiLangActive={isMultiLangActive}
                   onChange={(nextVal) => setFieldValue(field.field_name, nextVal)}
                 />
               )
@@ -773,6 +849,8 @@ function ContentEditor({
                   value={val || ""}
                   isRequired={isRequired}
                   description={field.description}
+                  isTranslatable={field.is_translatable}
+                  isMultiLangActive={isMultiLangActive}
                   onChange={(url) => setFieldValue(field.field_name, url)}
                 />
               )
@@ -781,10 +859,13 @@ function ContentEditor({
             if (field.field_type === "editor") {
               return (
                 <div key={field.field_name} className="space-y-2 sm:col-span-2">
-                  <Label htmlFor={`field-${field.field_name}`}>
-                    {field.field_label}
-                    {isRequired ? <span className="text-destructive"> *</span> : null}
-                  </Label>
+                  <FieldLabel
+                    label={field.field_label}
+                    isRequired={isRequired}
+                    isTranslatable={field.is_translatable}
+                    isMultiLangActive={isMultiLangActive}
+                    htmlFor={`field-${field.field_name}`}
+                  />
                   <RichTextEditor
                     id={`field-${field.field_name}`}
                     value={val || ""}
@@ -801,10 +882,13 @@ function ContentEditor({
             if (field.field_type === "textarea") {
               return (
                 <div key={field.field_name} className="space-y-2 sm:col-span-2">
-                  <Label htmlFor={`field-${field.field_name}`}>
-                    {field.field_label}
-                    {isRequired ? <span className="text-destructive"> *</span> : null}
-                  </Label>
+                  <FieldLabel
+                    label={field.field_label}
+                    isRequired={isRequired}
+                    isTranslatable={field.is_translatable}
+                    isMultiLangActive={isMultiLangActive}
+                    htmlFor={`field-${field.field_name}`}
+                  />
                   <Textarea
                     id={`field-${field.field_name}`}
                     value={val || ""}
@@ -821,10 +905,12 @@ function ContentEditor({
               const options = parseFieldOptions(field.field_options)
               return (
                 <div key={field.field_name} className="space-y-2">
-                  <Label>
-                    {field.field_label}
-                    {isRequired ? <span className="text-destructive"> *</span> : null}
-                  </Label>
+                  <FieldLabel
+                    label={field.field_label}
+                    isRequired={isRequired}
+                    isTranslatable={field.is_translatable}
+                    isMultiLangActive={isMultiLangActive}
+                  />
                   <Select
                     value={val ? String(val) : ""}
                     onValueChange={(value) => setFieldValue(field.field_name, value ?? "")}
@@ -850,10 +936,13 @@ function ContentEditor({
             if (field.field_type === "date") {
               return (
                 <div key={field.field_name} className="space-y-2">
-                  <Label htmlFor={`field-${field.field_name}`}>
-                    {field.field_label}
-                    {isRequired ? <span className="text-destructive"> *</span> : null}
-                  </Label>
+                  <FieldLabel
+                    label={field.field_label}
+                    isRequired={isRequired}
+                    isTranslatable={field.is_translatable}
+                    isMultiLangActive={isMultiLangActive}
+                    htmlFor={`field-${field.field_name}`}
+                  />
                   <Input
                     id={`field-${field.field_name}`}
                     type="datetime-local"
@@ -871,10 +960,13 @@ function ContentEditor({
             if (field.field_type === "number") {
               return (
                 <div key={field.field_name} className="space-y-2">
-                  <Label htmlFor={`field-${field.field_name}`}>
-                    {field.field_label}
-                    {isRequired ? <span className="text-destructive"> *</span> : null}
-                  </Label>
+                  <FieldLabel
+                    label={field.field_label}
+                    isRequired={isRequired}
+                    isTranslatable={field.is_translatable}
+                    isMultiLangActive={isMultiLangActive}
+                    htmlFor={`field-${field.field_name}`}
+                  />
                   <Input
                     id={`field-${field.field_name}`}
                     type="number"
@@ -893,10 +985,13 @@ function ContentEditor({
             const isFullWidth = field.field_name === "title" || field.field_name === "keywords"
             return (
               <div key={field.field_name} className={`space-y-2 ${isFullWidth ? "sm:col-span-2" : ""}`}>
-                <Label htmlFor={`field-${field.field_name}`}>
-                  {field.field_label}
-                  {isRequired ? <span className="text-destructive"> *</span> : null}
-                </Label>
+                <FieldLabel
+                  label={field.field_label}
+                  isRequired={isRequired}
+                  isTranslatable={field.is_translatable}
+                  isMultiLangActive={isMultiLangActive}
+                  htmlFor={`field-${field.field_name}`}
+                />
                 <Input
                   id={`field-${field.field_name}`}
                   type="text"
@@ -995,17 +1090,19 @@ export function ContentPage() {
   const [deleting, setDeleting] = useState<Content | null>(null)
   const [deleteSaving, setDeleteSaving] = useState(false)
 
+  const { activeLang, setActiveLang, languages, currentLanguage } = useLanguage()
+
   const categoryOptions = useMemo(() => flattenCategoryTree(categories), [categories])
 
   useEffect(() => {
-    getCategories().then(setCategories).catch(() => setCategories([]))
+    getCategories(activeLang).then(setCategories).catch(() => setCategories([]))
     getSystemModels().then(setModels).catch(() => setModels([]))
     getModelFields().then(setModelFields).catch(() => setModelFields([]))
-  }, [])
+  }, [activeLang])
 
   useEffect(() => {
     let active = true
-    getContent(page, pageSize, appliedQuery, categoryID)
+    getContent(page, pageSize, appliedQuery, categoryID, activeLang)
       .then((response) => {
         if (!active) return
         setItems(response.items)
@@ -1021,7 +1118,22 @@ export function ContentPage() {
     return () => {
       active = false
     }
-  }, [appliedQuery, categoryID, page])
+  }, [appliedQuery, categoryID, page, activeLang])
+
+  const editingID = editing?.id
+  useEffect(() => {
+    let active = true
+    if (editingID && editorOpen) {
+      void getContentItem(editingID, activeLang)
+        .then((detail) => {
+          if (active) setEditingDetail(detail)
+        })
+        .catch(() => {})
+    }
+    return () => {
+      active = false
+    }
+  }, [activeLang, editingID, editorOpen])
 
   const formContent = useMemo<ContentInput>(() => {
     if (!editingDetail) {
@@ -1074,7 +1186,7 @@ export function ContentPage() {
     setEditorOpen(true)
     setEditorLoading(true)
     try {
-      setEditingDetail(await getContentItem(item.id))
+      setEditingDetail(await getContentItem(item.id, activeLang))
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "内容详情加载失败")
       setEditorOpen(false)
@@ -1095,14 +1207,14 @@ export function ContentPage() {
     setSaving(true)
     try {
       const result = editing
-        ? await updateContent(editing.id, payload, publish)
-        : await createContent(payload, publish)
+        ? await updateContent(editing.id, payload, publish, activeLang)
+        : await createContent(payload, publish, activeLang)
       setNotice(publicationMessage(result))
       closeEditor(false)
       setLoading(true)
       const targetPage = editing ? page : 1
       if (!editing) setPage(1)
-      const response = await getContent(targetPage, pageSize, appliedQuery, categoryID)
+      const response = await getContent(targetPage, pageSize, appliedQuery, categoryID, activeLang)
       setItems(response.items)
       setTotal(response.total)
     } catch (saveError) {
@@ -1135,7 +1247,7 @@ export function ContentPage() {
   return (
     <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:space-y-0 lg:gap-4">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div className="flex w-full flex-col gap-2 sm:flex-row">
+        <div className="flex w-full flex-wrap gap-2 sm:flex-nowrap">
           <form className="flex w-full max-w-md gap-2" onSubmit={submitSearch}>
             <SearchField value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、编号或关键词" />
             <Button type="submit" variant="outline"><Search />搜索</Button>
@@ -1148,7 +1260,7 @@ export function ContentPage() {
               setCategoryID(Number(value ?? 0))
             }}
           >
-            <SelectTrigger className="w-full sm:w-64" aria-label="按分类筛选">
+            <SelectTrigger className="w-full sm:w-56" aria-label="按分类筛选">
               <SelectValue>
                 {(value) => {
                   const selectedID = Number(value ?? 0)
@@ -1167,6 +1279,32 @@ export function ContentPage() {
               ))}
             </SelectContent>
           </Select>
+          {languages.length > 1 && (
+            <Select
+              value={activeLang}
+              onValueChange={(val) => {
+                if (val) setActiveLang(val)
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-36" aria-label="选择语言">
+                <Languages className="size-3.5 mr-1 shrink-0 text-muted-foreground" />
+                <SelectValue>
+                  {currentLanguage?.name || activeLang}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {languages.map((lang) => (
+                  <SelectItem key={lang.code} value={lang.code}>
+                    <div className="flex items-center gap-1.5">
+                      <span>{lang.name}</span>
+                      {lang.is_default === 1 && <span className="text-[10px] text-muted-foreground">(主站)</span>}
+                      {lang.is_fallback === 1 && <span className="text-[10px] text-muted-foreground">(兜底)</span>}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
         </div>
         <Button onClick={openNew}><Plus />新增内容</Button>
       </div>
@@ -1229,7 +1367,7 @@ export function ContentPage() {
           <ScrollArea className="max-h-[calc(100dvh-4rem)]" contentClassName="space-y-4 pr-2">
             {editorLoading ? (
               <><DialogHeader><DialogTitle>编辑内容</DialogTitle><DialogDescription>正在加载内容。</DialogDescription></DialogHeader><div className="flex h-32 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div></>
-            ) : <ContentEditor key={editing?.id ?? "new"} content={formContent} categories={categories} models={models} modelFields={modelFields} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
+            ) : <ContentEditor key={`${editing?.id ?? "new"}-${activeLang}`} content={formContent} categories={categories} models={models} modelFields={modelFields} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
           </ScrollArea>
         </DialogContent>
       </Dialog>

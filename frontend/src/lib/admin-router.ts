@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 
-export type AdminView = "overview" | "content" | "categories" | "models" | "messages" | "publish" | "theme"
+export type AdminView = "overview" | "content" | "categories" | "models" | "languages" | "messages" | "publish" | "theme" | "api-keys"
 
 const adminPaths: Record<AdminView, string> = {
   overview: "/admin/",
@@ -9,7 +9,9 @@ const adminPaths: Record<AdminView, string> = {
   content: "/admin/content",
   categories: "/admin/categories",
   models: "/admin/models",
+  languages: "/admin/languages",
   messages: "/admin/messages",
+  "api-keys": "/admin/api-keys",
 }
 
 function normalizedPath(pathname: string) {

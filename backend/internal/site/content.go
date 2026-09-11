@@ -9,30 +9,36 @@ import (
 	"strconv"
 	"strings"
 
+	"gocms/internal/db"
 	"gocms/internal/routing"
 )
 
 // Content is the runtime content model. Historical source rows are imported
 // into this shape once and are never read by the runtime afterward.
 type Content struct {
-	ID          int64  `json:"id"`
-	RouteKey    string `json:"route_key"`
-	Category    int64  `json:"category_id"`
-	Title       string `json:"title"`
-	Code        string `json:"code"`
-	Summary     string `json:"summary"`
-	Content     string `json:"content"`
-	CoverImage  string `json:"cover_image"`
-	PublishedAt string `json:"published_at"`
-	Source      string `json:"source"`
-	Keywords    string `json:"keywords"`
-	Description string `json:"description"`
-	OrderID     int64  `json:"order_id"`
-	Featured    int64  `json:"featured"`
-	Visible     int64          `json:"visible"`
-	ModelID     int64          `json:"model_id"`
-	ExtraData   map[string]any `json:"extra_data,omitempty"`
-	URL         string         `json:"url,omitempty"`
+	ID            int64                             `json:"id"`
+	RouteKey      string                            `json:"route_key"`
+	Category      int64                             `json:"category_id"`
+	Title         string                            `json:"title"`
+	Code          string                            `json:"code"`
+	Summary       string                            `json:"summary"`
+	Content       string                            `json:"content"`
+	CoverImage    string                            `json:"cover_image"`
+	PublishedAt   string                            `json:"published_at"`
+	Source        string                            `json:"source"`
+	Keywords      string                            `json:"keywords"`
+	Description   string                            `json:"description"`
+	OrderID       int64                             `json:"order_id"`
+	Featured      int64                             `json:"featured"`
+	Visible       int64                             `json:"visible"`
+	ModelID       int64                             `json:"model_id"`
+	ExtraData     map[string]any                    `json:"extra_data,omitempty"`
+	URL           string                            `json:"url,omitempty"`
+	Lang          string                            `json:"lang,omitempty"`
+	PublishStatus string                            `json:"publish_status,omitempty"`
+	IsFallback    bool                              `json:"is_fallback,omitempty"`
+	FallbackLang  string                            `json:"fallback_lang,omitempty"`
+	Translations  map[string]ContentTranslationItem `json:"translations,omitempty"`
 }
 
 type ContentPage struct {
@@ -44,21 +50,24 @@ type ContentPage struct {
 }
 
 type contentPayload struct {
-	Title       string         `json:"title"`
-	Code        string         `json:"code"`
-	Category    int64          `json:"category_id"`
-	Summary     string         `json:"summary"`
-	Content     string         `json:"content"`
-	CoverImage  string         `json:"cover_image"`
-	PublishedAt string         `json:"published_at"`
-	Source      string         `json:"source"`
-	Keywords    string         `json:"keywords"`
-	Description string         `json:"description"`
-	OrderID     int64          `json:"order_id"`
-	Featured    int64          `json:"featured"`
-	Visible     int64          `json:"visible"`
-	ModelID     int64          `json:"model_id"`
-	ExtraData   map[string]any `json:"extra_data"`
+	Lang          string                            `json:"lang,omitempty"`
+	Translations  map[string]ContentTranslationItem `json:"translations,omitempty"`
+	Title         string                            `json:"title"`
+	Code          string                            `json:"code"`
+	Category      int64                             `json:"category_id"`
+	Summary       string                            `json:"summary"`
+	Content       string                            `json:"content"`
+	CoverImage    string                            `json:"cover_image"`
+	PublishedAt   string                            `json:"published_at"`
+	Source        string                            `json:"source"`
+	Keywords      string                            `json:"keywords"`
+	Description   string                            `json:"description"`
+	OrderID       int64                             `json:"order_id"`
+	Featured      int64                             `json:"featured"`
+	Visible       int64                             `json:"visible"`
+	ModelID       int64                             `json:"model_id"`
+	ExtraData     map[string]any                    `json:"extra_data"`
+	PublishStatus string                            `json:"publish_status,omitempty"`
 }
 
 func (s *Server) adminContent(response http.ResponseWriter, request *http.Request) {
@@ -76,12 +85,13 @@ func (s *Server) adminContent(response http.ResponseWriter, request *http.Reques
 
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	categoryID := parseIntOrZero(request.URL.Query().Get("category_id"))
+	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
 	page := positiveInt(request.URL.Query().Get("page"), 1)
 	pageSize := positiveInt(request.URL.Query().Get("page_size"), 20)
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	result, err := s.queryContent(request.Context(), query, categoryID, page, pageSize, false)
+	result, err := s.queryContent(request.Context(), query, categoryID, lang, page, pageSize, false)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -118,7 +128,8 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 		return
 	}
 	if request.Method == http.MethodGet {
-		item, err := s.readContent(request.Context(), id, false)
+		lang := strings.TrimSpace(request.URL.Query().Get("lang"))
+		item, err := s.readContent(request.Context(), id, lang, false)
 		if err == sql.ErrNoRows {
 			http.Error(response, "content not found", http.StatusNotFound)
 			return
@@ -145,6 +156,7 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 			http.Error(response, "content not found", http.StatusNotFound)
 			return
 		}
+		_, _ = s.database.ExecContext(request.Context(), `DELETE FROM "`+db.ContentTranslationTable+`" WHERE "content_id" = ?`, id)
 		s.contentSaved(response, request)
 		return
 	}
@@ -186,6 +198,15 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	extraBytes, _ := json.Marshal(payload.ExtraData)
 	extraDataStr := string(extraBytes)
 
+	requestedLang := strings.TrimSpace(payload.Lang)
+	if requestedLang == "" {
+		requestedLang = strings.TrimSpace(request.URL.Query().Get("lang"))
+	}
+	defaultLang, _ := s.getDefaultAndFallbackLang(request.Context())
+	if requestedLang == "" {
+		requestedLang = defaultLang
+	}
+
 	if id == 0 {
 		transaction, err := s.database.BeginTx(request.Context(), nil)
 		if err != nil {
@@ -213,6 +234,28 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
+		if payload.Translations != nil && len(payload.Translations) > 0 {
+			_ = s.saveContentTranslations(request.Context(), transaction, newID, payload.Translations)
+		} else {
+			transFields := s.getTranslatableFieldNames(request.Context(), transaction, modelID)
+			transExtra := make(map[string]any)
+			for k, v := range payload.ExtraData {
+				if transFields[k] {
+					transExtra[k] = v
+				}
+			}
+			_ = s.saveContentTranslations(request.Context(), transaction, newID, map[string]ContentTranslationItem{
+				requestedLang: {
+					Title:         payload.Title,
+					Summary:       payload.Summary,
+					Content:       payload.Content,
+					Keywords:      payload.Keywords,
+					Description:   payload.Description,
+					ExtraData:     transExtra,
+					PublishStatus: payload.PublishStatus,
+				},
+			})
+		}
 		if err := syncContentMediaRefs(request.Context(), transaction, newID, payload.Content, payload.CoverImage); err != nil {
 			http.Error(response, "media reference error", http.StatusInternalServerError)
 			return
@@ -228,26 +271,73 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			return
 		}
 		defer transaction.Rollback()
-		result, err := transaction.ExecContext(request.Context(), `
-			UPDATE "gocms_content" SET "category_id" = ?, "title" = ?, "code" = ?, "summary" = ?, "body" = ?,
-			"cover_image" = ?, "published_at" = ?, "source" = ?, "keywords" = ?, "description" = ?,
-			"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
-			payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
-			payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
-			modelID, extraDataStr, id)
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
+
+		if payload.Translations != nil && len(payload.Translations) > 0 {
+			_ = s.saveContentTranslations(request.Context(), transaction, id, payload.Translations)
+			if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Title) != "" {
+				payload.Title = def.Title
+				payload.Summary = def.Summary
+				payload.Content = def.Content
+				payload.Keywords = def.Keywords
+				payload.Description = def.Description
+			}
+		} else {
+			transFields := s.getTranslatableFieldNames(request.Context(), transaction, modelID)
+			transExtra := make(map[string]any)
+			for k, v := range payload.ExtraData {
+				if transFields[k] {
+					transExtra[k] = v
+				}
+			}
+			_ = s.saveContentTranslations(request.Context(), transaction, id, map[string]ContentTranslationItem{
+				requestedLang: {
+					Title:         payload.Title,
+					Summary:       payload.Summary,
+					Content:       payload.Content,
+					Keywords:      payload.Keywords,
+					Description:   payload.Description,
+					ExtraData:     transExtra,
+					PublishStatus: payload.PublishStatus,
+				},
+			})
 		}
-		affected, err := result.RowsAffected()
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
+
+		if requestedLang == defaultLang || payload.Translations != nil {
+			result, err := transaction.ExecContext(request.Context(), `
+				UPDATE "gocms_content" SET "category_id" = ?, "title" = ?, "code" = ?, "summary" = ?, "body" = ?,
+				"cover_image" = ?, "published_at" = ?, "source" = ?, "keywords" = ?, "description" = ?,
+				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
+				payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
+				payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
+				modelID, extraDataStr, id)
+			if err != nil {
+				http.Error(response, "database error", http.StatusInternalServerError)
+				return
+			}
+			affected, err := result.RowsAffected()
+			if err != nil || affected == 0 {
+				http.Error(response, "content not found", http.StatusNotFound)
+				return
+			}
+		} else {
+			result, err := transaction.ExecContext(request.Context(), `
+				UPDATE "gocms_content" SET "category_id" = ?, "code" = ?,
+				"cover_image" = ?, "published_at" = ?, "source" = ?,
+				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
+				payload.Category, payload.Code, payload.CoverImage,
+				payload.PublishedAt, payload.Source, payload.OrderID, payload.Featured, payload.Visible,
+				modelID, extraDataStr, id)
+			if err != nil {
+				http.Error(response, "database error", http.StatusInternalServerError)
+				return
+			}
+			affected, err := result.RowsAffected()
+			if err != nil || affected == 0 {
+				http.Error(response, "content not found", http.StatusNotFound)
+				return
+			}
 		}
-		if affected == 0 {
-			http.Error(response, "content not found", http.StatusNotFound)
-			return
-		}
+
 		if err := syncContentMediaRefs(request.Context(), transaction, id, payload.Content, payload.CoverImage); err != nil {
 			http.Error(response, "media reference error", http.StatusInternalServerError)
 			return
@@ -275,7 +365,12 @@ func normalizeContentDate(value string) string {
 	return value
 }
 
-func (s *Server) queryContent(ctx context.Context, query string, categoryID int64, page, pageSize int, visibleOnly bool) (ContentPage, error) {
+func (s *Server) queryContent(ctx context.Context, query string, categoryID int64, lang string, page, pageSize int, visibleOnly bool) (ContentPage, error) {
+	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx)
+	if lang == "" {
+		lang = defaultLang
+	}
+
 	where := "1=1"
 	var args []any
 	if visibleOnly {
@@ -305,7 +400,6 @@ func (s *Server) queryContent(ctx context.Context, query string, categoryID int6
 	if err != nil {
 		return ContentPage{}, err
 	}
-	defer rows.Close()
 	items := make([]Content, 0, pageSize)
 	for rows.Next() {
 		item, err := scanContent(rows)
@@ -314,10 +408,93 @@ func (s *Server) queryContent(ctx context.Context, query string, categoryID int6
 		}
 		items = append(items, item)
 	}
-	if err := rows.Err(); err != nil {
-		return ContentPage{}, err
+	_ = rows.Close()
+
+	if len(items) > 0 {
+		ids := make([]int64, len(items))
+		for i := range items {
+			ids[i] = items[i].ID
+		}
+		allTrans, _ := s.loadContentTranslationsForIDs(ctx, ids)
+		for i := range items {
+			s.applyContentTranslation(ctx, &items[i], allTrans[items[i].ID], lang, defaultLang, fallbackLang)
+		}
 	}
 	return ContentPage{Query: query, Page: page, PageSize: pageSize, Total: total, Items: items}, nil
+}
+
+func (s *Server) applyContentTranslation(ctx context.Context, item *Content, translations map[string]ContentTranslationItem, lang, defaultLang, fallbackLang string) {
+	if translations == nil {
+		translations = make(map[string]ContentTranslationItem)
+	}
+	if _, ok := translations[defaultLang]; !ok {
+		translations[defaultLang] = ContentTranslationItem{
+			Title:         item.Title,
+			Summary:       item.Summary,
+			Content:       item.Content,
+			Keywords:      item.Keywords,
+			Description:   item.Description,
+			ExtraData:     make(map[string]any),
+			PublishStatus: "published",
+		}
+	}
+
+	transFields := s.getTranslatableFieldNames(ctx, nil, item.ModelID)
+	trans := translations[lang]
+	fallbackTrans := translations[fallbackLang]
+
+	if strings.TrimSpace(trans.Title) != "" {
+		item.Title = trans.Title
+	} else if strings.TrimSpace(fallbackTrans.Title) != "" {
+		item.Title = fallbackTrans.Title
+		if lang != fallbackLang {
+			item.IsFallback = true
+			item.FallbackLang = fallbackLang
+		}
+	}
+
+	if strings.TrimSpace(trans.Summary) != "" {
+		item.Summary = trans.Summary
+	} else if strings.TrimSpace(fallbackTrans.Summary) != "" {
+		item.Summary = fallbackTrans.Summary
+	}
+
+	if strings.TrimSpace(trans.Content) != "" {
+		item.Content = trans.Content
+	} else if strings.TrimSpace(fallbackTrans.Content) != "" {
+		item.Content = fallbackTrans.Content
+	}
+
+	if strings.TrimSpace(trans.Keywords) != "" {
+		item.Keywords = trans.Keywords
+	} else if strings.TrimSpace(fallbackTrans.Keywords) != "" {
+		item.Keywords = fallbackTrans.Keywords
+	}
+
+	if strings.TrimSpace(trans.Description) != "" {
+		item.Description = trans.Description
+	} else if strings.TrimSpace(fallbackTrans.Description) != "" {
+		item.Description = fallbackTrans.Description
+	}
+
+	if trans.PublishStatus != "" {
+		item.PublishStatus = trans.PublishStatus
+	} else if fallbackTrans.PublishStatus != "" {
+		item.PublishStatus = fallbackTrans.PublishStatus
+	} else {
+		item.PublishStatus = "published"
+	}
+
+	for k := range transFields {
+		if val, exists := trans.ExtraData[k]; exists && val != nil && val != "" {
+			item.ExtraData[k] = val
+		} else if val, fExists := fallbackTrans.ExtraData[k]; fExists && val != nil && val != "" {
+			item.ExtraData[k] = val
+		}
+	}
+
+	item.Lang = lang
+	item.Translations = translations
 }
 
 type contentScanner interface {
@@ -342,7 +519,11 @@ func scanContent(scanner contentScanner) (Content, error) {
 	return item, err
 }
 
-func (s *Server) readContent(ctx context.Context, id int64, visibleOnly bool) (Content, error) {
+func (s *Server) readContent(ctx context.Context, id int64, lang string, visibleOnly bool) (Content, error) {
+	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx)
+	if lang == "" {
+		lang = defaultLang
+	}
 	where := `"id" = ?`
 	if visibleOnly {
 		where += ` AND "visible" = 1`
@@ -354,7 +535,13 @@ func (s *Server) readContent(ctx context.Context, id int64, visibleOnly bool) (C
 		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0),
 		       COALESCE("model_id", 1), COALESCE("extra_data", '{}')
 		FROM "gocms_content" WHERE `+where, id)
-	return scanContent(row)
+	item, err := scanContent(row)
+	if err != nil {
+		return Content{}, err
+	}
+	trans, _ := s.loadContentTranslations(ctx, item.ID)
+	s.applyContentTranslation(ctx, &item, trans, lang, defaultLang, fallbackLang)
+	return item, nil
 }
 
 func (s *Server) contentJSON(response http.ResponseWriter, request *http.Request) {
@@ -363,7 +550,8 @@ func (s *Server) contentJSON(response http.ResponseWriter, request *http.Request
 		return
 	}
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
-	result, err := s.queryContent(request.Context(), query, 0, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
+	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
+	result, err := s.queryContent(request.Context(), query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -381,7 +569,8 @@ func (s *Server) contentJSONItem(response http.ResponseWriter, request *http.Req
 		http.Error(response, "invalid content id", http.StatusBadRequest)
 		return
 	}
-	item, err := s.readContent(request.Context(), id, true)
+	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
+	item, err := s.readContent(request.Context(), id, lang, true)
 	if err == sql.ErrNoRows {
 		http.NotFound(response, request)
 		return

@@ -33,6 +33,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { Switch } from "@/components/ui/switch"
 import { ConfirmDialog, IconButton, InlineAlert } from "@/components/app/app-ui"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
@@ -745,11 +746,16 @@ export function ModelsPage() {
                               {f.description || "无"}
                             </TableCell>
                             <TableCell>
-                              {f.is_system ? (
-                                <Badge variant="secondary">内置字段</Badge>
-                              ) : (
-                                <Badge variant="outline">自定义</Badge>
-                              )}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {f.is_translatable === 1 ? (
+                                  <Badge variant="outline" className="text-blue-600 border-blue-500/30 bg-blue-500/10">多语言</Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-muted-foreground">通用</Badge>
+                                )}
+                                {f.is_system ? (
+                                  <Badge variant="secondary">内置</Badge>
+                                ) : null}
+                              </div>
                             </TableCell>
                             <TableCell className="pr-4 text-right">
                               <div className="flex justify-end gap-1">
@@ -901,6 +907,22 @@ export function ModelsPage() {
                         value={editingField.description || ""}
                         onChange={(e) =>
                           setEditingField({ ...editingField, description: e.target.value })
+                        }
+                      />
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border p-3">
+                      <div>
+                        <Label htmlFor="field-translatable" className="text-sm font-medium">支持多语言翻译</Label>
+                        <p className="text-xs text-muted-foreground">开启后，该字段在编辑内容时可根据所选语言进行独立翻译；关闭时所有语言共享相同值</p>
+                      </div>
+                      <Switch
+                        id="field-translatable"
+                        checked={editingField.is_translatable === 1}
+                        onCheckedChange={(checked) =>
+                          setEditingField({
+                            ...editingField,
+                            is_translatable: checked ? 1 : 0,
+                          })
                         }
                       />
                     </div>
