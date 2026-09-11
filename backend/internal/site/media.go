@@ -261,7 +261,7 @@ func (s *Server) listMedia(response http.ResponseWriter, request *http.Request) 
 		return
 	}
 	page := positiveInt(request.URL.Query().Get("page"), 1)
-	pageSize := positiveInt(request.URL.Query().Get("page_size"), 24)
+	pageSize := positiveInt(request.URL.Query().Get("page_size"), 20)
 	if pageSize > 100 {
 		pageSize = 100
 	}

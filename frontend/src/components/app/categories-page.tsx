@@ -28,6 +28,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ConfirmDialog, IconButton, InlineAlert } from "@/components/app/app-ui"
 import { cn } from "@/lib/utils"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 const emptyCategory: CategoryInput = {
   name: "",
@@ -367,9 +368,9 @@ export function CategoriesPage() {
                 <span>还没有栏目</span>
               </div>
             ) : (
-              <div className="max-h-[calc(100dvh-16rem)] overflow-auto">
+              <ScrollArea className="max-h-[calc(100dvh-16rem)]" orientation="both">
                 {renderNodes(tree)}
-              </div>
+              </ScrollArea>
             )}
           </CardContent>
         </Card>

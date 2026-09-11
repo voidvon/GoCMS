@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { useAdminRoute, type AdminView } from "@/lib/admin-router"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 import { DashboardPage } from "@/components/app/dashboard-page"
 import { CategoriesPage } from "@/components/app/categories-page"
@@ -220,10 +221,10 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
   )
 
   return (
-    <div className="flex min-h-svh bg-background">
+    <div className="flex min-h-svh bg-background lg:h-svh lg:overflow-hidden">
       <Sidebar activeView={activeView} onNavigate={navigate} user={user} onLogout={handleLogout} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur sm:px-6">
+      <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
+        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b bg-background/95 px-4 backdrop-blur sm:px-6">
           <div className="flex items-center gap-3">
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
               <SheetTrigger
@@ -248,7 +249,9 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
                     GoCMS 后台
                   </SheetTitle>
                 </SheetHeader>
-                <div className="mt-6 flex-1 overflow-y-auto">{mobileNavigation}</div>
+                <ScrollArea className="mt-6 flex-1" contentClassName="pr-2">
+                  {mobileNavigation}
+                </ScrollArea>
                 <div className="mt-6 border-t pt-4">
                   <div className="flex items-center gap-1">
                     <UserMenu user={user} onLogout={handleLogout} className="flex-1" />
@@ -264,8 +267,8 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
             </div>
           </div>
         </header>
-        <main className="flex-1 p-4 sm:p-6">
-          <div className="mx-auto w-full max-w-screen-2xl">
+        <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6 lg:overflow-hidden">
+          <div className="mx-auto h-full w-full max-w-screen-2xl min-h-0">
             <ViewContent view={activeView} />
           </div>
         </main>

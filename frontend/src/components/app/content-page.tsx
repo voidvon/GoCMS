@@ -16,7 +16,6 @@ import {
   updateContent,
 } from "@/lib/api"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -24,12 +23,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { ConfirmDialog, IconButton, InlineAlert, SearchField, TablePagination } from "@/components/app/app-ui"
 import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
 import { RichTextEditor } from "@/components/app/rich-text-editor"
 import { flattenCategoryTree } from "@/lib/category-tree"
 
-const pageSize = 12
+const pageSize = 20
 
 const emptyContent: ContentInput = {
   title: "",
@@ -85,6 +85,7 @@ function ContentEditor({
   saving: boolean
 }) {
   const [form, setForm] = useState(content)
+  const categoryOptions = flattenCategoryTree(categories)
   const coverInputRef = useRef<HTMLInputElement>(null)
   const [coverUploading, setCoverUploading] = useState(false)
   const [bodyUploading, setBodyUploading] = useState(false)
@@ -127,7 +128,7 @@ function ContentEditor({
         <DialogTitle>{content.title ? "编辑内容" : "新增内容"}</DialogTitle>
         <DialogDescription>内容使用所属分类的列表模板、详情模板和生成路径。</DialogDescription>
       </DialogHeader>
-      <div className="grid gap-5 overflow-y-auto py-2 sm:grid-cols-2">
+      <div className="grid gap-5 py-2 sm:grid-cols-2">
         <div className="space-y-2 sm:col-span-2">
           <Label htmlFor="content-title">标题</Label>
           <Input id="content-title" value={form.title} onChange={(event) => update("title", event.target.value)} required />
@@ -139,10 +140,19 @@ function ContentEditor({
         <div className="space-y-2">
           <Label>所属分类</Label>
           <Select value={String(form.category_id)} onValueChange={(value) => update("category_id", Number(value ?? 0))}>
-            <SelectTrigger className="w-full"><SelectValue placeholder="选择分类" /></SelectTrigger>
+            <SelectTrigger className="w-full">
+              <SelectValue>
+                {(value) => {
+                  const selectedID = Number(value ?? 0)
+                  return selectedID > 0
+                    ? categoryOptions.find((category) => category.id === selectedID)?.name ?? "选择分类"
+                    : "未分类"
+                }}
+              </SelectValue>
+            </SelectTrigger>
             <SelectContent>
               <SelectItem value="0">未分类</SelectItem>
-              {flattenCategoryTree(categories).map((category) => (
+              {categoryOptions.map((category) => (
                 <SelectItem key={category.id} value={String(category.id)}>
                   <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
                 </SelectItem>
@@ -384,7 +394,7 @@ export function ContentPage() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:space-y-0 lg:gap-4">
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div className="flex w-full flex-col gap-2 sm:flex-row">
           <form className="flex w-full max-w-md gap-2" onSubmit={submitSearch}>
@@ -423,8 +433,8 @@ export function ContentPage() {
       </div>
       {notice && <p role="status" className="text-sm text-muted-foreground">{notice}</p>}
       {error ? <InlineAlert>{error}</InlineAlert> : null}
-      <Card>
-        <CardContent className="p-0">
+      <div className="border-y lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden lg:border">
+        <ScrollArea className="lg:h-0 lg:min-h-0 lg:flex-1">
           <Table>
             <TableHeader>
               <TableRow>
@@ -471,15 +481,17 @@ export function ContentPage() {
               ))}
             </TableBody>
           </Table>
-          <TablePagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} loading={loading} onPageChange={(nextPage) => { setLoading(true); setPage(nextPage) }} />
-        </CardContent>
-      </Card>
+        </ScrollArea>
+        <TablePagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} loading={loading} onPageChange={(nextPage) => { setLoading(true); setPage(nextPage) }} />
+      </div>
 
       <Dialog open={editorOpen} onOpenChange={closeEditor}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-5xl">
-          {editorLoading ? (
-            <><DialogHeader><DialogTitle>编辑内容</DialogTitle><DialogDescription>正在加载内容。</DialogDescription></DialogHeader><div className="flex h-32 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div></>
-          ) : <ContentEditor key={editing?.id ?? "new"} content={formContent} categories={categories} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
+        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden sm:max-w-5xl">
+          <ScrollArea className="max-h-[calc(100dvh-4rem)]" contentClassName="space-y-4 pr-2">
+            {editorLoading ? (
+              <><DialogHeader><DialogTitle>编辑内容</DialogTitle><DialogDescription>正在加载内容。</DialogDescription></DialogHeader><div className="flex h-32 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div></>
+            ) : <ContentEditor key={editing?.id ?? "new"} content={formContent} categories={categories} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
+          </ScrollArea>
         </DialogContent>
       </Dialog>
       <ConfirmDialog

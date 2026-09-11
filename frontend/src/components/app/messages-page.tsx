@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { ConfirmDialog, IconButton, InlineAlert, TablePagination } from "@/components/app/app-ui"
 
-const pageSize = 12
+const pageSize = 20
 
 function formatDate(value: string) {
   return value ? value.slice(0, 16).replace("T", " ") : "暂无日期"
@@ -83,9 +84,9 @@ export function MessagesPage() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:space-y-0 lg:gap-4">
       {error ? <InlineAlert>{error}</InlineAlert> : null}
-      <Card>
+      <Card className="min-h-0 lg:flex lg:flex-1 lg:flex-col">
         <CardHeader className="flex flex-row items-center justify-between border-b">
           <div>
             <CardTitle>客户留言</CardTitle>
@@ -93,8 +94,9 @@ export function MessagesPage() {
           </div>
           <Badge variant="outline" className="gap-1.5"><Inbox />收件箱</Badge>
         </CardHeader>
-        <CardContent className="p-0">
-          <Table>
+        <CardContent className="min-h-0 p-0 lg:flex lg:flex-1 lg:flex-col">
+          <ScrollArea className="lg:h-0 lg:max-h-[calc(100dvh-15rem)] lg:flex-1 lg:overflow-y-scroll">
+            <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="pl-4">主题</TableHead>
@@ -135,7 +137,8 @@ export function MessagesPage() {
                 </TableRow>
               ))}
             </TableBody>
-          </Table>
+            </Table>
+          </ScrollArea>
           <TablePagination
             page={page}
             totalPages={totalPages}

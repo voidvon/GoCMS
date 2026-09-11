@@ -11,6 +11,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 export function SettingsDialog() {
   const [update, setUpdate] = useState<UpdateCheck | null>(null)
@@ -78,12 +79,13 @@ export function SettingsDialog() {
       >
         <Settings />
       </DialogTrigger>
-      <DialogContent className="max-h-[85svh] gap-0 overflow-y-auto p-0 sm:max-w-2xl">
-        <div className="border-b px-5 py-4">
+      <DialogContent className="max-h-[85svh] gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <ScrollArea className="max-h-[85svh]" contentClassName="pr-2">
+          <div className="border-b px-5 py-4">
           <DialogTitle>设置</DialogTitle>
           <DialogDescription className="sr-only">查看 GoCMS 设置和版本信息</DialogDescription>
         </div>
-        <div className="grid min-h-72 grid-cols-[112px_minmax(0,1fr)] sm:grid-cols-[180px_minmax(0,1fr)]">
+          <div className="grid min-h-72 grid-cols-[112px_minmax(0,1fr)] sm:grid-cols-[180px_minmax(0,1fr)]">
           <nav aria-label="设置菜单" className="border-r bg-muted/30 p-2 sm:p-3">
             <Button
               variant="secondary"
@@ -153,7 +155,8 @@ export function SettingsDialog() {
             )}
             {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
           </section>
-        </div>
+          </div>
+        </ScrollArea>
       </DialogContent>
     </Dialog>
   )

@@ -19,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { InlineAlert } from "@/components/app/app-ui"
 import { cn } from "@/lib/utils"
 
@@ -68,7 +69,7 @@ function FileBrowser({
   const FileIcon = kind === "css" ? FileCode : FileText
 
   return (
-    <div className="grid min-h-[32rem] overflow-hidden rounded-lg border lg:grid-cols-[minmax(15rem,21rem)_minmax(0,1fr)]">
+    <div className="grid min-h-[32rem] overflow-hidden rounded-lg border lg:h-[calc(100dvh-9rem)] lg:grid-cols-[minmax(15rem,21rem)_minmax(0,1fr)]">
       <section className="flex min-h-0 flex-col border-b bg-muted/20 lg:border-r lg:border-b-0">
         <div className="border-b p-3">
           <div className="relative">
@@ -83,7 +84,7 @@ function FileBrowser({
           </div>
           <p className="mt-2 text-xs text-muted-foreground">{filteredFiles.length} / {files.length} 个文件</p>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <ScrollArea className="min-h-0 flex-1" contentClassName="p-2">
           {filteredFiles.length === 0 ? (
             <p className="p-4 text-center text-sm text-muted-foreground">没有匹配的文件</p>
           ) : (
@@ -105,7 +106,7 @@ function FileBrowser({
               ))}
             </div>
           )}
-        </div>
+        </ScrollArea>
       </section>
 
       <section className="flex min-h-0 min-w-0 flex-col bg-background">
@@ -124,7 +125,9 @@ function FileBrowser({
         ) : loading ? (
           <div className="flex min-h-96 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
         ) : content ? (
-          <pre className="min-h-96 flex-1 overflow-auto bg-muted/20 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-words"><code>{content.content}</code></pre>
+          <ScrollArea className="min-h-96 flex-1 bg-muted/20" orientation="both" contentClassName="p-4">
+            <pre className="font-mono text-xs leading-6 whitespace-pre-wrap break-words"><code>{content.content}</code></pre>
+          </ScrollArea>
         ) : (
           <div className="flex min-h-96 items-center justify-center text-sm text-muted-foreground">选择一个文件查看内容</div>
         )}
@@ -406,9 +409,11 @@ export function ThemePage() {
               <TabsContent value="template" className="mt-0">
                 {templateGroups.length > 0 && (
                   <Tabs value={activeTemplateGroup?.key ?? templateGroups[0].key} onValueChange={selectTemplateGroup} className="mb-4">
-                    <TabsList className="max-w-full overflow-x-auto">
-                      {templateGroups.map((group) => <TabsTrigger key={group.key} value={group.key}>{group.label} ({group.files.length})</TabsTrigger>)}
-                    </TabsList>
+                    <ScrollArea className="max-w-full" orientation="horizontal">
+                      <TabsList>
+                        {templateGroups.map((group) => <TabsTrigger key={group.key} value={group.key}>{group.label} ({group.files.length})</TabsTrigger>)}
+                      </TabsList>
+                    </ScrollArea>
                   </Tabs>
                 )}
                 {activeTemplateGroup && (

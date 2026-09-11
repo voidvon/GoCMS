@@ -288,7 +288,7 @@ export function uploadMedia(file: File) {
   })
 }
 
-export function getMedia(page = 1, pageSize = 24, search = "", contentID = 0) {
+export function getMedia(page = 1, pageSize = 20, search = "", contentID = 0) {
   return request<MediaPage>(
     `/api/admin/media${query({ page, page_size: pageSize, q: search, content_id: contentID || undefined })}`,
   )
