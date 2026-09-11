@@ -15,6 +15,7 @@ const (
 	DimensionHome    = "home"
 	DimensionList    = "list"
 	DimensionDetail  = "detail"
+	DimensionPublic  = "public"
 	DimensionMessage = "message"
 	DimensionOther   = "other"
 )
@@ -43,9 +44,8 @@ type Assignment struct {
 }
 
 var defaults = []Assignment{
-	{Key: RoleHomeIndex, Label: "首页模板", Dimension: DimensionHome, DimensionName: "首页", TemplatePath: "index.html", SortOrder: 10},
-	{Key: RoleMessage, Label: "留言模板", Dimension: DimensionMessage, DimensionName: "留言", TemplatePath: "msg.html", SortOrder: 20},
-	{Key: RoleSearch, Label: "搜索模板", Dimension: DimensionOther, DimensionName: "其他模板", TemplatePath: "search.html", SortOrder: 30},
+	{Key: RoleMessage, Label: "留言模板", Dimension: DimensionPublic, DimensionName: "公共模板", TemplatePath: "msg.html", SortOrder: 20},
+	{Key: RoleSearch, Label: "搜索模板", Dimension: DimensionPublic, DimensionName: "公共模板", TemplatePath: "search.html", SortOrder: 30},
 }
 
 type queryer interface {

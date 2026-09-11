@@ -27,8 +27,9 @@ func (s *Server) ConfigurePublishing(templates, data, frontend, assets, theme st
 	s.themeMu.Lock()
 	s.themeRoot = theme
 	s.templateRoot = templates
+	homeTpl := s.activeTheme.HomeTemplate()
 	s.themeMu.Unlock()
-	p := &publication{publisher: generator.Publisher{DB: s.database, Web: s.siteRoot, Templates: templates, Data: data, Assets: assets, Theme: theme}, report: generator.Report{State: "idle"}}
+	p := &publication{publisher: generator.Publisher{DB: s.database, Web: s.siteRoot, Templates: templates, Data: data, Assets: assets, Theme: theme, HomeTemplate: homeTpl}, report: generator.Report{State: "idle"}}
 	if b, e := os.ReadFile(filepath.Join(data, "publish.json")); e == nil {
 		_ = json.Unmarshal(b, &p.report)
 	}

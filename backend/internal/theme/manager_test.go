@@ -76,6 +76,73 @@ func TestImportExportAndActiveSelection(t *testing.T) {
 	}
 }
 
+func TestTemplateGroupMetadataOverridesFallback(t *testing.T) {
+	themesRoot := filepath.Join(t.TempDir(), "templates")
+	archive := makeArchive(t, map[string]string{
+		ManifestFile:                   `{"id":"grouped","name":"Grouped","template_groups":{"home":["landing.html"],"cover":["index.html"],"content":["pages/article.html"]}}`,
+		"templates/index.html":         "<main>home</main>",
+		"templates/landing.html":       "<main>landing</main>",
+		"templates/pages/article.html": "<main>article</main>",
+	})
+
+	definition, err := ImportArchive(themesRoot, bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := definition.TemplateGroupFor("landing.html"); got != TemplateGroupHome {
+		t.Fatalf("explicit home group = %q", got)
+	}
+	if got := definition.TemplateGroupFor("index.html"); got != TemplateGroupCover {
+		t.Fatalf("explicit cover group = %q", got)
+	}
+	if got := definition.TemplateGroupFor("pages/article.html"); got != TemplateGroupContent {
+		t.Fatalf("explicit content group = %q", got)
+	}
+	if got := definition.TemplateGroupFor("category_list.html"); got != TemplateGroupList {
+		t.Fatalf("fallback list group = %q", got)
+	}
+	if got := definition.TemplateGroupFor("search.html"); got != TemplateGroupPublic {
+		t.Fatalf("fallback public group = %q", got)
+	}
+}
+
+func TestPublicAndLegacyOtherTemplateGroup(t *testing.T) {
+	themesRoot := filepath.Join(t.TempDir(), "templates")
+	archive := makeArchive(t, map[string]string{
+		ManifestFile:             `{"id":"public-theme","name":"PublicTheme","template_groups":{"public":["search.html"],"other":["msg.html"]}}`,
+		"templates/search.html":  "<main>search</main>",
+		"templates/msg.html":     "<main>msg</main>",
+	})
+
+	definition, err := ImportArchive(themesRoot, bytes.NewReader(archive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := definition.TemplateGroupFor("search.html"); got != TemplateGroupPublic {
+		t.Fatalf("explicit public group = %q", got)
+	}
+	if got := definition.TemplateGroupFor("msg.html"); got != TemplateGroupPublic {
+		t.Fatalf("legacy other mapped to public = %q", got)
+	}
+	if label := TemplateGroupLabel(TemplateGroupPublic); label != "公共模板" {
+		t.Fatalf("label = %q", label)
+	}
+	if label := TemplateGroupLabel("other"); label != "公共模板" {
+		t.Fatalf("label for other = %q", label)
+	}
+}
+
+func TestTemplateGroupMetadataRejectsUnsafePath(t *testing.T) {
+	themesRoot := filepath.Join(t.TempDir(), "templates")
+	archive := makeArchive(t, map[string]string{
+		ManifestFile:           `{"id":"unsafe-groups","template_groups":{"content":["../secret.html"]}}`,
+		"templates/index.html": "<main>home</main>",
+	})
+	if _, err := ImportArchive(themesRoot, bytes.NewReader(archive)); err == nil {
+		t.Fatal("unsafe template group path was accepted")
+	}
+}
+
 func TestImportRejectsUnsafeArchivePath(t *testing.T) {
 	themesRoot := filepath.Join(t.TempDir(), "themes")
 	archive := makeArchive(t, map[string]string{

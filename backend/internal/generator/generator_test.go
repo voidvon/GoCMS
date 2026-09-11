@@ -49,12 +49,18 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 			(30, 1, 'hidden', '隐藏内容', '', '', 4, 0)`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_template_label" ("key", "name", "context", "content") VALUES
+			('home-banner', '首页标题', 'home', 'banner={{.site_name}}'),
+			('item-card', '内容卡片', 'list', '[{{.Title}}]')`); err != nil {
+		t.Fatal(err)
+	}
 
 	templates := filepath.Join(t.TempDir(), "templates")
-	writeTemplate(t, templates, "index.html", `home={{setting "site_name"}} nav={{range navigation .}}{{.Name}}={{.URL}};{{end}}`)
+	writeTemplate(t, templates, "index.html", `home={{setting "site_name"}} {{label "HOME-BANNER" .}} nav={{range navigation .}}{{.Name}}={{.URL}};{{end}}`)
 	writeTemplate(t, templates, "msg.html", `message`)
 	writeTemplate(t, templates, "search.html", `search`)
-	writeTemplate(t, templates, "lists/section.html", `list={{.category_name}} page={{.list_page}}/{{.content_count}} items={{range listItems .}}{{.Title}}={{.URL}};{{end}}{{with listPagination .}}pages={{.Pages}} current={{.Page}}{{end}}`)
+	writeTemplate(t, templates, "lists/section.html", `list={{.category_name}} page={{.list_page}}/{{.content_count}} items={{range listItems .}}{{label "item-card" .}}{{.Title}}={{.URL}};{{end}}{{with listPagination .}}pages={{.Pages}} current={{.Page}}{{end}}`)
 	writeTemplate(t, templates, "details/item.html", `detail={{.title}} category={{.category_name}} root={{.category_root_name}} body={{.body}} previous={{.previous_url}} next={{.next_url}} related={{range relatedItems . 2}}{{.Title}}={{.URL}};{{end}}`)
 	writeTemplate(t, templates, "covers/landing.html", `cover={{.category_name}} children={{range listChildren .}}{{.Name}}={{.URL}};{{end}}`)
 
@@ -82,8 +88,11 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 	}
 
 	listBody := readGenerated(t, web, "sections/1-2.html")
-	if !strings.Contains(listBody, "list=任意内容 page=2/3") || !strings.Contains(listBody, "第三条=/entries/third.html") || strings.Contains(listBody, "隐藏内容") {
+	if !strings.Contains(listBody, "list=任意内容 page=2/3") || !strings.Contains(listBody, "[第三条]第三条=/entries/third.html") || strings.Contains(listBody, "隐藏内容") {
 		t.Fatalf("unexpected configured list output: %s", listBody)
+	}
+	if homeBody := readGenerated(t, web, "index.html"); !strings.Contains(homeBody, "home=示例站点 banner=示例站点") {
+		t.Fatalf("unexpected label output: %s", homeBody)
 	}
 	detailBody := readGenerated(t, web, "entries/second.html")
 	if !strings.Contains(detailBody, "detail=第二条 category=任意内容 root=任意内容") || !strings.Contains(detailBody, "previous=/entries/first.html") || !strings.Contains(detailBody, "next=/entries/third.html") || !strings.Contains(detailBody, "related=第一条=/entries/first.html;第三条=/entries/third.html;") {

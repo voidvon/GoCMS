@@ -15,6 +15,7 @@ import (
 
 	"gocms/internal/db"
 	"gocms/internal/templateconfig"
+	"gocms/internal/templatelabel"
 	"gocms/internal/theme"
 )
 
@@ -53,6 +54,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 			return nil, err
 		}
 		if err := templateconfig.Ensure(context.Background(), database); err != nil {
+			return nil, err
+		}
+		if err := templatelabel.Ensure(context.Background(), database); err != nil {
 			return nil, err
 		}
 	}
@@ -105,11 +109,29 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminCategories(response, request)
 	case "/api/admin/theme/activate":
 		s.adminThemeActivate(response, request)
+	case "/api/admin/template/activate", "/api/admin/templates/activate":
+		s.adminThemeActivate(response, request)
 	case "/api/admin/theme/import":
+		s.adminThemeImport(response, request)
+	case "/api/admin/template/import", "/api/admin/templates/import":
 		s.adminThemeImport(response, request)
 	case "/api/admin/theme/export":
 		s.adminThemeExport(response, request)
+	case "/api/admin/template/export", "/api/admin/templates/export":
+		s.adminThemeExport(response, request)
+	case "/api/admin/theme/files", "/api/admin/template/files", "/api/admin/templates/files":
+		s.adminThemeFiles(response, request)
+	case "/api/admin/theme/label-templates":
+		s.adminThemeLabelTemplates(response, request)
+	case "/api/admin/template/label-templates", "/api/admin/templates/label-templates":
+		s.adminThemeLabelTemplates(response, request)
+	case "/api/admin/theme/label-categories":
+		s.adminThemeLabelCategories(response, request)
+	case "/api/admin/template/label-categories", "/api/admin/templates/label-categories":
+		s.adminThemeLabelCategories(response, request)
 	case "/api/admin/theme":
+		s.adminTheme(response, request)
+	case "/api/admin/template", "/api/admin/templates":
 		s.adminTheme(response, request)
 	case "/api/search":
 		s.searchJSON(response, request)
@@ -144,6 +166,32 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		if strings.HasPrefix(lowerPath, "/api/admin/theme/assignments/") {
 			s.adminThemeAssignment(response, request, cleanPath[len("/api/admin/theme/assignments/"):])
 			return
+		}
+		for _, prefix := range []string{"/api/admin/template/assignments/", "/api/admin/templates/assignments/"} {
+			if strings.HasPrefix(lowerPath, prefix) {
+				s.adminThemeAssignment(response, request, cleanPath[len(prefix):])
+				return
+			}
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/theme/label-templates/") {
+			s.adminThemeLabelTemplate(response, request, cleanPath[len("/api/admin/theme/label-templates/"):])
+			return
+		}
+		for _, prefix := range []string{"/api/admin/template/label-templates/", "/api/admin/templates/label-templates/"} {
+			if strings.HasPrefix(lowerPath, prefix) {
+				s.adminThemeLabelTemplate(response, request, cleanPath[len(prefix):])
+				return
+			}
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/theme/label-categories/") {
+			s.adminThemeLabelCategory(response, request, cleanPath[len("/api/admin/theme/label-categories/"):])
+			return
+		}
+		for _, prefix := range []string{"/api/admin/template/label-categories/", "/api/admin/templates/label-categories/"} {
+			if strings.HasPrefix(lowerPath, prefix) {
+				s.adminThemeLabelCategory(response, request, cleanPath[len(prefix):])
+				return
+			}
 		}
 		if strings.HasPrefix(strings.ToLower(cleanPath), "/api/content/") {
 			s.contentJSONItem(response, request, cleanPath[len("/api/content/"):])

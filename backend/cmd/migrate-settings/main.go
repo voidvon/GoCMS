@@ -27,5 +27,5 @@ func main() {
 	if err := legacyimport.MigrateExistingSettings(ctx, database); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("migrated existing site settings into %s\n", *databasePath)
+	fmt.Printf("migrated existing site settings and template labels into %s\n", *databasePath)
 }

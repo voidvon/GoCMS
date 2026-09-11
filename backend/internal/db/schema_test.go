@@ -22,14 +22,16 @@ func TestCreateSchemaContainsOnlyRuntimeTables(t *testing.T) {
 	}
 	defer rows.Close()
 	want := map[string]bool{
-		"gocms_site_setting":        false,
-		"gocms_admin_user":          false,
-		"gocms_category":            false,
-		"gocms_content":             false,
-		"gocms_media":               false,
-		"gocms_media_ref":           false,
-		"gocms_message":             false,
-		"gocms_template_assignment": false,
+		"gocms_site_setting":            false,
+		"gocms_admin_user":              false,
+		"gocms_category":                false,
+		"gocms_content":                 false,
+		"gocms_media":                   false,
+		"gocms_media_ref":               false,
+		"gocms_message":                 false,
+		"gocms_template_assignment":     false,
+		"gocms_template_label_category": false,
+		"gocms_template_label":          false,
 	}
 	for rows.Next() {
 		var name string

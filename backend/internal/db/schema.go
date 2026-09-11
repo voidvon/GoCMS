@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"gocms/internal/templateconfig"
+	"gocms/internal/templatelabel"
 )
 
 // CreateSchema creates the database used by the running CMS. Importers for
@@ -23,6 +24,7 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 		{name: "media", fn: EnsureMedia},
 		{name: "messages", fn: EnsureMessages},
 		{name: "template assignments", fn: templateconfig.Ensure},
+		{name: "template labels", fn: templatelabel.Ensure},
 	}
 	for _, ensure := range ensurers {
 		if err := ensure.fn(ctx, database); err != nil {

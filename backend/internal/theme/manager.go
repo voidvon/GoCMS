@@ -22,12 +22,32 @@ const (
 	MaxThemeFileCount    = 10000
 )
 
+const (
+	TemplateGroupHome           = "home"
+	TemplateGroupCover          = "cover"
+	TemplateGroupList           = "list"
+	TemplateGroupContent        = "content"
+	TemplateGroupLabelTemplates = "label"
+	TemplateGroupPublic         = "public"
+	TemplateGroupOther          = "other"
+)
+
+var templateGroupOrder = []string{
+	TemplateGroupHome,
+	TemplateGroupCover,
+	TemplateGroupList,
+	TemplateGroupContent,
+	TemplateGroupLabelTemplates,
+	TemplateGroupPublic,
+}
+
 type Manifest struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Version     string `json:"version,omitempty"`
-	Description string `json:"description,omitempty"`
-	Author      string `json:"author,omitempty"`
+	ID             string              `json:"id"`
+	Name           string              `json:"name"`
+	Version        string              `json:"version,omitempty"`
+	Description    string              `json:"description,omitempty"`
+	Author         string              `json:"author,omitempty"`
+	TemplateGroups map[string][]string `json:"template_groups,omitempty"`
 }
 
 type Info struct {
@@ -44,6 +64,71 @@ type Definition struct {
 	Root          string
 	AssetsRoot    string
 	TemplatesRoot string
+}
+
+func TemplateGroupKeys() []string {
+	keys := make([]string, len(templateGroupOrder))
+	copy(keys, templateGroupOrder)
+	return keys
+}
+
+func TemplateGroupLabel(key string) string {
+	switch strings.ToLower(strings.TrimSpace(key)) {
+	case TemplateGroupHome:
+		return "首页模板"
+	case TemplateGroupCover:
+		return "封面模板"
+	case TemplateGroupList:
+		return "列表模板"
+	case TemplateGroupContent:
+		return "内容模板"
+	case TemplateGroupLabelTemplates:
+		return "标签模板"
+	case TemplateGroupPublic, TemplateGroupOther:
+		return "公共模板"
+	default:
+		return "公共模板"
+	}
+}
+
+func (d Definition) HomeTemplate() string {
+	if homeFiles, ok := d.Manifest.TemplateGroups[TemplateGroupHome]; ok && len(homeFiles) > 0 {
+		clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(strings.ReplaceAll(homeFiles[0], `\`, "/"))))
+		if clean != "" && clean != "." {
+			return clean
+		}
+	}
+	return "index.html"
+}
+
+func (d Definition) TemplateGroupFor(filePath string) string {
+	clean := filepath.ToSlash(filepath.Clean(strings.TrimSpace(strings.ReplaceAll(filePath, `\`, "/"))))
+	for group, paths := range d.Manifest.TemplateGroups {
+		for _, path := range paths {
+			if path == clean {
+				return group
+			}
+		}
+	}
+	return DefaultTemplateGroup(clean)
+}
+
+func DefaultTemplateGroup(filePath string) string {
+	name := strings.ToLower(filepath.Base(filePath))
+	switch {
+	case strings.HasPrefix(name, "index"):
+		return TemplateGroupHome
+	case strings.Contains(name, "cover"):
+		return TemplateGroupCover
+	case strings.Contains(name, "list") || strings.Contains(name, "sort"):
+		return TemplateGroupList
+	case strings.Contains(name, "detail") || strings.Contains(name, "content"):
+		return TemplateGroupContent
+	case strings.Contains(name, "label") || strings.Contains(name, "tag"):
+		return TemplateGroupLabelTemplates
+	default:
+		return TemplateGroupPublic
+	}
 }
 
 func (d Definition) Info(active bool) Info {
@@ -415,7 +500,63 @@ func normalizeManifest(manifest Manifest) (Manifest, error) {
 	if manifest.Name == "" {
 		manifest.Name = manifest.ID
 	}
+	templateGroups, err := normalizeTemplateGroups(manifest.TemplateGroups)
+	if err != nil {
+		return Manifest{}, err
+	}
+	manifest.TemplateGroups = templateGroups
 	return manifest, nil
+}
+
+func normalizeTemplateGroups(groups map[string][]string) (map[string][]string, error) {
+	if len(groups) == 0 {
+		return nil, nil
+	}
+	validGroups := make(map[string]struct{}, len(templateGroupOrder)+2)
+	for _, key := range templateGroupOrder {
+		validGroups[key] = struct{}{}
+	}
+	validGroups[TemplateGroupLabelTemplates] = struct{}{}
+	validGroups[TemplateGroupOther] = struct{}{}
+	normalized := make(map[string][]string, len(groups))
+	seen := make(map[string]string)
+	for rawGroup, paths := range groups {
+		group := strings.ToLower(strings.TrimSpace(rawGroup))
+		if group == TemplateGroupOther {
+			group = TemplateGroupPublic
+		}
+		if _, ok := validGroups[group]; !ok {
+			return nil, fmt.Errorf("invalid template group: %s", rawGroup)
+		}
+		for _, rawPath := range paths {
+			clean, err := normalizeTemplatePath(rawPath)
+			if err != nil {
+				return nil, fmt.Errorf("invalid template group %s path: %w", group, err)
+			}
+			if previous, ok := seen[clean]; ok && previous != group {
+				return nil, fmt.Errorf("template path belongs to multiple groups: %s", clean)
+			}
+			seen[clean] = group
+			normalized[group] = append(normalized[group], clean)
+		}
+		sort.Strings(normalized[group])
+	}
+	return normalized, nil
+}
+
+func normalizeTemplatePath(value string) (string, error) {
+	value = strings.TrimSpace(strings.ReplaceAll(value, `\`, "/"))
+	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, ":") {
+		return "", fmt.Errorf("template path is invalid")
+	}
+	clean := path.Clean(value)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("template path is invalid")
+	}
+	if !strings.EqualFold(path.Ext(clean), ".html") {
+		return "", fmt.Errorf("template must be an HTML file")
+	}
+	return clean, nil
 }
 
 func archivePath(value string) (string, error) {

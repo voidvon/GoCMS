@@ -102,7 +102,8 @@ export type CategoryItem = {
 
 export type CategoryInput = Omit<CategoryItem, "id" | "route_id" | "content_count">
 
-export type ThemeFileKind = "css" | "template"
+export type ThemeFileKind = "css" | "js" | "image" | "template"
+export type CustomFileKind = Exclude<ThemeFileKind, "template">
 
 export type ThemeFile = {
   path: string
@@ -114,7 +115,15 @@ export type ThemeFiles = {
   name: string
   active_theme: string
   themes: ThemeInfo[]
+  template_groups_catalog: ThemeInfo[]
   css_files: ThemeFile[]
+  js_files: ThemeFile[]
+  image_files: ThemeFile[]
+  custom_files: {
+    css: ThemeFile[]
+    js: ThemeFile[]
+    images: ThemeFile[]
+  }
   template_files: ThemeFile[]
   template_groups: ThemeTemplateGroup[]
 }
@@ -131,6 +140,7 @@ export type ThemeInfo = {
 export type ThemeTemplateGroup = {
   key: string
   label: string
+  count: number
   files: ThemeFile[]
   assignments: ThemeTemplateAssignment[]
 }
@@ -147,6 +157,64 @@ export type ThemeTemplateAssignment = {
 export type ThemeFileContent = ThemeFile & {
   kind: ThemeFileKind
   content: string
+}
+
+export type TemplateLabelContext = "any" | "home" | "category" | "list" | "detail"
+
+export type TemplateLabelCategory = {
+  id: number
+  name: string
+  sort_order: number
+  label_count: number
+}
+
+export type TemplateLabel = {
+  id: number
+  key: string
+  name: string
+  category_id: number
+  category_name: string
+  context: TemplateLabelContext
+  description: string
+  content: string
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export type TemplateLabelInput = {
+  key: string
+  name: string
+  category_id: number
+  context: TemplateLabelContext
+  description: string
+  content: string
+  sort_order: number
+}
+
+export type TemplateField = {
+  name: string
+  type: string
+  description: string
+}
+
+export type TemplateTag = {
+  name: string
+  category: string
+  signature: string
+  description: string
+  context: string
+  example: string
+  fields?: TemplateField[]
+}
+
+export type TemplateLabelsResponse = {
+  page: number
+  page_size: number
+  total: number
+  items: TemplateLabel[]
+  categories: TemplateLabelCategory[]
+  template_tags: TemplateTag[]
 }
 
 export type UpdateCheck = {
@@ -327,11 +395,11 @@ export function generateSitemap(format: SitemapFormat) {
 }
 
 export function getThemeFiles() {
-  return request<ThemeFiles>("/api/admin/theme")
+  return request<ThemeFiles>("/api/admin/templates")
 }
 
 export function activateTheme(id: string) {
-  return request<{ ok: boolean; theme: ThemeInfo; publish_started: boolean; publication?: Publication }>("/api/admin/theme/activate", {
+  return request<{ ok: boolean; theme: ThemeInfo; publish_started: boolean; publication?: Publication }>("/api/admin/templates/activate", {
     method: "POST",
     body: JSON.stringify({ id }),
   })
@@ -340,25 +408,93 @@ export function activateTheme(id: string) {
 export function importTheme(file: File) {
   const body = new FormData()
   body.append("theme", file)
-  return request<{ ok: boolean; theme: ThemeInfo }>("/api/admin/theme/import", {
+  return request<{ ok: boolean; theme: ThemeInfo }>("/api/admin/templates/import", {
     method: "POST",
     body,
   })
 }
 
 export function themeExportURL(id?: string) {
-  return endpoint(`/api/admin/theme/export${query({ id })}`)
+  return endpoint(`/api/admin/templates/export${query({ id })}`)
 }
 
 export function getThemeFile(kind: ThemeFileKind, filePath: string) {
   const params = new URLSearchParams({ kind, path: filePath })
-  return request<ThemeFileContent>(`/api/admin/theme?${params.toString()}`)
+  return request<ThemeFileContent>(`/api/admin/templates?${params.toString()}`)
+}
+
+export function updateThemeFile(kind: ThemeFileKind, filePath: string, content: string) {
+  return request<{ ok: boolean; file: ThemeFile }>("/api/admin/templates/files", {
+    method: "PUT",
+    body: JSON.stringify({ kind, path: filePath, content }),
+  })
+}
+
+export function uploadThemeFile(kind: CustomFileKind, file: File, filePath?: string) {
+  const body = new FormData()
+  body.append("kind", kind)
+  body.append("file", file)
+  if (filePath) body.append("path", filePath)
+  return request<{ ok: boolean; file: ThemeFile }>("/api/admin/templates/files", {
+    method: "POST",
+    body,
+  })
+}
+
+export function deleteThemeFile(kind: CustomFileKind, filePath: string) {
+  return request<{ ok: boolean }>(`/api/admin/templates/files${query({ kind, path: filePath })}`, {
+    method: "DELETE",
+  })
 }
 
 export function updateThemeAssignment(key: string, templatePath: string) {
-  return request<{ ok: boolean; key: string; template_path: string }>(`/api/admin/theme/assignments/${encodeURIComponent(key)}`, {
+  return request<{ ok: boolean; key: string; template_path: string }>(`/api/admin/templates/assignments/${encodeURIComponent(key)}`, {
     method: "PUT",
     body: JSON.stringify({ template_path: templatePath }),
+  })
+}
+
+export function getTemplateLabels(page = 1, queryText = "", categoryID = 0) {
+  return request<TemplateLabelsResponse>(`/api/admin/templates/label-templates${query({ page, page_size: 20, q: queryText, category_id: categoryID })}`)
+}
+
+export function createTemplateLabel(input: TemplateLabelInput, publish = false) {
+  return request<{ ok: boolean; item: TemplateLabel; publication?: Publication; publish_started?: boolean }>(`/api/admin/templates/label-templates${publish ? "?publish=1" : ""}`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+}
+
+export function updateTemplateLabel(id: number, input: TemplateLabelInput, publish = false) {
+  return request<{ ok: boolean; item: TemplateLabel; publication?: Publication; publish_started?: boolean }>(`/api/admin/templates/label-templates/${id}${publish ? "?publish=1" : ""}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })
+}
+
+export function deleteTemplateLabel(id: number, publish = false) {
+  return request<{ ok: boolean; publication?: Publication; publish_started?: boolean }>(`/api/admin/templates/label-templates/${id}${publish ? "?publish=1" : ""}`, {
+    method: "DELETE",
+  })
+}
+
+export function createTemplateLabelCategory(name: string, sortOrder = 0) {
+  return request<{ ok: boolean; category: TemplateLabelCategory }>("/api/admin/templates/label-categories", {
+    method: "POST",
+    body: JSON.stringify({ name, sort_order: sortOrder }),
+  })
+}
+
+export function updateTemplateLabelCategory(id: number, name: string, sortOrder = 0) {
+  return request<{ ok: boolean; category: TemplateLabelCategory }>(`/api/admin/templates/label-categories/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ name, sort_order: sortOrder }),
+  })
+}
+
+export function deleteTemplateLabelCategory(id: number) {
+  return request<{ ok: boolean }>(`/api/admin/templates/label-categories/${id}`, {
+    method: "DELETE",
   })
 }
 

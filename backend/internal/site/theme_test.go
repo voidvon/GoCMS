@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -76,10 +78,10 @@ func TestAdminThemeFiles(t *testing.T) {
 	if listed.CSSFiles[0].Path != "css/site.css" || listed.TemplateFiles[0].Path != "index.html" {
 		t.Fatalf("theme files are not sorted: %+v", listed)
 	}
-	if listed.TemplateGroups[0].Key != "home" || listed.TemplateGroups[0].Files[0].Path != "index.html" || listed.TemplateGroups[1].Key != "other" || listed.TemplateGroups[1].Files[0].Path != "z-entry.html" {
+	if listed.TemplateGroups[0].Key != "home" || listed.TemplateGroups[0].Files[0].Path != "index.html" || listed.TemplateGroups[1].Key != "public" || listed.TemplateGroups[1].Files[0].Path != "z-entry.html" {
 		t.Fatalf("unexpected home template group: %+v", listed.TemplateGroups[0])
 	}
-	if len(listed.TemplateGroups[0].Assignments) != 1 || listed.TemplateGroups[0].Assignments[0].TemplatePath != "index.html" {
+	if len(listed.TemplateGroups[0].Assignments) != 0 {
 		t.Fatalf("unexpected home assignment: %+v", listed.TemplateGroups[0])
 	}
 
@@ -96,7 +98,7 @@ func TestAdminThemeFiles(t *testing.T) {
 		t.Fatalf("unexpected css content: %+v", css)
 	}
 
-	updateRequest := httptest.NewRequest(http.MethodPut, "/api/admin/theme/assignments/home_index", strings.NewReader(`{"template_path":"index.html"}`))
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/admin/theme/assignments/search", strings.NewReader(`{"template_path":"z-entry.html"}`))
 	updateRequest.Header.Set("Content-Type", "application/json")
 	updateRequest.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
 	updateResponse := httptest.NewRecorder()
@@ -104,6 +106,16 @@ func TestAdminThemeFiles(t *testing.T) {
 	if updateResponse.Code != http.StatusOK {
 		t.Fatalf("assignment update status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
 	}
+
+	homeIndexUpdate := httptest.NewRequest(http.MethodPut, "/api/admin/theme/assignments/home_index", strings.NewReader(`{"template_path":"index.html"}`))
+	homeIndexUpdate.Header.Set("Content-Type", "application/json")
+	homeIndexUpdate.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
+	homeIndexResponse := httptest.NewRecorder()
+	server.Handler().ServeHTTP(homeIndexResponse, homeIndexUpdate)
+	if homeIndexResponse.Code != http.StatusBadRequest {
+		t.Fatalf("home_index assignment update status = %d, body = %s", homeIndexResponse.Code, homeIndexResponse.Body.String())
+	}
+
 	categoryUpdate := httptest.NewRequest(http.MethodPut, "/api/admin/theme/assignments/category_detail", strings.NewReader(`{"template_path":"z-entry.html"}`))
 	categoryUpdate.Header.Set("Content-Type", "application/json")
 	categoryUpdate.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
@@ -129,6 +141,123 @@ func TestAdminThemeFiles(t *testing.T) {
 	traversalPath := url.Values{"kind": {"css"}, "path": {"../secret.txt"}}.Encode()
 	if response := request("/api/admin/theme?" + traversalPath); response.Code != http.StatusBadRequest {
 		t.Fatalf("path traversal status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAdminTemplateCustomFiles(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	server, err := New(database, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.themeRoot = t.TempDir()
+	token, err := server.createSession("gocms")
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(method, rawURL string, body io.Reader, contentType string) *httptest.ResponseRecorder {
+		response := httptest.NewRecorder()
+		req := httptest.NewRequest(method, rawURL, body)
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		req.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
+		server.Handler().ServeHTTP(response, req)
+		return response
+	}
+
+	cssResponse := request(http.MethodPut, "/api/admin/templates/files", strings.NewReader(`{"kind":"css","path":"site.css","content":"body { color: red; }"}`), "application/json")
+	if cssResponse.Code != http.StatusOK {
+		t.Fatalf("save css status = %d: %s", cssResponse.Code, cssResponse.Body.String())
+	}
+	var saved struct {
+		File ThemeFile `json:"file"`
+	}
+	if err := json.Unmarshal(cssResponse.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.File.Path != "css/site.css" {
+		t.Fatalf("saved css path = %q", saved.File.Path)
+	}
+
+	jsResponse := request(http.MethodPut, "/api/admin/templates/files", strings.NewReader(`{"kind":"js","path":"js/site.js","content":"console.log('ok')"}`), "application/json")
+	if jsResponse.Code != http.StatusOK {
+		t.Fatalf("save js status = %d: %s", jsResponse.Code, jsResponse.Body.String())
+	}
+
+	var imageData bytes.Buffer
+	if err := png.Encode(&imageData, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	multipartWriter := multipart.NewWriter(&body)
+	if err := multipartWriter.WriteField("kind", "image"); err != nil {
+		t.Fatal(err)
+	}
+	part, err := multipartWriter.CreateFormFile("file", "cover.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(imageData.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := multipartWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	imageResponse := request(http.MethodPost, "/api/admin/templates/files", &body, multipartWriter.FormDataContentType())
+	if imageResponse.Code != http.StatusCreated {
+		t.Fatalf("upload image status = %d: %s", imageResponse.Code, imageResponse.Body.String())
+	}
+	if !strings.Contains(imageResponse.Body.String(), "images/cover.png") {
+		t.Fatalf("uploaded image response = %s", imageResponse.Body.String())
+	}
+
+	listResponse := request(http.MethodGet, "/api/admin/templates", nil, "")
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("custom file list status = %d: %s", listResponse.Code, listResponse.Body.String())
+	}
+	var listed ThemeFilesResponse
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.JSFiles) != 1 || len(listed.ImageFiles) != 1 || len(listed.CustomFiles.CSS) != 1 {
+		t.Fatalf("custom file list = %+v", listed)
+	}
+
+	imagePath := url.Values{"kind": {"image"}, "path": {"images/cover.png"}}.Encode()
+	imageMetadata := request(http.MethodGet, "/api/admin/templates?"+imagePath, nil, "")
+	if imageMetadata.Code != http.StatusOK || !strings.Contains(imageMetadata.Body.String(), `"content":""`) {
+		t.Fatalf("image metadata = %d: %s", imageMetadata.Code, imageMetadata.Body.String())
+	}
+	publicImage := request(http.MethodGet, "/images/cover.png", nil, "")
+	if publicImage.Code != http.StatusOK || publicImage.Body.Len() == 0 {
+		t.Fatalf("public image = %d, %d bytes", publicImage.Code, publicImage.Body.Len())
+	}
+
+	traversal := request(http.MethodPut, "/api/admin/templates/files", strings.NewReader(`{"kind":"css","path":"../outside.css","content":"nope"}`), "application/json")
+	if traversal.Code != http.StatusBadRequest {
+		t.Fatalf("custom file traversal status = %d: %s", traversal.Code, traversal.Body.String())
+	}
+	deletePath := url.Values{"kind": {"image"}, "path": {"images/cover.png"}}.Encode()
+	if response := request(http.MethodDelete, "/api/admin/templates/files?"+deletePath, nil, ""); response.Code != http.StatusOK {
+		t.Fatalf("delete image status = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestThemeCustomImageValidation(t *testing.T) {
+	var data bytes.Buffer
+	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 2, 2))); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateThemeImage(data.Bytes(), ".jpg"); err == nil {
+		t.Fatal("png content accepted as jpg")
+	}
+	if err := validateThemeImage(data.Bytes(), ".png"); err != nil {
+		t.Fatalf("png content rejected: %v", err)
 	}
 }
 

@@ -2,5 +2,12 @@
   "id": "blue",
   "name": "Blue",
   "version": "1.0.0",
-  "description": "A classic blue website theme"
+  "description": "A classic blue website theme",
+  "template_groups": {
+    "home": ["index.html"],
+    "cover": ["category_cover.html"],
+    "list": ["category_list.html", "product_category_list.html", "service_category_list.html"],
+    "content": ["content_detail.html", "product_detail.html"],
+    "public": ["contact.html", "msg.html", "search.html", "site-footer.html", "site-header.html", "site-home-footer.html"]
+  }
 }

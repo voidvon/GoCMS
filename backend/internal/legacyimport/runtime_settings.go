@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"gocms/internal/templatelabel"
 )
 
 // MigrateExistingSettings repairs a database produced by an earlier import.
@@ -13,6 +15,10 @@ import (
 // source tables after these values are copied into the unified settings table.
 func MigrateExistingSettings(ctx context.Context, database *sql.DB) error {
 	configRows, err := readRows(ctx, database, "benming_ch_config")
+	if err != nil {
+		return err
+	}
+	labelCategoryRows, err := readRows(ctx, database, "benming_ch_cuskind")
 	if err != nil {
 		return err
 	}
@@ -27,6 +33,9 @@ func MigrateExistingSettings(ctx context.Context, database *sql.DB) error {
 	labelRows, err := readRows(ctx, database, "benming_ch_cuslabel")
 	if err != nil {
 		return err
+	}
+	if err := templatelabel.Ensure(ctx, database); err != nil {
+		return fmt.Errorf("ensure template labels: %w", err)
 	}
 	transaction, err := database.BeginTx(ctx, nil)
 	if err != nil {
@@ -84,6 +93,9 @@ func MigrateExistingSettings(ctx context.Context, database *sql.DB) error {
 		if err := insertSettingIfMissing(ctx, transaction, key, value); err != nil {
 			return err
 		}
+	}
+	if err := importTemplateLabels(ctx, transaction, labelCategoryRows, labelRows); err != nil {
+		return err
 	}
 	for _, row := range metaRows {
 		id := row.number("id")

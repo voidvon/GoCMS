@@ -55,6 +55,10 @@ func migrateRows(ctx context.Context, database *sql.DB) error {
 	if err != nil {
 		return err
 	}
+	labelCategoryRows, err := readRows(ctx, database, "benming_ch_cuskind")
+	if err != nil {
+		return err
+	}
 	labelRows, err := readRows(ctx, database, "benming_ch_cuslabel")
 	if err != nil {
 		return err
@@ -114,6 +118,9 @@ func migrateRows(ctx context.Context, database *sql.DB) error {
 		return err
 	}
 	if err := importCustomLabelSettings(ctx, transaction, labelRows); err != nil {
+		return err
+	}
+	if err := importTemplateLabels(ctx, transaction, labelCategoryRows, labelRows); err != nil {
 		return err
 	}
 	if err := importMetaSettings(ctx, transaction, metaRows); err != nil {
@@ -182,7 +189,9 @@ func importSettings(ctx context.Context, transaction *sql.Tx, rows []sourceRow) 
 		"site_url":         row.text("WebUrl"),
 		"site_icp":         row.text("WebIcp"),
 		"site_qq":          row.text("WebQQ"),
+		"company_qq":       row.text("WebQQ"),
 		"site_msn":         row.text("WebMsn"),
+		"company_mobile":   row.text("WebMsn"),
 		"site_author":      row.text("Webauthor"),
 		"site_copyright":   row.text("WebCopyright"),
 		"company_name":     row.text("CoName"),

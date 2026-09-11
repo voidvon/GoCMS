@@ -19,6 +19,7 @@ import (
 	"gocms/internal/db"
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
+	"gocms/internal/templatelabel"
 )
 
 type Row map[string]string
@@ -42,14 +43,18 @@ type Publisher struct {
 	Web, Templates, Data string
 	Assets               string
 	Theme                string
+	HomeTemplate         string
 }
 
 type content struct {
-	tables      map[string][]Row
-	settings    map[string]string
-	templates   map[string]*template.Template
-	assignments map[string]string
-	pages       map[string][]byte
+	tables           map[string][]Row
+	settings         map[string]string
+	templates        map[string]*template.Template
+	labelTemplates   map[string]*template.Template
+	assignments      map[string]string
+	pages            map[string][]byte
+	homeTemplatePath string
+	labelDepth       int
 }
 
 // ListItem, ListCategory, ListPagination, and NavigationItem are the data
@@ -102,11 +107,141 @@ type ListPagination struct {
 	PageLinks   []ListPage
 }
 
+type TemplateField struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
+type TemplateTag struct {
+	Name        string          `json:"name"`
+	Category    string          `json:"category"`
+	Signature   string          `json:"signature"`
+	Description string          `json:"description"`
+	Context     string          `json:"context"`
+	Example     string          `json:"example"`
+	Fields      []TemplateField `json:"fields,omitempty"`
+}
+
+// TemplateTags is the public template contract shown in the admin. Keep this
+// list next to templateFuncs so the documentation and parser evolve together.
+func TemplateTags() []TemplateTag {
+	return []TemplateTag{
+		{
+			Name: "setting", Category: "全局设置", Signature: `{{setting "site_name"}}`,
+			Description: "读取站点设置并进行 HTML 转义，适合输出站点名称、网址等文本。",
+			Context:     "所有模板", Example: `<title>{{setting "site_name"}}</title>`,
+		},
+		{
+			Name: "settingHTML", Category: "全局设置", Signature: `{{settingHTML "site_footer_links"}}`,
+			Description: "读取站点设置中的原始 HTML。只应使用受信任的后台设置内容。",
+			Context:     "所有模板", Example: `<footer>{{settingHTML "site_footer_links"}}</footer>`,
+		},
+		{
+			Name: "include", Category: "公共模板", Signature: `{{include "site-header.html" .}}`,
+			Description: "渲染主题 templates 目录中的公共 HTML 模板，并传入当前上下文。",
+			Context:     "所有模板", Example: `{{include "site-header.html" .}}`,
+		},
+		{
+			Name: "label", Category: "标签模板", Signature: `{{label "content-card" .}}`,
+			Description: "渲染后台保存的标签模板。标签模板内部可以继续使用本清单中的模板标签。",
+			Context:     "所有模板", Example: `{{range listItems .}}{{label "content-card" .}}{{end}}`,
+		},
+		{
+			Name: "navigation", Category: "栏目导航", Signature: `{{range navigation .}}...{{end}}`,
+			Description: "返回从根栏目开始的完整导航树。传入参数用于保持模板调用形式，当前上下文不会改变导航范围。",
+			Context:     "所有模板", Example: `{{range navigation .}}<a href="{{.URL}}">{{.Name}}</a>{{end}}`,
+			Fields: []TemplateField{
+				{Name: ".URL", Type: "string", Description: "栏目链接"},
+				{Name: ".Name", Type: "string", Description: "栏目名称"},
+				{Name: ".Children", Type: "[]NavigationItem", Description: "子栏目导航，可继续 range"},
+			},
+		},
+		{
+			Name: "listItems", Category: "内容列表", Signature: `{{range listItems .}}...{{end}}`,
+			Description: "返回当前栏目当前分页中的可见内容。列表模板和标签模板通常使用它输出内容卡片。",
+			Context:     "列表模板", Example: `{{range listItems .}}<a href="{{.URL}}">{{.Title}}</a>{{end}}`,
+			Fields: []TemplateField{
+				{Name: ".URL", Type: "string", Description: "内容详情链接"},
+				{Name: ".Title", Type: "string", Description: "内容标题"},
+				{Name: ".Summary", Type: "string", Description: "完整摘要"},
+				{Name: ".Excerpt", Type: "string", Description: "适合列表展示的摘要"},
+				{Name: ".PublishedAt", Type: "string", Description: "完整发布日期"},
+				{Name: ".Date", Type: "string", Description: "发布日期前 10 位"},
+				{Name: ".Image", Type: "string", Description: "封面图片地址"},
+				{Name: ".Category", Type: "string", Description: "所属栏目名称"},
+				{Name: ".RowStart / .RowEnd", Type: "bool", Description: "按两列分组的首尾标记"},
+			},
+		},
+		{
+			Name: "listCategories", Category: "栏目导航", Signature: `{{range listCategories .}}...{{end}}`,
+			Description: "返回当前栏目根栏目下的同级栏目，当前栏目带有 Current 标记。",
+			Context:     "列表模板", Example: `{{range listCategories .}}<a class="{{if .Current}}active{{end}}" href="{{.URL}}">{{.Name}}</a>{{end}}`,
+			Fields: []TemplateField{
+				{Name: ".URL / .Name", Type: "string", Description: "栏目链接和名称"},
+				{Name: ".Current / .Last", Type: "bool", Description: "当前项和最后一项标记"},
+			},
+		},
+		{
+			Name: "listChildren", Category: "栏目导航", Signature: `{{range listChildren .}}...{{end}}`,
+			Description: "返回当前栏目直属的子栏目，适合封面模板展示栏目入口。",
+			Context:     "栏目模板", Example: `{{range listChildren .}}<a href="{{.URL}}">{{.Name}}</a>{{end}}`,
+			Fields: []TemplateField{
+				{Name: ".URL / .Name", Type: "string", Description: "子栏目链接和名称"},
+				{Name: ".Last", Type: "bool", Description: "最后一项标记"},
+				{Name: ".RowStart / .RowEnd", Type: "bool", Description: "按五列分组的首尾标记"},
+			},
+		},
+		{
+			Name: "catalogCategories", Category: "栏目导航", Signature: `{{range catalogCategories .}}...{{end}}`,
+			Description: "返回当前站点根栏目下的一级栏目集合，适合站点栏目目录。",
+			Context:     "所有模板", Example: `{{range catalogCategories .}}<a href="{{.URL}}">{{.Name}}</a>{{end}}`,
+			Fields: []TemplateField{
+				{Name: ".URL / .Name", Type: "string", Description: "栏目链接和名称"},
+				{Name: ".Last", Type: "bool", Description: "最后一项标记"},
+			},
+		},
+		{
+			Name: "featuredItems", Category: "内容列表", Signature: `{{range featuredItems 6}}...{{end}}`,
+			Description: "返回全站推荐内容，参数为最大显示条数。",
+			Context:     "所有模板", Example: `{{range featuredItems 6}}<a href="{{.URL}}">{{.Title}}</a>{{end}}`,
+			Fields: []TemplateField{{Name: "参数", Type: "int", Description: "最大显示条数"}},
+		},
+		{
+			Name: "featuredItemsIn", Category: "内容列表", Signature: `{{range featuredItemsIn "collection" 6}}...{{end}}`,
+			Description: "返回指定内容集合中的推荐内容，参数依次为集合标识和最大显示条数。",
+			Context:     "所有模板", Example: `{{range featuredItemsIn "products" 6}}{{.Title}}{{end}}`,
+			Fields: []TemplateField{
+				{Name: "collection", Type: "string", Description: "根栏目 URL 目录标识"},
+				{Name: "limit", Type: "int", Description: "最大显示条数"},
+			},
+		},
+		{
+			Name: "relatedItems", Category: "相关内容", Signature: `{{range relatedItems . 6}}...{{end}}`,
+			Description: "返回当前内容同栏目的其他可见内容，参数为当前详情上下文和最大显示条数。",
+			Context:     "详情模板", Example: `{{range relatedItems . 6}}<a href="{{.URL}}">{{.Title}}</a>{{end}}`,
+			Fields: []TemplateField{{Name: "limit", Type: "int", Description: "最大显示条数"}},
+		},
+		{
+			Name: "listPagination", Category: "分页", Signature: `{{with listPagination .}}...{{end}}`,
+			Description: "返回当前栏目分页信息。分页链接已经按栏目路由生成。",
+			Context:     "列表模板", Example: `{{with listPagination .}}{{range .PageLinks}}<a href="{{.URL}}">{{.Number}}</a>{{end}}{{end}}`,
+			Fields: []TemplateField{
+				{Name: ".Total / .Page / .Pages / .PageSize", Type: "int", Description: "总数、当前页、总页数和每页数量"},
+				{Name: ".FirstURL / .PreviousURL / .NextURL / .LastURL", Type: "string", Description: "首页、上一页、下一页和末页链接"},
+				{Name: ".HasPrevious / .HasNext", Type: "bool", Description: "是否存在上一页或下一页"},
+				{Name: ".PageLinks", Type: "[]ListPage", Description: "页码链接集合，每项有 .Number、.URL、.Current"},
+			},
+		},
+	}
+}
+
 func (c *content) templateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"setting":           func(key string) string { return esc(c.settings[strings.TrimSpace(key)]) },
 		"settingHTML":       func(key string) string { return c.settings[strings.TrimSpace(key)] },
 		"include":           func(path string, row Row) (string, error) { return c.include(path, row) },
+		"label":             func(key string, data any) (string, error) { return c.renderLabel(key, data) },
 		"listItems":         func(row Row) []ListItem { return c.listItems(row) },
 		"listCategories":    func(row Row) []ListCategory { return c.listCategories(row) },
 		"listChildren":      func(row Row) []ListCategory { return c.listChildren(row) },
@@ -191,11 +326,13 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	}()
 
 	c := &content{
-		tables:      map[string][]Row{},
-		settings:    map[string]string{},
-		templates:   map[string]*template.Template{},
-		assignments: map[string]string{},
-		pages:       map[string][]byte{},
+		tables:           map[string][]Row{},
+		settings:         map[string]string{},
+		templates:        map[string]*template.Template{},
+		labelTemplates:   map[string]*template.Template{},
+		assignments:      map[string]string{},
+		pages:            map[string][]byte{},
+		homeTemplatePath: p.HomeTemplate,
 	}
 	tx, err := p.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -219,8 +356,20 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		_ = tx.Rollback()
 		return report, err
 	}
+	labels, err := templatelabel.Load(ctx, tx)
+	if err != nil {
+		_ = tx.Rollback()
+		return report, err
+	}
 	if err = tx.Commit(); err != nil {
 		return report, err
+	}
+	for _, label := range labels {
+		parsed, parseErr := template.New("label:" + label.Key).Funcs(c.templateFuncs()).Parse(label.Content)
+		if parseErr != nil {
+			return report, fmt.Errorf("解析标签模板 %s: %w", label.Key, parseErr)
+		}
+		c.labelTemplates[label.Key] = parsed
 	}
 
 	sortRows(c.tables["gocms_category"], "order_id", true)
@@ -353,9 +502,22 @@ func atomicWrite(filePath string, data []byte) error {
 	return os.Rename(temporary.Name(), filePath)
 }
 
+func (c *content) homeTemplate() string {
+	if strings.TrimSpace(c.homeTemplatePath) != "" {
+		return strings.TrimSpace(c.homeTemplatePath)
+	}
+	if templatePath, ok := c.assignments[templateconfig.RoleHomeIndex]; ok && strings.TrimSpace(templatePath) != "" {
+		return strings.TrimSpace(templatePath)
+	}
+	return "index.html"
+}
+
 func (c *content) page(rolePath, role string, row Row) error {
 	templatePath, ok := c.assignments[role]
 	if !ok {
+		if role == templateconfig.RoleHomeIndex {
+			return c.pageTemplate(rolePath, c.homeTemplate(), row)
+		}
 		return fmt.Errorf("缺少模板配置: %s", role)
 	}
 	return c.pageTemplate(rolePath, templatePath, row)
@@ -393,6 +555,24 @@ func (c *content) include(templatePath string, row Row) (string, error) {
 	var output strings.Builder
 	if err := parsed.Execute(&output, row); err != nil {
 		return "", err
+	}
+	return output.String(), nil
+}
+
+func (c *content) renderLabel(key string, data any) (string, error) {
+	key = strings.ToLower(strings.TrimSpace(key))
+	parsed, ok := c.labelTemplates[key]
+	if !ok {
+		return "", fmt.Errorf("标签模板不存在: %s", key)
+	}
+	if c.labelDepth >= 32 {
+		return "", fmt.Errorf("标签模板嵌套层级超过限制")
+	}
+	c.labelDepth++
+	defer func() { c.labelDepth-- }()
+	var output strings.Builder
+	if err := parsed.Execute(&output, data); err != nil {
+		return "", fmt.Errorf("渲染标签模板 %s: %w", key, err)
 	}
 	return output.String(), nil
 }
@@ -944,7 +1124,7 @@ func (c *content) categoryView(category Row, items []Row, page, pageSize int) Ro
 }
 
 func (c *content) build() error {
-	if err := c.page("index.html", templateconfig.RoleHomeIndex, Row{
+	if err := c.pageTemplate("index.html", c.homeTemplate(), Row{
 		"title":         esc(c.settings["site_name"]),
 		"site_name":     esc(c.settings["site_name"]),
 		"site_url":      esc(c.settings["site_url"]),

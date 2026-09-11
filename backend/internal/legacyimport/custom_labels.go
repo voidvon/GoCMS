@@ -7,8 +7,9 @@ import (
 
 var copyrightYearsPattern = regexp.MustCompile(`(?i)copyright\s+(?:&#169;|©)?\s*(\d{4}(?:-\d{4})?)`)
 
-// customLabelSettings converts legacy reusable fragments into generic site
-// settings. The running CMS never reads the legacy custom-label table.
+// customLabelSettings extracts the two legacy fragments that are still used by
+// the default theme as site settings. All legacy reusable fragments are also
+// imported into the unified template-label table by importTemplateLabels.
 func customLabelSettings(rows []sourceRow) map[string]string {
 	settings := make(map[string]string)
 	for _, row := range rows {

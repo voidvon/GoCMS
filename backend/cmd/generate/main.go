@@ -32,7 +32,15 @@ func main() {
 	if e != nil {
 		log.Fatal(e)
 	}
-	r, e := (generator.Publisher{DB: d, Web: *web, Templates: themeDefinition.TemplatesRoot, Data: *data, Assets: *assets, Theme: themeDefinition.AssetsRoot}).Generate(context.Background())
+	r, e := (generator.Publisher{
+		DB:           d,
+		Web:          *web,
+		Templates:    themeDefinition.TemplatesRoot,
+		Data:         *data,
+		Assets:       *assets,
+		Theme:        themeDefinition.AssetsRoot,
+		HomeTemplate: themeDefinition.HomeTemplate(),
+	}).Generate(context.Background())
 	_ = json.NewEncoder(os.Stdout).Encode(r)
 	if e != nil {
 		log.Fatal(e)

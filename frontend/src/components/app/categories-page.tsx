@@ -39,7 +39,7 @@ const emptyCategory: CategoryInput = {
   list_path: "category",
   list_file_pattern: "{id}.html",
   list_template: "category_list.html",
-  cover_template: "category_list.html",
+  cover_template: "category_cover.html",
   detail_path: "content",
   detail_file_pattern: "{id}.html",
   detail_template: "content_detail.html",
@@ -474,7 +474,7 @@ export function CategoriesPage() {
                   <Select value={form.detail_template} onValueChange={(value) => update("detail_template", value ?? "")} disabled={templatesLoading}>
                     <SelectTrigger className="w-full"><SelectValue placeholder="选择详情模板" /></SelectTrigger>
                     <SelectContent>
-                      {templateOptions(form.detail_template, "detail").map((file) => <SelectItem key={file.path} value={file.path}>{file.path}</SelectItem>)}
+                      {templateOptions(form.detail_template, "content").map((file) => <SelectItem key={file.path} value={file.path}>{file.path}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">此栏目下内容详情页使用的 HTML 模板。</p>

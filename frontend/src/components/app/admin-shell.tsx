@@ -64,7 +64,7 @@ type NavigationItem = {
 
 const navigationItems: NavigationItem[] = [
   { id: "publish", label: "网站发布", icon: Globe },
-  { id: "theme", label: "主题模板", icon: Palette },
+  { id: "theme", label: "模板管理", icon: Palette },
   { id: "overview", label: "总览", icon: LayoutDashboard },
   { id: "content", label: "内容", icon: FileText },
   { id: "categories", label: "分类", icon: FolderTree },
@@ -175,7 +175,7 @@ function viewMeta(view: AdminView) {
   switch (view) {
  case "publish": return {title:"网站发布",description:"生成并发布公开站点"}
     case "theme":
-      return { title: "主题模板", description: "管理当前主题的样式和页面模板" }
+      return { title: "模板管理", description: "管理模板组、页面模板和自定义文件" }
     case "content":
       return { title: "内容", description: "维护内容、分类和公开展示状态" }
     case "categories":
