@@ -1366,6 +1366,21 @@ export function ContentPage() {
     }
   }, [appliedQuery, categoryID, page, activeLang])
 
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.search).get("edit"))
+    if (!Number.isSafeInteger(id) || id < 1) return
+    let active = true
+    getContentItem(id).then((item) => {
+      if (!active) return
+      setEditing(item)
+      setEditingDetail(item)
+      setEditorOpen(true)
+    }).catch((err) => {
+      if (active) setError(err instanceof Error ? err.message : "关联内容加载失败")
+    })
+    return () => { active = false }
+  }, [])
+
   const editingID = editing?.id
   useEffect(() => {
     let active = true

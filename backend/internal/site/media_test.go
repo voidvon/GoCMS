@@ -110,6 +110,24 @@ func TestContentMediaReferencesFollowContent(t *testing.T) {
 		t.Fatalf("unexpected initial media references: %#v", refs)
 	}
 
+	detailResponse := mediaItemRequest(t, server, token, http.MethodGet, coverAsset.ID)
+	var detail struct {
+		MediaAsset
+		References []MediaReference `json:"references"`
+	}
+	if detailResponse.Code != http.StatusOK {
+		t.Fatalf("media detail returned %d: %s", detailResponse.Code, detailResponse.Body.String())
+	}
+	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.ID != coverAsset.ID || len(detail.References) != 1 || detail.References[0].ContentID != contentID || detail.References[0].Title != "带图片的内容" || detail.References[0].FieldName != "cover_image" {
+		t.Fatalf("unexpected media detail: %+v", detail)
+	}
+	if response := mediaItemRequest(t, server, "", http.MethodGet, coverAsset.ID); response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized detail returned %d", response.Code)
+	}
+
 	if response := mediaItemRequest(t, server, token, http.MethodDelete, coverAsset.ID); response.Code != http.StatusConflict {
 		t.Fatalf("delete referenced cover returned %d: %s", response.Code, response.Body.String())
 	}
@@ -244,4 +262,43 @@ func mediaReferences(t *testing.T, database *sql.DB, contentID int64) map[string
 		t.Fatal(err)
 	}
 	return refs
+}
+
+func TestAdminMediaManagementSearchAndEmptyReferences(t *testing.T) {
+	server, _, token := newCategoryTestServer(t)
+	server.assetsRoot = t.TempDir()
+	first := uploadTestMedia(t, server, token, "manual.png")
+	second := uploadTestMedia(t, server, token, "manual-cover.png")
+	uploadTestMedia(t, server, token, "other.png")
+	response := contentJSONRequest(t, server, token, http.MethodGet, "/api/admin/media?q=manual&page_size=1&page=2", nil)
+	var page MediaPage
+	if response.Code != http.StatusOK {
+		t.Fatalf("list returned %d: %s", response.Code, response.Body.String())
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 2 || page.Page != 2 || len(page.Items) != 1 || page.Items[0].ID != first.ID {
+		t.Fatalf("unexpected page: %+v", page)
+	}
+	response = mediaItemRequest(t, server, token, http.MethodGet, second.ID)
+	var detail struct {
+		References []MediaReference `json:"references"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if detail.References == nil || len(detail.References) != 0 {
+		t.Fatalf("expected empty references: %s", response.Body.String())
+	}
+	if response := mediaItemRequest(t, server, token, http.MethodDelete, second.ID); response.Code != http.StatusOK {
+		t.Fatalf("delete returned %d", response.Code)
+	}
+	if response := mediaItemRequest(t, server, token, http.MethodGet, second.ID); response.Code != http.StatusNotFound {
+		t.Fatalf("deleted detail returned %d", response.Code)
+	}
+	diskPath := filepath.Join(server.assetsRoot, filepath.FromSlash(strings.TrimPrefix(second.URL, "/")))
+	if _, err := os.Stat(diskPath); !os.IsNotExist(err) {
+		t.Fatalf("deleted file still exists: %v", err)
+	}
 }

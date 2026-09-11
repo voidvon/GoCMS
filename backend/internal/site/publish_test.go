@@ -63,3 +63,48 @@ func TestAdminSitemapGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAdminLLMSGeneration(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := db.CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(database, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.ConfigurePublishing("", t.TempDir(), "", "", "")
+	if err := os.WriteFile(filepath.Join(server.siteRoot, "index.html"), []byte("<title>Public site</title>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	token, err := server.createSession("gocms")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, authenticated := range []bool{false, true} {
+		req := httptest.NewRequest(http.MethodPost, "/api/admin/publish/llms", nil)
+		if authenticated {
+			req.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
+		}
+		res := httptest.NewRecorder()
+		server.Handler().ServeHTTP(res, req)
+		if !authenticated {
+			if res.Code != http.StatusUnauthorized {
+				t.Fatalf("unauthenticated: %d", res.Code)
+			}
+			continue
+		}
+		if res.Code != http.StatusOK {
+			t.Fatalf("generate: %d %s", res.Code, res.Body.String())
+		}
+	}
+	res := httptest.NewRecorder()
+	server.Handler().ServeHTTP(res, httptest.NewRequest(http.MethodGet, "/llms.txt", nil))
+	if res.Code != http.StatusOK {
+		t.Fatalf("public guide: %d", res.Code)
+	}
+}

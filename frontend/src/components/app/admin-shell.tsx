@@ -1,23 +1,23 @@
-import { useState, type ComponentType } from "react"
+import { useEffect, useState, type ComponentType } from "react"
 import {
   BarChart3,
   Boxes,
-  Check,
   ChevronsUpDown,
   FolderTree,
   LayoutDashboard,
   LogOut,
-  Menu,
+  PanelLeft,
   MessageSquareText,
   FileText,
   Globe,
   KeyRound,
   Languages,
   Palette,
+  Paperclip,
 } from "lucide-react"
 
 import { logout, type AdminUser } from "@/lib/api"
-import { LanguageProvider, useLanguage } from "@/lib/language-context"
+import { LanguageProvider } from "@/lib/language-context"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { useAdminRoute, type AdminView } from "@/lib/admin-router"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 import { DashboardPage } from "@/components/app/dashboard-page"
@@ -48,6 +49,8 @@ import { MessagesPage } from "@/components/app/messages-page"
 import { ContentPage } from "@/components/app/content-page"
 import { ThemePage } from "@/components/app/theme-page"
 import { ApiKeysPage } from "@/components/app/api-keys-page"
+
+import { MediaPage } from "@/components/app/media-page"
 
 import { PublishPage } from "@/components/app/publish-page"
 import { SettingsDialog } from "@/components/app/settings-dialog"
@@ -62,6 +65,7 @@ type NavigationProps = {
   activeView: AdminView
   onNavigate: (view: AdminView) => void
   onClose?: () => void
+  collapsed?: boolean
 }
 
 type NavigationItem = {
@@ -73,6 +77,7 @@ type NavigationItem = {
 const navigationItems: NavigationItem[] = [
   { id: "overview", label: "仪表盘", icon: LayoutDashboard },
   { id: "content", label: "内容", icon: FileText },
+  { id: "media", label: "附件", icon: Paperclip },
   { id: "categories", label: "分类", icon: FolderTree },
   { id: "languages", label: "多语言", icon: Languages },
   { id: "messages", label: "信息反馈", icon: MessageSquareText },
@@ -82,17 +87,17 @@ const navigationItems: NavigationItem[] = [
   { id: "api-keys", label: "API Key", icon: KeyRound },
 ]
 
-function Navigation({ activeView, onNavigate, onClose }: NavigationProps) {
+function Navigation({ activeView, onNavigate, onClose, collapsed = false }: NavigationProps) {
   return (
-    <nav className="space-y-1">
+    <nav aria-label="主导航" className="space-y-1">
       {navigationItems.map((item) => {
         const Icon = item.icon
         const active = activeView === item.id
-        return (
+        const button = (
           <Button
-            key={item.id}
             variant={active ? "secondary" : "ghost"}
-            className={cn("w-full justify-start gap-3", active && "font-medium")}
+            className={cn("w-full justify-start gap-3", active && "font-medium", collapsed && "justify-center px-0")}
+            aria-label={item.label}
             aria-current={active ? "page" : undefined}
             onClick={() => {
               onNavigate(item.id)
@@ -100,9 +105,15 @@ function Navigation({ activeView, onNavigate, onClose }: NavigationProps) {
             }}
           >
             <Icon />
-            {item.label}
+            {!collapsed && item.label}
           </Button>
         )
+        return collapsed ? (
+          <Tooltip key={item.id}>
+            <TooltipTrigger render={button} />
+            <TooltipContent side="right">{item.label}</TooltipContent>
+          </Tooltip>
+        ) : <div key={item.id}>{button}</div>
       })}
     </nav>
   )
@@ -112,9 +123,10 @@ type UserMenuProps = {
   user: AdminUser
   onLogout: () => void
   className?: string
+  collapsed?: boolean
 }
 
-function UserMenu({ user, onLogout, className }: UserMenuProps) {
+function UserMenu({ user, onLogout, className, collapsed = false }: UserMenuProps) {
   const initials = user.username.slice(0, 1).toUpperCase()
 
   return (
@@ -123,13 +135,16 @@ function UserMenu({ user, onLogout, className }: UserMenuProps) {
         render={
           <Button
             variant="ghost"
-            className={cn("min-w-0 justify-start gap-2 px-2", className)}
+            className={cn("min-w-0 justify-start gap-2 px-2", collapsed && "justify-center px-0", className)}
+            aria-label={`账号：${user.username}`}
           >
             <Avatar size="sm">
               <AvatarFallback>{initials}</AvatarFallback>
             </Avatar>
-            <span className="min-w-0 flex-1 truncate text-left text-sm">{user.username}</span>
-            <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+            {!collapsed && <>
+              <span className="min-w-0 flex-1 truncate text-left text-sm">{user.username}</span>
+              <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
+            </>}
           </Button>
         }
       />
@@ -151,28 +166,27 @@ function UserMenu({ user, onLogout, className }: UserMenuProps) {
 }
 
 type SidebarProps = Pick<NavigationProps, "activeView" | "onNavigate"> &
-  Pick<AdminShellProps, "user" | "onLogout">
+  Pick<AdminShellProps, "user" | "onLogout"> & { collapsed: boolean }
 
-function Sidebar({ activeView, onNavigate, user, onLogout }: SidebarProps) {
+function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarProps) {
   return (
-    <aside className="hidden w-60 shrink-0 border-r bg-muted/20 lg:block">
-      <div className="sticky top-0 flex h-svh flex-col p-4">
-        <div className="flex items-center gap-3 px-2 py-2">
+    <aside id="desktop-sidebar" aria-label="侧边栏" data-state={collapsed ? "collapsed" : "expanded"} className={cn("hidden shrink-0 border-r bg-muted/20 transition-[width] duration-200 motion-reduce:transition-none lg:block", collapsed ? "w-16" : "w-60")}>
+      <div className={cn("sticky top-0 flex h-svh flex-col py-4", collapsed ? "px-2" : "px-4")}>
+        <div className={cn("flex shrink-0 items-center gap-3 py-2", collapsed ? "justify-center" : "px-2")}>
           <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <BarChart3 className="size-4" />
           </span>
-          <div>
+          {!collapsed && <div className="whitespace-nowrap">
             <p className="text-sm font-semibold tracking-tight">GoCMS 后台</p>
             <p className="text-xs text-muted-foreground">内容管理</p>
-          </div>
+          </div>}
         </div>
-        <div className="mt-8 px-2 pb-2 text-[11px] font-medium tracking-wide text-muted-foreground">
-          工作区
-        </div>
-        <Navigation activeView={activeView} onNavigate={onNavigate} />
-        <div className="mt-auto border-t pt-4">
-          <div className="flex items-center gap-1">
-            <UserMenu user={user} onLogout={onLogout} className="flex-1" />
+        <ScrollArea className="mt-6 min-h-0 flex-1" contentClassName="pb-4">
+          <Navigation activeView={activeView} onNavigate={onNavigate} collapsed={collapsed} />
+        </ScrollArea>
+        <div className="shrink-0 border-t pt-4">
+          <div className={cn("flex items-center gap-1", collapsed && "flex-col")}>
+            <UserMenu user={user} onLogout={onLogout} collapsed={collapsed} className={collapsed ? "w-full" : "flex-1"} />
             <ThemeToggle />
             <SettingsDialog />
           </div>
@@ -184,6 +198,8 @@ function Sidebar({ activeView, onNavigate, user, onLogout }: SidebarProps) {
 
 function viewMeta(view: AdminView) {
   switch (view) {
+    case "media":
+      return { title: "附件管理", description: "管理全站上传图片及内容引用" }
     case "publish":
       return { title: "网站发布", description: "生成并发布公开站点" }
     case "theme":
@@ -207,6 +223,8 @@ function viewMeta(view: AdminView) {
 
 function ViewContent({ view }: { view: AdminView }) {
   switch (view) {
+    case "media":
+      return <MediaPage />
     case "publish":
       return <PublishPage />
     case "theme":
@@ -228,58 +246,6 @@ function ViewContent({ view }: { view: AdminView }) {
   }
 }
 
-function HeaderLanguageSwitcher() {
-  const { languages, activeLang, setActiveLang } = useLanguage()
-
-  if (languages.length <= 1) {
-    return null
-  }
-
-  const current = languages.find((l) => l.code === activeLang) || languages[0]
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 border-dashed text-xs px-2.5">
-            <Languages className="size-3.5 text-primary" />
-            <span className="font-medium">{current?.name || activeLang}</span>
-            {current?.is_default === 1 && (
-              <span className="text-[10px] bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400 px-1 rounded font-normal">主站</span>
-            )}
-            <ChevronsUpDown className="size-3 text-muted-foreground opacity-60" />
-          </Button>
-        }
-      />
-      <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel className="text-xs text-muted-foreground">切换显示与编辑语言</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {languages.map((lang) => (
-          <DropdownMenuItem
-            key={lang.id}
-            onClick={() => setActiveLang(lang.code)}
-            className="flex items-center justify-between text-xs cursor-pointer py-1.5"
-          >
-            <div className="flex items-center gap-2">
-              <span className="font-medium">{lang.name}</span>
-              <span className="text-[11px] text-muted-foreground">({lang.code})</span>
-            </div>
-            <div className="flex items-center gap-1">
-              {lang.is_default === 1 && (
-                <span className="text-[10px] text-blue-600 bg-blue-50 dark:bg-blue-950 px-1 rounded">主站</span>
-              )}
-              {lang.is_fallback === 1 && (
-                <span className="text-[10px] text-amber-600 bg-amber-50 dark:bg-amber-950 px-1 rounded">兜底</span>
-              )}
-              {lang.code === activeLang && <Check className="size-3.5 text-primary ml-1" />}
-            </div>
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
 export function AdminShell({ user, onLogout }: AdminShellProps) {
   return (
     <LanguageProvider>
@@ -291,6 +257,34 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
 function AdminShellInner({ user, onLogout }: AdminShellProps) {
   const { view: activeView, navigate } = useAdminRoute()
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem("gocms-sidebar-collapsed") === "true" }
+    catch { return false }
+  })
+
+  useEffect(() => {
+    try { localStorage.setItem("gocms-sidebar-collapsed", String(collapsed)) }
+    catch { /* Keep the toggle usable when browser storage is unavailable. */ }
+  }, [collapsed])
+
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 1024px)")
+    const onResize = () => { if (desktop.matches) setMobileOpen(false) }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "b" || !(event.metaKey || event.ctrlKey) || event.altKey || event.repeat) return
+      const target = event.target
+      if (target instanceof HTMLElement && target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")) return
+      event.preventDefault()
+      if (desktop.matches) setCollapsed((value) => !value)
+      else setMobileOpen((value) => !value)
+    }
+    desktop.addEventListener("change", onResize)
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      desktop.removeEventListener("change", onResize)
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [])
   const meta = viewMeta(activeView)
 
   async function handleLogout() {
@@ -308,10 +302,17 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
 
   return (
     <div className="flex min-h-svh bg-background lg:h-svh lg:overflow-hidden">
-      <Sidebar activeView={activeView} onNavigate={navigate} user={user} onLogout={handleLogout} />
+      <Sidebar activeView={activeView} onNavigate={navigate} user={user} onLogout={handleLogout} collapsed={collapsed} />
       <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
         <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b bg-background/95 px-4 backdrop-blur sm:px-6">
           <div className="flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="hidden lg:inline-flex"
+              aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
+              title={collapsed ? "展开侧边栏" : "收起侧边栏"}
+              aria-expanded={!collapsed} aria-controls="desktop-sidebar"
+              onClick={() => setCollapsed((value) => !value)}>
+              <PanelLeft />
+            </Button>
             <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
               <SheetTrigger
                 render={
@@ -324,9 +325,9 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
                   />
                 }
               >
-                <Menu />
+                <PanelLeft />
               </SheetTrigger>
-              <SheetContent side="left" className="flex w-72 flex-col p-4">
+              <SheetContent side="left" className="flex w-72 max-w-[calc(100vw-2rem)] flex-col p-4">
                 <SheetHeader className="px-2">
                   <SheetTitle className="flex items-center gap-3">
                     <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
@@ -335,7 +336,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
                     GoCMS 后台
                   </SheetTitle>
                 </SheetHeader>
-                <ScrollArea className="mt-6 flex-1" contentClassName="pr-2">
+                <ScrollArea className="mt-6 min-h-0 flex-1" contentClassName="pr-2">
                   {mobileNavigation}
                 </ScrollArea>
                 <div className="mt-6 border-t pt-4">
@@ -351,9 +352,6 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
               <h1 className="text-sm font-semibold tracking-tight">{meta.title}</h1>
               <p className="hidden text-xs text-muted-foreground sm:block">{meta.description}</p>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <HeaderLanguageSwitcher />
           </div>
         </header>
         <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6 lg:overflow-hidden">

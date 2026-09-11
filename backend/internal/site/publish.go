@@ -155,3 +155,27 @@ func (s *Server) contentSaved(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
+
+func (s *Server) adminLLMS(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	if s.publication == nil {
+		http.Error(w, "publishing is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	filename, err := s.publication.publisher.GenerateLLMS(r.Context())
+	if err != nil {
+		if errors.Is(err, generator.ErrPublishBusy) {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "path": "/" + filename})
+}

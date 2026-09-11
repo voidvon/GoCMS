@@ -856,3 +856,23 @@ export function getApiKeyEvents(id: number) {
   return request<{ ok: boolean; success: boolean; data: ApiKeyEvent[] }>(`/api/admin/api-keys/${id}/events`)
 }
 
+
+export function generateLLMS() {
+  return request<{ ok: boolean; path: string }>("/api/admin/publish/llms", { method: "POST" })
+}
+
+export type MediaReference = {
+  content_id: number
+  title: string
+  field_name: string
+}
+
+export type MediaDetail = MediaAsset & { references: MediaReference[] }
+
+export function getMediaItem(id: number) {
+  return request<MediaDetail>(`/api/admin/media/${id}`)
+}
+
+export function deleteMedia(id: number) {
+  return request<{ ok: boolean }>(`/api/admin/media/${id}`, { method: "DELETE" })
+}

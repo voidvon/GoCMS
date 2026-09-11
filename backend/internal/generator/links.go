@@ -79,16 +79,17 @@ func (c *content) normalizeLinks(assets, theme string) error {
 		index[strings.ToLower(p)] = p
 	}
 	for name, b := range c.pages {
-		c.pages[name] = []byte(resourceAttribute.ReplaceAllStringFunc(string(b), func(attr string) string {
+		c.pages[name] = resourceAttribute.ReplaceAllFunc(b, func(raw []byte) []byte {
+			attr := string(raw)
 			m := resourceAttribute.FindStringSubmatch(attr)
 			value := html.UnescapeString(strings.Trim(m[2], `"'`))
 			u, e := url.Parse(value)
 			if e != nil || u.Path == "" {
-				return attr
+				return raw
 			}
 			external := u.IsAbs() || u.Host != ""
 			if external {
-				return attr
+				return raw
 			}
 			target := path.Clean(path.Join("/", path.Dir(name), u.Path))
 			if strings.HasPrefix(u.Path, "/") {
@@ -100,14 +101,14 @@ func (c *content) normalizeLinks(assets, theme string) error {
 				ok = resolved != ""
 			}
 			if !ok {
-				return attr
+				return raw
 			}
 			u.Path = "/" + resolved
 			if strings.HasSuffix(value, "/") {
 				u.Path += "/"
 			}
-			return m[1] + `="` + esc(u.String()) + `"`
-		}))
+			return []byte(m[1] + `="` + esc(u.String()) + `"`)
+		})
 	}
 	return nil
 }

@@ -11,7 +11,7 @@ dev:
 
 backend:
 	@if [ -n "$(AIR)" ]; then \
-		cd backend && $(AIR); \
+		cd backend && "$(AIR)"; \
 	else \
 		echo "提示: 未检测到 air 工具，以普通模式启动。如需热重载请执行: go install github.com/air-verse/air@latest"; \
 		cd backend && go run ./cmd/site -addr 127.0.0.1:18080; \

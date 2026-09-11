@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -24,6 +25,10 @@ var ErrPublishBusy = errors.New("已有发布任务正在运行")
 // GenerateSitemap updates one sitemap from the pages that are currently live.
 // A full publication still regenerates both files from the new page snapshot.
 func (p Publisher) GenerateSitemap(ctx context.Context, format string) (string, error) {
+	return p.generateIndex(ctx, format)
+}
+
+func (p Publisher) generateIndex(ctx context.Context, format string) (string, error) {
 	format = strings.ToLower(strings.TrimSpace(format))
 	filename, ok := sitemapFilename(format)
 	if !ok {
@@ -62,6 +67,11 @@ func (p Publisher) GenerateSitemap(ctx context.Context, format string) (string, 
 	var body []byte
 	if format == SitemapHTML {
 		body = renderSitemapHTML(urls)
+	} else if format == "llms" {
+		body, err = renderLLMS(ctx, base, urls, func(path string) (io.ReadCloser, error) { return os.Open(filepath.Join(web, filepath.FromSlash(path))) })
+		if err != nil {
+			return "", err
+		}
 	} else {
 		body = renderSitemapXML(base, urls)
 	}
@@ -73,6 +83,8 @@ func (p Publisher) GenerateSitemap(ctx context.Context, format string) (string, 
 
 func sitemapFilename(format string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "llms":
+		return "llms.txt", true
 	case SitemapHTML:
 		return "sitemap.html", true
 	case SitemapXML:

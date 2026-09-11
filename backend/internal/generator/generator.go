@@ -1,11 +1,13 @@
 package generator
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -67,6 +69,12 @@ type content struct {
 	lang             string
 	langPrefix       string
 	languages        []LanguageInfo
+	visibleCache     []Row
+	categoryCache    map[int][]Row
+	categoryByID     map[int]Row
+	childrenCache    map[int][]Row
+	navigationCache  []NavigationItem
+	catalogCache     []ListCategory
 }
 
 // ListItem, ListCategory, ListPagination, and NavigationItem are the data
@@ -768,6 +776,12 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		c.langPrefix = lang.PathPrefix
 		c.tables["gocms_category"] = prepareTranslatedCategories(baseCategories, c.tables["gocms_category_translation"], lang.Code, fallbackLang)
 		c.tables["gocms_content"] = prepareTranslatedContent(baseContents, c.tables["gocms_content_translation"], lang.Code, fallbackLang, transFields)
+		c.visibleCache = nil
+		c.categoryCache = nil
+		c.categoryByID = nil
+		c.childrenCache = nil
+		c.navigationCache = nil
+		c.catalogCache = nil
 		sortRows(c.tables["gocms_category"], "order_id", true)
 		sortRows(c.tables["gocms_content"], "sort_order", false)
 		if err = c.buildForLang(); err != nil {
@@ -780,6 +794,10 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		urls = append(urls, pagePath)
 	}
 	sort.Strings(urls)
+	c.pages["llms.txt"], err = renderLLMS(ctx, c.settings["site_url"], urls, func(path string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(c.pages[path])), nil })
+	if err != nil {
+		return report, err
+	}
 	c.pages["sitemap.html"] = renderSitemapHTML(urls)
 	c.pages["Sitemap.xml"] = renderSitemapXML(strings.TrimRight(c.settings["site_url"], "/"), urls)
 
@@ -809,7 +827,13 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		if err = ctx.Err(); err != nil {
 			return report, err
 		}
-		if err = atomicWrite(filepath.Join(stage, filepath.FromSlash(relative)), data); err != nil {
+		// stage is a private temporary tree; avoid per-file temp files and renames.
+		// This substantially reduces filesystem overhead for large publications.
+		path := filepath.Join(stage, filepath.FromSlash(relative))
+		if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			return report, err
+		}
+		if err = os.WriteFile(path, data, 0644); err != nil {
 			return report, err
 		}
 	}
@@ -949,10 +973,14 @@ func (c *content) renderLabel(key string, data any) (string, error) {
 }
 
 func (c *content) cat(id int) Row {
-	for _, category := range c.tables["gocms_category"] {
-		if category.n("id") == id {
-			return category
+	if c.categoryByID == nil {
+		c.categoryByID = make(map[int]Row, len(c.tables["gocms_category"]))
+		for _, category := range c.tables["gocms_category"] {
+			c.categoryByID[category.n("id")] = category
 		}
+	}
+	if category, ok := c.categoryByID[id]; ok {
+		return category
 	}
 	return Row{}
 }
@@ -1183,6 +1211,9 @@ func (c *content) categoryPageSize(category Row) int {
 }
 
 func (c *content) visibleContents() []Row {
+	if c.visibleCache != nil {
+		return c.visibleCache
+	}
 	items := make([]Row, 0, len(c.tables["gocms_content"]))
 	for _, item := range c.tables["gocms_content"] {
 		if item.n("visible") == 1 {
@@ -1190,22 +1221,31 @@ func (c *content) visibleContents() []Row {
 		}
 	}
 	sortRows(items, "sort_order", false)
+	c.visibleCache = items
 	return items
 }
 
-func (c *content) contentsForCategory(category Row, visible []Row) []Row {
+func (c *content) contentsForCategory(category Row) []Row {
+	if c.categoryCache == nil {
+		c.categoryCache = make(map[int][]Row)
+	}
+	id := category.n("id")
+	if v, ok := c.categoryCache[id]; ok {
+		return v
+	}
 	items := make([]Row, 0)
-	for _, item := range visible {
+	for _, item := range c.visibleContents() {
 		if c.under(item.n("category_id"), category.n("id")) {
 			items = append(items, item)
 		}
 	}
+	c.categoryCache[id] = items
 	return items
 }
 
 func (c *content) listContext(view Row) (category Row, pageItems []Row, page, pages, pageSize, total int) {
 	category = c.cat(view.n("category_id"))
-	allItems := c.contentsForCategory(category, c.visibleContents())
+	allItems := c.contentsForCategory(category)
 	total = len(allItems)
 	pageSize = view.n("list_page_size")
 	if pageSize < 1 {
@@ -1279,6 +1319,9 @@ func (c *content) listChildren(view Row) []ListCategory {
 }
 
 func (c *content) catalogCategories() []ListCategory {
+	if c.catalogCache != nil {
+		return c.catalogCache
+	}
 	collection := c.categoryCollectionKey(c.rootCategory())
 	items := make([]ListCategory, 0)
 	for _, category := range c.tables["gocms_category"] {
@@ -1293,25 +1336,33 @@ func (c *content) catalogCategories() []ListCategory {
 	for index := range items {
 		items[index].Last = index+1 == len(items)
 	}
+	c.catalogCache = items
 	return items
 }
 
 func (c *content) children(parentID int) []Row {
-	children := make([]Row, 0)
-	for _, category := range c.tables["gocms_category"] {
-		if category.n("parent_id") == parentID {
-			children = append(children, category)
+	if c.childrenCache == nil {
+		c.childrenCache = make(map[int][]Row)
+		for _, category := range c.tables["gocms_category"] {
+			id := category.n("parent_id")
+			c.childrenCache[id] = append(c.childrenCache[id], category)
+		}
+		for _, children := range c.childrenCache {
+			sortRows(children, "order_id", true)
 		}
 	}
-	sortRows(children, "order_id", true)
-	return children
+	return c.childrenCache[parentID]
 }
 
 func (c *content) navigation() []NavigationItem {
+	if c.navigationCache != nil {
+		return c.navigationCache
+	}
 	items := make([]NavigationItem, 0)
 	for _, category := range c.children(0) {
 		items = append(items, c.navigationItem(category))
 	}
+	c.navigationCache = items
 	return items
 }
 
@@ -1559,29 +1610,26 @@ func (c *content) buildForLang() error {
 	}
 
 	visible := c.visibleContents()
+	byCategory := make(map[int][]Row)
+	positions := make(map[int]int)
+	for _, item := range visible {
+		positions[item.n("id")] = len(byCategory[item.n("category_id")])
+		byCategory[item.n("category_id")] = append(byCategory[item.n("category_id")], item)
+	}
 	for _, item := range visible {
 		category := c.cat(item.n("category_id"))
 		view := c.contentView(item)
 		view["previous_url"], view["previous_title"] = "", ""
 		view["next_url"], view["next_title"] = "", ""
-		sameCategory := make([]Row, 0)
-		for _, candidate := range visible {
-			if candidate.n("category_id") == item.n("category_id") {
-				sameCategory = append(sameCategory, candidate)
-			}
+		sameCategory := byCategory[item.n("category_id")]
+		index := positions[item.n("id")]
+		if index > 0 {
+			view["previous_url"] = esc(c.contentURL(sameCategory[index-1]))
+			view["previous_title"] = esc(sameCategory[index-1]["title"])
 		}
-		for index, candidate := range sameCategory {
-			if candidate.n("id") != item.n("id") {
-				continue
-			}
-			if index > 0 {
-				view["previous_url"] = esc(c.contentURL(sameCategory[index-1]))
-				view["previous_title"] = esc(sameCategory[index-1]["title"])
-			}
-			if index+1 < len(sameCategory) {
-				view["next_url"] = esc(c.contentURL(sameCategory[index+1]))
-				view["next_title"] = esc(sameCategory[index+1]["title"])
-			}
+		if index+1 < len(sameCategory) {
+			view["next_url"] = esc(c.contentURL(sameCategory[index+1]))
+			view["next_title"] = esc(sameCategory[index+1]["title"])
 		}
 		if err := c.pageTemplate(strings.TrimPrefix(c.contentURL(item), "/"), c.categoryDetailTemplate(category), view); err != nil {
 			return err
@@ -1589,7 +1637,7 @@ func (c *content) buildForLang() error {
 	}
 
 	for _, category := range c.tables["gocms_category"] {
-		items := c.contentsForCategory(category, visible)
+		items := c.contentsForCategory(category)
 		pageSize := c.categoryPageSize(category)
 		if c.categoryPageType(category) == routing.PageTypeCover {
 			view := c.categoryView(category, items, 1, pageSize)

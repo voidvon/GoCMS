@@ -103,6 +103,15 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 		t.Fatalf("unexpected cover output: %s", coverBody)
 	}
 
+	guide := readGenerated(t, web, "llms.txt")
+	for _, want := range []string{"/entries/second.html", "/sections/1-2.html", "/landing/index.html"} {
+		if !strings.Contains(guide, want) {
+			t.Fatalf("llms missing %s", want)
+		}
+	}
+	if strings.Contains(guide, "hidden.html") {
+		t.Fatal("llms exposes hidden content")
+	}
 	before := readGenerated(t, web, "index.html")
 	writeTemplate(t, templates, "index.html", `{{unknownFunction .}}`)
 	if _, err := publisher.Generate(ctx); err == nil {
@@ -110,6 +119,9 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 	}
 	if after := readGenerated(t, web, "index.html"); after != before {
 		t.Fatal("failed publication changed the live site")
+	}
+	if readGenerated(t, web, "llms.txt") != guide {
+		t.Fatal("failed publication changed llms.txt")
 	}
 }
 
@@ -316,7 +328,7 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 	}
 
 	templates := filepath.Join(t.TempDir(), "templates")
-	writeTemplate(t, templates, "index.html", `site={{setting "site_name"}} lang={{currentLang}} langs={{range languages .}}{{.Code}}:{{.URL}};{{end}}`)
+	writeTemplate(t, templates, "index.html", `site={{setting "site_name"}} lang={{currentLang}} langs={{range languages .}}{{.Code}}:{{.URL}};{{end}} nav={{range navigation .}}{{.Name}}={{.URL}};{{end}} catalog={{range catalogCategories .}}{{.Name}}={{.URL}};{{end}}`)
 	writeTemplate(t, templates, "msg.html", `msg lang={{currentLang}}`)
 	writeTemplate(t, templates, "search.html", `search lang={{currentLang}}`)
 	writeTemplate(t, templates, "lists/news.html", `cat={{.category_name}} items={{range listItems .}}{{.Title}}={{.URL}};{{end}}`)
@@ -338,6 +350,11 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 	if !strings.Contains(zhHome, "lang=zh-CN") || !strings.Contains(zhHome, "zh-CN:/;") || !strings.Contains(zhHome, "en:/en/;") {
 		t.Fatalf("unexpected zh home: %s", zhHome)
 	}
+	for _, fragment := range []string{"nav=中文新闻=/news/1.html;", "catalog=中文新闻=/news/1.html;"} {
+		if !strings.Contains(zhHome, fragment) {
+			t.Fatalf("missing %q in %s", fragment, zhHome)
+		}
+	}
 	zhList := readGenerated(t, web, "news/1.html")
 	if !strings.Contains(zhList, "cat=中文新闻") || !strings.Contains(zhList, "第一篇中文=/news/first.html;") {
 		t.Fatalf("unexpected zh list: %s", zhList)
@@ -352,6 +369,11 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 	if !strings.Contains(enHome, "lang=en") || !strings.Contains(enHome, "zh-CN:/;") || !strings.Contains(enHome, "en:/en/;") {
 		t.Fatalf("unexpected en home: %s", enHome)
 	}
+	for _, fragment := range []string{"nav=English News=/en/news/1.html;", "catalog=English News=/en/news/1.html;"} {
+		if !strings.Contains(enHome, fragment) {
+			t.Fatalf("missing %q in %s", fragment, enHome)
+		}
+	}
 	enList := readGenerated(t, web, "en/news/1.html")
 	// Content 10 has translation "First English Title", Content 11 fell back to "第二篇中文"
 	if !strings.Contains(enList, "cat=English News") || !strings.Contains(enList, "First English Title=/en/news/first.html;") || !strings.Contains(enList, "第二篇中文=/en/news/second.html;") {
@@ -362,10 +384,13 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 		t.Fatalf("unexpected en detail: %s", enDetail)
 	}
 
+	guide := readGenerated(t, web, "llms.txt")
+	if !strings.Contains(guide, "https://example.test/news/first.html") || !strings.Contains(guide, "https://example.test/en/news/first.html") {
+		t.Fatalf("unexpected multilingual llms: %s", guide)
+	}
 	// 3. Verify sitemap has both languages
 	sitemap := readGenerated(t, web, "Sitemap.xml")
 	if !strings.Contains(sitemap, "https://example.test/news/first.html") || !strings.Contains(sitemap, "https://example.test/en/news/first.html") {
 		t.Fatalf("unexpected sitemap: %s", sitemap)
 	}
 }
-

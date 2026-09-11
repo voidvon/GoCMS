@@ -19,22 +19,22 @@ import (
 )
 
 type Server struct {
-	database     *sql.DB
-	siteRoot     string
-	fileServe    http.Handler
+	database         *sql.DB
+	siteRoot         string
+	fileServe        http.Handler
 	frontendRoot     string
 	frontendFS       fs.FS
 	frontendDevProxy http.Handler
 	assetsRoot       string
-	themeRoot    string
-	templateRoot string
-	themeBase    string
-	themeData    string
-	activeTheme  theme.Definition
-	themeMu      sync.RWMutex
-	publication  *publication
-	updateMu     sync.Mutex
-	updateActive bool
+	themeRoot        string
+	templateRoot     string
+	themeBase        string
+	themeData        string
+	activeTheme      theme.Definition
+	themeMu          sync.RWMutex
+	publication      *publication
+	updateMu         sync.Mutex
+	updateActive     bool
 }
 
 func New(database *sql.DB, siteRoot string) (*Server, error) {
@@ -90,6 +90,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminUpdate(response, request)
 	case "/api/admin/publish":
 		s.adminPublish(response, request)
+	case "/api/admin/publish/llms":
+		s.adminLLMS(response, request)
 	case "/api/admin/publish/sitemap":
 		s.adminSitemap(response, request)
 	case "/api/health":

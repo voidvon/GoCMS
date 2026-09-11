@@ -87,6 +87,7 @@ export function SearchField({
 }
 
 type TablePaginationProps = {
+  className?: string
   page: number
   totalPages: number
   total: number
@@ -96,6 +97,7 @@ type TablePaginationProps = {
 }
 
 export function TablePagination({
+  className,
   page,
   totalPages,
   total,
@@ -104,7 +106,7 @@ export function TablePagination({
   onPageChange,
 }: TablePaginationProps) {
   return (
-    <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className={cn("flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between", className)}>
       <p className="text-xs text-muted-foreground">
         {total.toLocaleString("zh-CN")} 条记录 · 每页 {pageSize} 条
       </p>

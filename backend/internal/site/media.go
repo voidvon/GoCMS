@@ -95,7 +95,15 @@ func (s *Server) adminMediaItem(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	if request.Method == http.MethodGet {
-		writeJSON(response, http.StatusOK, asset)
+		references, err := s.readMediaReferences(request.Context(), id)
+		if err != nil {
+			http.Error(response, "读取附件引用失败", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(response, http.StatusOK, struct {
+			MediaAsset
+			References []MediaReference `json:"references"`
+		}{asset, references})
 		return
 	}
 	s.deleteMedia(response, request, asset)
@@ -464,4 +472,32 @@ func normalizeMediaURL(value string) string {
 		return ""
 	}
 	return imagePath
+}
+
+// MediaReference identifies a recorded content field using an asset.
+type MediaReference struct {
+	ContentID int64  `json:"content_id"`
+	Title     string `json:"title"`
+	FieldName string `json:"field_name"`
+}
+
+func (s *Server) readMediaReferences(ctx context.Context, id int64) ([]MediaReference, error) {
+	rows, err := s.database.QueryContext(ctx, `
+ SELECT ref."content_id", COALESCE(content."title", ''), ref."field_name"
+ FROM "gocms_media_ref" AS ref
+ LEFT JOIN "gocms_content" AS content ON content."id" = ref."content_id"
+ WHERE ref."media_id" = ? ORDER BY ref."content_id", ref."field_name"`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	references := make([]MediaReference, 0)
+	for rows.Next() {
+		var reference MediaReference
+		if err := rows.Scan(&reference.ContentID, &reference.Title, &reference.FieldName); err != nil {
+			return nil, err
+		}
+		references = append(references, reference)
+	}
+	return references, rows.Err()
 }
