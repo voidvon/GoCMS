@@ -3,6 +3,7 @@ package legacyimport
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"html"
 	"net/url"
@@ -172,6 +173,9 @@ func migrateRows(ctx context.Context, database *sql.DB) error {
 	if err := importAdmins(ctx, transaction, adminRows); err != nil {
 		return err
 	}
+	if err := EnsureLegacyModelFields(ctx, database); err != nil {
+		return err
+	}
 
 	if err := transaction.Commit(); err != nil {
 		return fmt.Errorf("commit data migration: %w", err)
@@ -260,17 +264,19 @@ func importCategories(ctx context.Context, transaction *sql.Tx, source categoryS
 		}
 		listPath, detailPath, pageSize := categoryRoutes(source, row, rows)
 		detailTemplate := "content_detail.html"
+		modelID := int64(1)
 		if source == productCategories {
 			detailTemplate = "product_detail.html"
+			modelID = 2
 		}
 		resultID, err := transaction.ExecContext(ctx, `
 			INSERT INTO "gocms_category"
 			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id",
 			 "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path",
-			 "detail_file_pattern", "detail_template", "keywords", "description", "cover_content")
-			VALUES (?, 0, ?, ?, 'list', ?, ?, '{id}.html', 'category_list.html', '', ?, '{id}.html', ?, ?, ?, '')`,
+			 "detail_file_pattern", "detail_template", "keywords", "description", "cover_content", "model_id")
+			VALUES (?, 0, ?, ?, 'list', ?, ?, '{id}.html', 'category_list.html', '', ?, '{id}.html', ?, ?, ?, '', ?)`,
 			row.text("CatName", "coname"), row.number("Orderid", "ORderID", "orderid"), pageSize, oldID,
-			listPath, detailPath, detailTemplate, row.text("key"), normalizeImageText(row.text("desc"), publicHost))
+			listPath, detailPath, detailTemplate, row.text("key"), normalizeImageText(row.text("desc"), publicHost), modelID)
 		if err != nil {
 			return nil, fmt.Errorf("import %s category %d: %w", source, oldID, err)
 		}
@@ -355,18 +361,30 @@ func importProductContent(ctx context.Context, transaction *sql.Tx, rows []sourc
 		if strings.Contains(strings.ToLower(strings.TrimSpace(image)), "/skin/dfpic.gif") || strings.EqualFold(strings.TrimSpace(image), "skin/dfpic.gif") {
 			image = ""
 		}
+		code := row.text("prodCode")
+		summary := normalizeImageText(row.text("remark"), publicHost)
+		extra := extractLegacyProductParameters(code, summary)
+		extraData := "{}"
+		if len(extra) > 0 {
+			if b, err := json.Marshal(extra); err == nil {
+				extraData = string(b)
+			}
+		}
+
 		contentID, err := insertContent(ctx, transaction, contentInput{
 			CategoryID: categories[row.number("CatId")],
 			RouteKey:   strconv.FormatInt(row.number("id"), 10),
 			Title:      row.text("prodName"),
-			Code:       row.text("prodCode"),
-			Summary:    normalizeImageText(row.text("remark"), publicHost),
+			Code:       code,
+			Summary:    summary,
 			Body:       normalizeImageText(row.text("itemize"), publicHost),
 			Image:      normalizeImageText(image, publicHost),
 			Keywords:   row.text("key"),
 			OrderID:    row.number("orderid"),
 			Featured:   flagValue(row.number("tjhome")),
 			Visible:    flagValue(row.number("show")),
+			ModelID:    2,
+			ExtraData:  extraData,
 		})
 		if err != nil {
 			return fmt.Errorf("import product content %d: %w", row.number("id"), err)
@@ -392,6 +410,7 @@ func importArticleContent(ctx context.Context, transaction *sql.Tx, rows []sourc
 			OrderID:     row.number("newsid"),
 			Featured:    flagValue(row.number("tjhome")),
 			Visible:     1,
+			ModelID:     1,
 		})
 		if err != nil {
 			return fmt.Errorf("import article content %d: %w", row.number("newsid"), err)
@@ -424,6 +443,7 @@ func importJobContent(ctx context.Context, transaction *sql.Tx, rows []sourceRow
 			Source:     row.text("linkren"),
 			Code:       row.text("phone"),
 			Visible:    flagValue(row.number("state")),
+			ModelID:    1,
 		})
 		if err != nil {
 			return fmt.Errorf("import job content %d: %w", row.number("id"), err)
@@ -448,15 +468,25 @@ type contentInput struct {
 	OrderID     int64
 	Featured    int64
 	Visible     int64
+	ModelID     int64
+	ExtraData   string
 }
 
 func insertContent(ctx context.Context, transaction *sql.Tx, item contentInput) (int64, error) {
+	modelID := item.ModelID
+	if modelID <= 0 {
+		modelID = 1
+	}
+	extraData := item.ExtraData
+	if extraData == "" {
+		extraData = "{}"
+	}
 	result, err := transaction.ExecContext(ctx, `
 		INSERT INTO "gocms_content"
-		("category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "keywords", "description", "sort_order", "featured", "visible")
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		("category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "keywords", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.CategoryID, item.RouteKey, item.Title, item.Code, item.Summary, item.Body, item.Image, item.Published,
-		item.Source, item.Keywords, item.Description, item.OrderID, item.Featured, item.Visible)
+		item.Source, item.Keywords, item.Description, item.OrderID, item.Featured, item.Visible, modelID, extraData)
 	if err != nil {
 		return 0, err
 	}
@@ -612,4 +642,105 @@ func normalizeImageText(value, publicHost string) string {
 		parsed.Path = "/images/" + filename
 		return parsed.String()
 	})
+}
+
+var (
+	reLegacySpec        = regexp.MustCompile(`(?:型号|规格)[：:\s]+([^，,；;\s\n\r]+)`)
+	reLegacyCaliber     = regexp.MustCompile(`(?:口径|通径)[：:\s]+([^，,；;\s\n\r]+)`)
+	reLegacyMaterial    = regexp.MustCompile(`(?:材质|阀体材质)[：:\s]+([^，,；;\s\n\r]+)`)
+	reLegacyPressure    = regexp.MustCompile(`(?:压力|公称压力)[：:\s]+([^，,；;\s\n\r]+)`)
+	reLegacyTemperature = regexp.MustCompile(`(?:温度|适用温度|工作温度)[：:\s]+([^，,；;\s\n\r]+)`)
+	reLegacyMedium      = regexp.MustCompile(`(?:介质|适用介质)[：:\s]+([^，,；;\s\n\r]+)`)
+)
+
+func cleanLegacyParam(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Trim(s, "，,。;；:：")
+	return s
+}
+
+func extractLegacyProductParameters(code, summary string) map[string]string {
+	extra := make(map[string]string)
+	if m := reLegacySpec.FindStringSubmatch(summary); len(m) > 1 {
+		extra["spec"] = cleanLegacyParam(m[1])
+	} else if strings.TrimSpace(code) != "" {
+		extra["spec"] = strings.TrimSpace(code)
+	}
+
+	if m := reLegacyCaliber.FindStringSubmatch(summary); len(m) > 1 {
+		extra["caliber"] = cleanLegacyParam(m[1])
+	}
+	if m := reLegacyMaterial.FindStringSubmatch(summary); len(m) > 1 {
+		extra["material"] = cleanLegacyParam(m[1])
+	}
+	if m := reLegacyPressure.FindStringSubmatch(summary); len(m) > 1 {
+		extra["pressure"] = cleanLegacyParam(m[1])
+	}
+	if m := reLegacyTemperature.FindStringSubmatch(summary); len(m) > 1 {
+		extra["temperature"] = cleanLegacyParam(m[1])
+	}
+	if m := reLegacyMedium.FindStringSubmatch(summary); len(m) > 1 {
+		extra["medium"] = cleanLegacyParam(m[1])
+	}
+	return extra
+}
+
+func EnsureLegacyModelFields(ctx context.Context, database *sql.DB) error {
+	var tableID int64
+	err := database.QueryRowContext(ctx, `SELECT "id" FROM "gocms_model_table" WHERE "table_name" = 'product'`).Scan(&tableID)
+	if err != nil {
+		return nil
+	}
+
+	fields := []struct {
+		name      string
+		label     string
+		fieldType string
+		options   string
+		desc      string
+		order     int
+	}{
+		{"spec", "规格型号", "text", "", "如 ANSI 150LB~600LB, Z41H系列等", 100},
+		{"material", "阀体材质", "select", "铸钢==铸钢\n不锈钢==不锈钢\n球墨铸铁==球墨铸铁\n铸铁==铸铁\n黄铜==黄铜\n合金钢==合金钢\n锻钢==锻钢\nPVC/塑料==PVC/塑料", "阀门阀体及关键部件材质", 110},
+		{"pressure", "公称压力", "select", "PN1.6MPa==PN1.6MPa\nPN2.5MPa==PN2.5MPa\nPN4.0MPa==PN4.0MPa\nPN6.4MPa==PN6.4MPa\nPN10.0MPa==PN10.0MPa\n150LB==150LB\n300LB==300LB\n600LB==600LB\n10K==10K\n20K==20K", "公称工作压力等级", 120},
+		{"caliber", "公称通径", "text", "", "如 DN15~DN600, 1/2\"~24\"", 130},
+		{"temperature", "适用温度", "text", "", "如 -20℃~425℃", 140},
+		{"medium", "适用介质", "text", "", "如 水、蒸汽、油品、气体、腐蚀性介质等", 150},
+	}
+
+	for _, f := range fields {
+		_, _ = database.ExecContext(ctx, `
+			INSERT OR IGNORE INTO "gocms_model_field" ("table_id", "field_name", "field_label", "field_type", "field_options", "description", "sort_order", "is_system")
+			VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+			tableID, f.name, f.label, f.fieldType, f.options, f.desc, f.order)
+	}
+
+	var modelID int64
+	if err := database.QueryRowContext(ctx, `SELECT "id" FROM "gocms_model" WHERE "table_id" = ? AND "name" = '产品系统模型'`, tableID).Scan(&modelID); err == nil {
+		var existingEntryFields string
+		if err := database.QueryRowContext(ctx, `SELECT "entry_fields" FROM "gocms_model" WHERE "id" = ?`, modelID).Scan(&existingEntryFields); err == nil {
+			var items []map[string]string
+			_ = json.Unmarshal([]byte(existingEntryFields), &items)
+			hasField := func(f string) bool {
+				for _, item := range items {
+					if item["field"] == f {
+						return true
+					}
+				}
+				return false
+			}
+			added := false
+			for _, f := range fields {
+				if !hasField(f.name) {
+					items = append(items, map[string]string{"field": f.name, "label": f.label})
+					added = true
+				}
+			}
+			if added {
+				updatedJSON, _ := json.Marshal(items)
+				_, _ = database.ExecContext(ctx, `UPDATE "gocms_model" SET "entry_fields" = ? WHERE "id" = ?`, string(updatedJSON), modelID)
+			}
+		}
+	}
+	return nil
 }

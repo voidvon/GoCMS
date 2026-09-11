@@ -170,6 +170,16 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		return
 	}
 	payload.Title = strings.TrimSpace(payload.Title)
+	if payload.Title == "" && payload.Translations != nil {
+		defaultLang, _ := s.getDefaultAndFallbackLang(request.Context())
+		if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Title) != "" {
+			payload.Title = strings.TrimSpace(def.Title)
+			payload.Summary = def.Summary
+			payload.Content = def.Content
+			payload.Keywords = def.Keywords
+			payload.Description = def.Description
+		}
+	}
 	if payload.Title == "" {
 		http.Error(response, "content title is required", http.StatusBadRequest)
 		return

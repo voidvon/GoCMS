@@ -3,6 +3,7 @@ package legacyimport
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -120,9 +121,69 @@ func MigrateExistingSettings(ctx context.Context, database *sql.DB) error {
 			}
 		}
 	}
+	if err := migrateLegacyCategoriesAndProducts(ctx, transaction); err != nil {
+		return err
+	}
 	if err := transaction.Commit(); err != nil {
 		return fmt.Errorf("commit settings migration: %w", err)
 	}
+	_ = EnsureLegacyModelFields(ctx, database)
+	return nil
+}
+
+func migrateLegacyCategoriesAndProducts(ctx context.Context, transaction *sql.Tx) error {
+	var productModelID int64
+	_ = transaction.QueryRowContext(ctx, `SELECT "id" FROM "gocms_model" WHERE "name" = '产品系统模型'`).Scan(&productModelID)
+	if productModelID <= 0 {
+		return nil
+	}
+
+	_, _ = transaction.ExecContext(ctx, `
+		UPDATE "gocms_category"
+		SET "model_id" = ?
+		WHERE "list_path" IN ('valve', 'Products') AND "model_id" != ?`,
+		productModelID, productModelID)
+
+	_, _ = transaction.ExecContext(ctx, `
+		UPDATE "gocms_content"
+		SET "model_id" = ?
+		WHERE "category_id" IN (SELECT "id" FROM "gocms_category" WHERE "model_id" = ?)
+		  AND "model_id" != ?`,
+		productModelID, productModelID, productModelID)
+
+	rows, err := transaction.QueryContext(ctx, `
+		SELECT "id", "code", "summary"
+		FROM "gocms_content"
+		WHERE "model_id" = ? AND ("extra_data" = '' OR "extra_data" = '{}' OR "extra_data" IS NULL)`,
+		productModelID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	type itemUpdate struct {
+		id   int64
+		data string
+	}
+	var updates []itemUpdate
+	for rows.Next() {
+		var id int64
+		var code, summary string
+		if err := rows.Scan(&id, &code, &summary); err == nil {
+			extra := extractLegacyProductParameters(code, summary)
+			if len(extra) > 0 {
+				if b, err := json.Marshal(extra); err == nil {
+					updates = append(updates, itemUpdate{id: id, data: string(b)})
+				}
+			}
+		}
+	}
+	_ = rows.Close()
+
+	for _, u := range updates {
+		_, _ = transaction.ExecContext(ctx, `UPDATE "gocms_content" SET "extra_data" = ? WHERE "id" = ?`, u.data, u.id)
+	}
+
 	return nil
 }
 

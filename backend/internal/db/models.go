@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -102,25 +101,32 @@ func seedDefaultModels(ctx context.Context, database *sql.DB) error {
 	return nil
 }
 
-// MigrateCategoryAndContentModels aligns existing categories and contents to their appropriate models.
+// MigrateCategoryAndContentModels ensures existing categories and contents have valid model assignments.
 func MigrateCategoryAndContentModels(ctx context.Context, database *sql.DB) error {
-	if !tableExists(ctx, database, "gocms_category") || !tableExists(ctx, database, "gocms_content") || !tableExists(ctx, database, ModelTable) {
+	if !tableExists(ctx, database, "gocms_category") || !tableExists(ctx, database, "gocms_content") {
 		return nil
 	}
 
-	var articleModelID int64
-	_ = database.QueryRowContext(ctx, `SELECT "id" FROM "`+ModelTable+`" WHERE "name" = '文章系统模型'`).Scan(&articleModelID)
-	if articleModelID == 0 {
-		articleModelID = 1
+	// Ensure any category with invalid model_id is set to default model (1)
+	if _, err := database.ExecContext(ctx, `
+		UPDATE "gocms_category"
+		SET "model_id" = 1
+		WHERE "model_id" <= 0 OR "model_id" IS NULL`); err != nil {
+		return fmt.Errorf("align category default model: %w", err)
 	}
 
-	var productModelID int64
-	_ = database.QueryRowContext(ctx, `SELECT "id" FROM "`+ModelTable+`" WHERE "name" = '产品系统模型'`).Scan(&productModelID)
-	if productModelID == 0 {
-		return nil
+	// Ensure any content with invalid model_id inherits from its category or defaults to 1
+	if _, err := database.ExecContext(ctx, `
+		UPDATE "gocms_content"
+		SET "model_id" = COALESCE(
+			(SELECT "c"."model_id" FROM "gocms_category" "c" WHERE "c"."id" = "gocms_content"."category_id"),
+			1
+		)
+		WHERE "model_id" <= 0 OR "model_id" IS NULL`); err != nil {
+		return fmt.Errorf("align content model_id: %w", err)
 	}
 
-	return ensureCategoryAndContentModels(ctx, database, articleModelID, productModelID)
+	return nil
 }
 
 func tableExists(ctx context.Context, database *sql.DB, tableName string) bool {
@@ -235,7 +241,7 @@ func ensureProductModel(ctx context.Context, database *sql.DB, now string) (int6
 	if err == sql.ErrNoRows {
 		res, err := database.ExecContext(ctx, `
 			INSERT INTO "`+ModelTableTable+`" ("table_name", "name", "description", "is_default", "created_at")
-			VALUES ('product', '产品数据表', '用于机械、阀门、工业品等产品展示与技术参数管理', 0, ?)`, now)
+			VALUES ('product', '产品数据表', '系统默认产品与商品数据表', 0, ?)`, now)
 		if err != nil {
 			return 0, fmt.Errorf("seed product table: %w", err)
 		}
@@ -260,20 +266,14 @@ func ensureProductModel(ctx context.Context, database *sql.DB, now string) (int6
 	fields := []fieldDef{
 		{"title", "产品名称", "text", "", "产品名称或信息标题，必填", 10, 1},
 		{"code", "产品型号", "text", "", "产品型号或统一编号", 20, 1},
+		{"price", "参考价格", "text", "", "产品参考价格或指导价", 25, 0},
 		{"summary", "产品简介", "textarea", "", "产品简要概述", 30, 1},
-		{"body", "详细说明", "editor", "", "详细技术图纸与规格说明", 40, 1},
+		{"body", "详细说明", "editor", "", "详细规格说明与图文介绍", 40, 1},
 		{"cover_image", "产品图片", "image", "", "产品主图或外观展示图", 50, 1},
-		{"published_at", "发布时间", "date", "", "发布或更新时间", 60, 1},
-		{"keywords", "关键词", "text", "", "页面SEO关键词", 70, 1},
-		{"description", "描述", "textarea", "", "页面SEO描述", 80, 1},
-		// Product extension fields
-		{"spec", "规格型号", "text", "", "如 ANSI 150LB~600LB, Z41H系列等", 100, 0},
-		{"material", "阀体材质", "select", "铸钢==铸钢\n不锈钢==不锈钢\n球墨铸铁==球墨铸铁\n铸铁==铸铁\n黄铜==黄铜\n合金钢==合金钢\n锻钢==锻钢\nPVC/塑料==PVC/塑料", "阀门阀体及关键部件材质", 110, 0},
-		{"pressure", "公称压力", "select", "PN1.6MPa==PN1.6MPa\nPN2.5MPa==PN2.5MPa\nPN4.0MPa==PN4.0MPa\nPN6.4MPa==PN6.4MPa\nPN10.0MPa==PN10.0MPa\n150LB==150LB\n300LB==300LB\n600LB==600LB\n10K==10K\n20K==20K", "公称工作压力等级", 120, 0},
-		{"caliber", "公称通径", "text", "", "如 DN15~DN600, 1/2\"~24\"", 130, 0},
-		{"temperature", "适用温度", "text", "", "如 -20℃~425℃", 140, 0},
-		{"medium", "适用介质", "text", "", "如 水、蒸汽、油品、气体、腐蚀性介质等", 150, 0},
-		{"photo_list", "产品图集", "morepic", "", "产品多角度细节实拍与技术图纸", 160, 0},
+		{"photo_list", "产品图集", "morepic", "", "产品多角度细节实拍与图集展示", 60, 0},
+		{"published_at", "发布时间", "date", "", "发布或更新时间", 70, 1},
+		{"keywords", "关键词", "text", "", "页面SEO关键词", 80, 1},
+		{"description", "描述", "textarea", "", "页面SEO描述", 90, 1},
 	}
 
 	for _, f := range fields {
@@ -291,12 +291,7 @@ func ensureProductModel(ctx context.Context, database *sql.DB, now string) (int6
 		entryFieldsJSON, _ := json.Marshal([]map[string]string{
 			{"field": "title", "label": "产品名称"},
 			{"field": "code", "label": "产品型号"},
-			{"field": "spec", "label": "规格型号"},
-			{"field": "material", "label": "阀体材质"},
-			{"field": "pressure", "label": "公称压力"},
-			{"field": "caliber", "label": "公称通径"},
-			{"field": "temperature", "label": "适用温度"},
-			{"field": "medium", "label": "适用介质"},
+			{"field": "price", "label": "参考价格"},
 			{"field": "summary", "label": "产品简介"},
 			{"field": "cover_image", "label": "产品图片"},
 			{"field": "photo_list", "label": "产品图集"},
@@ -309,7 +304,7 @@ func ensureProductModel(ctx context.Context, database *sql.DB, now string) (int6
 
 		res, err := database.ExecContext(ctx, `
 			INSERT INTO "`+ModelTable+`" ("name", "table_id", "description", "entry_fields", "must_fields", "is_default", "sort_order", "created_at")
-			VALUES ('产品系统模型', ?, '标准工业品及阀门系统模型，内置规格、材质、压力、通径、温度等技术参数', ?, ?, 0, 20, ?)`,
+			VALUES ('产品系统模型', ?, '系统默认产品模型，包含型号、图集、详细说明等通用参数', ?, ?, 0, 20, ?)`,
 			tableID, string(entryFieldsJSON), string(mustFieldsJSON), now)
 		if err != nil {
 			return 0, fmt.Errorf("seed product model: %w", err)
@@ -320,150 +315,9 @@ func ensureProductModel(ctx context.Context, database *sql.DB, now string) (int6
 		}
 	} else if err != nil {
 		return 0, fmt.Errorf("query product model: %w", err)
-	} else {
-		// Ensure photo_list is in entry_fields for existing product model
-		var existingEntryFields string
-		if err := database.QueryRowContext(ctx, `SELECT "entry_fields" FROM "`+ModelTable+`" WHERE "id" = ?`, modelID).Scan(&existingEntryFields); err == nil {
-			if !strings.Contains(existingEntryFields, `"photo_list"`) {
-				var items []map[string]string
-				if err := json.Unmarshal([]byte(existingEntryFields), &items); err == nil {
-					items = append(items, map[string]string{"field": "photo_list", "label": "产品图集"})
-					updatedJSON, _ := json.Marshal(items)
-					_, _ = database.ExecContext(ctx, `UPDATE "`+ModelTable+`" SET "entry_fields" = ? WHERE "id" = ?`, string(updatedJSON), modelID)
-				}
-			}
-		}
 	}
 
 	return modelID, nil
-}
-
-func ensureCategoryAndContentModels(ctx context.Context, database *sql.DB, articleModelID, productModelID int64) error {
-	// 1. Bind product categories (valve, Products) to productModelID
-	if _, err := database.ExecContext(ctx, `
-		UPDATE "gocms_category"
-		SET "model_id" = ?
-		WHERE "list_path" IN ('valve', 'Products') AND "model_id" != ?`,
-		productModelID, productModelID); err != nil {
-		return fmt.Errorf("bind product categories: %w", err)
-	}
-
-	// 2. Bind article categories (news, service, about) to articleModelID
-	if _, err := database.ExecContext(ctx, `
-		UPDATE "gocms_category"
-		SET "model_id" = ?
-		WHERE "list_path" IN ('news', 'service', 'about', '') AND "model_id" != ?`,
-		articleModelID, articleModelID); err != nil {
-		return fmt.Errorf("bind article categories: %w", err)
-	}
-
-	// 3. Align content model_id with its category model_id
-	if _, err := database.ExecContext(ctx, `
-		UPDATE "gocms_content"
-		SET "model_id" = (
-			SELECT "c"."model_id" FROM "gocms_category" "c" WHERE "c"."id" = "gocms_content"."category_id"
-		)
-		WHERE "category_id" IN (SELECT "id" FROM "gocms_category")
-		  AND "model_id" != (
-			SELECT "c"."model_id" FROM "gocms_category" "c" WHERE "c"."id" = "gocms_content"."category_id"
-		  )`); err != nil {
-		return fmt.Errorf("align content model_id: %w", err)
-	}
-
-	// 4. Extract structured parameters for legacy product contents
-	if err := extractLegacyProductParameters(ctx, database, productModelID); err != nil {
-		return fmt.Errorf("extract legacy product parameters: %w", err)
-	}
-
-	return nil
-}
-
-var (
-	reSpec        = regexp.MustCompile(`(?:型号|规格)[：:\s]+([^，,；;\s\n\r]+)`)
-	reCaliber     = regexp.MustCompile(`(?:口径|通径)[：:\s]+([^，,；;\s\n\r]+)`)
-	reMaterial    = regexp.MustCompile(`(?:材质|阀体材质)[：:\s]+([^，,；;\s\n\r]+)`)
-	rePressure    = regexp.MustCompile(`(?:压力|公称压力)[：:\s]+([^，,；;\s\n\r]+)`)
-	reTemperature = regexp.MustCompile(`(?:温度|适用温度|工作温度)[：:\s]+([^，,；;\s\n\r]+)`)
-	reMedium      = regexp.MustCompile(`(?:介质|适用介质)[：:\s]+([^，,；;\s\n\r]+)`)
-)
-
-func cleanParam(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.Trim(s, "，,。;；:：")
-	return s
-}
-
-func extractLegacyProductParameters(ctx context.Context, database *sql.DB, productModelID int64) error {
-	rows, err := database.QueryContext(ctx, `
-		SELECT "id", "code", "summary"
-		FROM "gocms_content"
-		WHERE "model_id" = ? AND ("extra_data" = '' OR "extra_data" = '{}' OR "extra_data" IS NULL)`,
-		productModelID)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	type itemUpdate struct {
-		id   int64
-		data string
-	}
-	var updates []itemUpdate
-
-	for rows.Next() {
-		var id int64
-		var code, summary string
-		if err := rows.Scan(&id, &code, &summary); err != nil {
-			return err
-		}
-
-		extra := make(map[string]string)
-		if m := reSpec.FindStringSubmatch(summary); len(m) > 1 {
-			extra["spec"] = cleanParam(m[1])
-		} else if strings.TrimSpace(code) != "" {
-			extra["spec"] = strings.TrimSpace(code)
-		}
-
-		if m := reCaliber.FindStringSubmatch(summary); len(m) > 1 {
-			extra["caliber"] = cleanParam(m[1])
-		}
-		if m := reMaterial.FindStringSubmatch(summary); len(m) > 1 {
-			extra["material"] = cleanParam(m[1])
-		}
-		if m := rePressure.FindStringSubmatch(summary); len(m) > 1 {
-			extra["pressure"] = cleanParam(m[1])
-		}
-		if m := reTemperature.FindStringSubmatch(summary); len(m) > 1 {
-			extra["temperature"] = cleanParam(m[1])
-		}
-		if m := reMedium.FindStringSubmatch(summary); len(m) > 1 {
-			extra["medium"] = cleanParam(m[1])
-		}
-
-		if len(extra) > 0 {
-			b, err := json.Marshal(extra)
-			if err == nil {
-				updates = append(updates, itemUpdate{id: id, data: string(b)})
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	stmt, err := database.PrepareContext(ctx, `UPDATE "gocms_content" SET "extra_data" = ? WHERE "id" = ?`)
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-
-	for _, u := range updates {
-		if _, err := stmt.ExecContext(ctx, u.data, u.id); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func ensureModelFieldColumn(ctx context.Context, database *sql.DB, name, definition string) error {

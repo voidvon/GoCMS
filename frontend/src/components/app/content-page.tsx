@@ -13,6 +13,8 @@ import {
   type CategoryItem,
   type Content,
   type ContentInput,
+  type ContentTranslationItem,
+  type Language,
   type MediaAsset,
   type ModelField,
   type SaveResponse,
@@ -28,12 +30,68 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ConfirmDialog, IconButton, InlineAlert, SearchField, TablePagination } from "@/components/app/app-ui"
 import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
 import { RichTextEditor } from "@/components/app/rich-text-editor"
 import { flattenCategoryTree } from "@/lib/category-tree"
+import { cn } from "@/lib/utils"
+
+function buildInitialContentTranslations(
+  content: ContentInput,
+  defaultLang: string,
+  availableLanguages: Array<{ code: string }>,
+): Record<string, ContentTranslationItem> {
+  const source = content.translations || {}
+  const output: Record<string, ContentTranslationItem> = {}
+
+  for (const lang of availableLanguages) {
+    if (source[lang.code]) {
+      output[lang.code] = {
+        title: source[lang.code].title || "",
+        summary: source[lang.code].summary || "",
+        content: source[lang.code].content || "",
+        keywords: source[lang.code].keywords || "",
+        description: source[lang.code].description || "",
+        extra_data: source[lang.code].extra_data || {},
+        publish_status: source[lang.code].publish_status || "published",
+      }
+    } else {
+      output[lang.code] = {
+        title: "",
+        summary: "",
+        content: "",
+        keywords: "",
+        description: "",
+        extra_data: {},
+        publish_status: "published",
+      }
+    }
+  }
+
+  if (!output[defaultLang]) {
+    output[defaultLang] = {
+      title: content.title || "",
+      summary: content.summary || "",
+      content: content.content || "",
+      keywords: content.keywords || "",
+      description: content.description || "",
+      extra_data: content.extra_data || {},
+      publish_status: "published",
+    }
+  } else if (!output[defaultLang].title && content.title) {
+    output[defaultLang].title = content.title
+    output[defaultLang].summary = content.summary || output[defaultLang].summary
+    output[defaultLang].content = content.content || output[defaultLang].content
+    output[defaultLang].keywords = content.keywords || output[defaultLang].keywords
+    output[defaultLang].description = content.description || output[defaultLang].description
+    output[defaultLang].extra_data = { ...(content.extra_data || {}), ...(output[defaultLang].extra_data || {}) }
+  }
+
+  return output
+}
 
 function FieldLabel({
   label,
@@ -623,12 +681,44 @@ function ContentEditor({
   onCancel: () => void
   saving: boolean
 }) {
+  const { languages, defaultLang, fallbackLang } = useLanguage()
+  const enabledLanguages: Language[] = useMemo(() => {
+    const list = languages.filter((l) => l.is_enabled === 1)
+    return list.length > 0
+      ? list
+      : [{ id: 1, code: defaultLang || "zh-CN", name: "默认语言", is_default: 1, is_enabled: 1, is_fallback: 0, sort_order: 0, path_prefix: "" }]
+  }, [languages, defaultLang])
+
+  const [activeTab, setActiveTab] = useState("base")
   const [form, setForm] = useState(content)
+  const [translations, setTranslations] = useState<Record<string, ContentTranslationItem>>(() => {
+    return buildInitialContentTranslations(content, defaultLang, enabledLanguages)
+  })
   const [customError, setCustomError] = useState("")
   const categoryOptions = flattenCategoryTree(categories)
   const [bodyUploading, setBodyUploading] = useState(false)
-  const { activeLang, defaultLang, currentLanguage } = useLanguage()
-  const isMultiLangActive = activeLang !== defaultLang
+
+  useEffect(() => {
+    setTranslations((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const lang of enabledLanguages) {
+        if (!next[lang.code]) {
+          next[lang.code] = {
+            title: "",
+            summary: "",
+            content: "",
+            keywords: "",
+            description: "",
+            extra_data: {},
+            publish_status: "published",
+          }
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [enabledLanguages])
 
   function update<K extends keyof ContentInput>(key: K, value: ContentInput[K]) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -690,7 +780,15 @@ function ContentEditor({
     }))
   }, [currentModel, modelFields])
 
-  function getFieldValue(fieldName: string): any {
+  const baseFields = useMemo(() => {
+    return activeFields.filter((f) => !f.is_translatable)
+  }, [activeFields])
+
+  const translatableFields = useMemo(() => {
+    return activeFields.filter((f) => f.is_translatable)
+  }, [activeFields])
+
+  function getBaseFieldValue(fieldName: string): any {
     if (fieldName === "body" || fieldName === "content") return form.content
     if (fieldName in form && fieldName !== "extra_data") {
       return (form as any)[fieldName] ?? ""
@@ -698,7 +796,7 @@ function ContentEditor({
     return form.extra_data?.[fieldName] ?? ""
   }
 
-  function setFieldValue(fieldName: string, value: any) {
+  function setBaseFieldValue(fieldName: string, value: any) {
     if (fieldName === "body" || fieldName === "content") {
       update("content", value)
     } else if (fieldName in form && fieldName !== "extra_data") {
@@ -708,30 +806,319 @@ function ContentEditor({
     }
   }
 
+  function updateTranslation(langCode: string, patch: Partial<ContentTranslationItem>) {
+    setTranslations((prev) => ({
+      ...prev,
+      [langCode]: {
+        title: "",
+        summary: "",
+        content: "",
+        keywords: "",
+        description: "",
+        extra_data: {},
+        publish_status: "published",
+        ...(prev[langCode] || {}),
+        ...patch,
+      },
+    }))
+  }
+
+  function getTranslationFieldValue(langCode: string, fieldName: string): any {
+    const t = translations[langCode]
+    if (!t) return ""
+    if (fieldName === "title") return t.title || ""
+    if (fieldName === "summary") return t.summary || ""
+    if (fieldName === "body" || fieldName === "content") return t.content || ""
+    if (fieldName === "keywords") return t.keywords || ""
+    if (fieldName === "description") return t.description || ""
+    return t.extra_data?.[fieldName] ?? ""
+  }
+
+  function setTranslationFieldValue(langCode: string, fieldName: string, value: any) {
+    if (fieldName === "title") {
+      updateTranslation(langCode, { title: value })
+    } else if (fieldName === "summary") {
+      updateTranslation(langCode, { summary: value })
+    } else if (fieldName === "body" || fieldName === "content") {
+      updateTranslation(langCode, { content: value })
+    } else if (fieldName === "keywords") {
+      updateTranslation(langCode, { keywords: value })
+    } else if (fieldName === "description") {
+      updateTranslation(langCode, { description: value })
+    } else {
+      setTranslations((prev) => {
+        const cur = prev[langCode] || {
+          title: "",
+          summary: "",
+          content: "",
+          keywords: "",
+          description: "",
+          extra_data: {},
+          publish_status: "published",
+        }
+        return {
+          ...prev,
+          [langCode]: {
+            ...cur,
+            extra_data: {
+              ...(cur.extra_data || {}),
+              [fieldName]: value,
+            },
+          },
+        }
+      })
+    }
+  }
+
+  function renderFieldControl(
+    field: (typeof activeFields)[number],
+    val: any,
+    onChange: (val: any) => void,
+    isRequired: boolean,
+    idPrefix: string,
+    placeholderNote?: string,
+  ) {
+    const inputId = `${idPrefix}-${field.field_name}`
+
+    if (field.field_type === "morepic") {
+      return (
+        <MultiImageField
+          key={field.field_name}
+          field={field}
+          value={val}
+          isRequired={isRequired}
+          onChange={onChange}
+        />
+      )
+    }
+
+    if (field.field_type === "multivalue") {
+      return (
+        <MultiValueField
+          key={field.field_name}
+          field={field}
+          value={val}
+          isRequired={isRequired}
+          onChange={onChange}
+        />
+      )
+    }
+
+    if (field.field_type === "image") {
+      return (
+        <SingleImageField
+          key={field.field_name}
+          label={field.field_label}
+          value={val || ""}
+          isRequired={isRequired}
+          description={field.description}
+          onChange={onChange}
+        />
+      )
+    }
+
+    if (field.field_type === "editor") {
+      return (
+        <div key={field.field_name} className="space-y-2 sm:col-span-2">
+          <FieldLabel
+            label={field.field_label}
+            isRequired={isRequired}
+            htmlFor={inputId}
+          />
+          <RichTextEditor
+            id={inputId}
+            value={val || ""}
+            onChange={onChange}
+            onUploadingChange={setBodyUploading}
+          />
+          {field.description ? (
+            <p className="text-xs text-muted-foreground">{field.description}</p>
+          ) : null}
+        </div>
+      )
+    }
+
+    if (field.field_type === "textarea") {
+      return (
+        <div key={field.field_name} className="space-y-2 sm:col-span-2">
+          <FieldLabel
+            label={field.field_label}
+            isRequired={isRequired}
+            htmlFor={inputId}
+          />
+          <Textarea
+            id={inputId}
+            value={val || ""}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={placeholderNote || field.description || `请输入${field.field_label}`}
+            className="min-h-20"
+            required={isRequired}
+          />
+        </div>
+      )
+    }
+
+    if (field.field_type === "select" || field.field_type === "radio") {
+      const options = parseFieldOptions(field.field_options)
+      return (
+        <div key={field.field_name} className="space-y-2">
+          <FieldLabel
+            label={field.field_label}
+            isRequired={isRequired}
+          />
+          <Select
+            value={val ? String(val) : ""}
+            onValueChange={(value) => onChange(value ?? "")}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={`选择${field.field_label}`} />
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {field.description ? (
+            <p className="text-xs text-muted-foreground">{field.description}</p>
+          ) : null}
+        </div>
+      )
+    }
+
+    if (field.field_type === "date") {
+      return (
+        <div key={field.field_name} className="space-y-2">
+          <FieldLabel
+            label={field.field_label}
+            isRequired={isRequired}
+            htmlFor={inputId}
+          />
+          <Input
+            id={inputId}
+            type="datetime-local"
+            value={dateTimeInput(val || "")}
+            onChange={(e) => onChange(dateTimeValue(e.target.value))}
+            required={isRequired}
+          />
+          {field.description ? (
+            <p className="text-xs text-muted-foreground">{field.description}</p>
+          ) : null}
+        </div>
+      )
+    }
+
+    if (field.field_type === "number") {
+      return (
+        <div key={field.field_name} className="space-y-2">
+          <FieldLabel
+            label={field.field_label}
+            isRequired={isRequired}
+            htmlFor={inputId}
+          />
+          <Input
+            id={inputId}
+            type="number"
+            value={val ?? ""}
+            onChange={(e) => onChange(e.target.value ? Number(e.target.value) : "")}
+            placeholder={placeholderNote || field.description || `请输入${field.field_label}`}
+            required={isRequired}
+          />
+          {field.description ? (
+            <p className="text-xs text-muted-foreground">{field.description}</p>
+          ) : null}
+        </div>
+      )
+    }
+
+    const isFullWidth = field.field_name === "title" || field.field_name === "keywords"
+    return (
+      <div key={field.field_name} className={`space-y-2 ${isFullWidth ? "sm:col-span-2" : ""}`}>
+        <FieldLabel
+          label={field.field_label}
+          isRequired={isRequired}
+          htmlFor={inputId}
+        />
+        <Input
+          id={inputId}
+          type="text"
+          value={val || ""}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={
+            field.field_name === "keywords"
+              ? "用 | 分隔关键词"
+              : placeholderNote || field.description || `请输入${field.field_label}`
+          }
+          required={isRequired}
+        />
+        {field.description && field.field_name !== "keywords" ? (
+          <p className="text-xs text-muted-foreground">{field.description}</p>
+        ) : null}
+      </div>
+    )
+  }
+
   function handleSave(publish = false) {
-    for (const f of activeFields) {
+    for (const f of baseFields) {
       if (mustFieldSet.has(f.field_name)) {
-        const val = getFieldValue(f.field_name)
+        const val = getBaseFieldValue(f.field_name)
         const isEmpty =
           val === undefined ||
           val === null ||
           (Array.isArray(val) ? val.length === 0 : String(val).trim() === "")
         if (isEmpty) {
-          setCustomError(`请填写必填字段：${f.field_label}`)
+          setCustomError(`请在基础信息中填写必填字段：${f.field_label}`)
+          setActiveTab("base")
           return
         }
       }
     }
+
+    const defaultTrans = translations[defaultLang]
+    const defaultTitle = defaultTrans?.title?.trim() || form.title?.trim() || ""
+    if (!defaultTitle) {
+      setCustomError(`请在默认语言（${enabledLanguages.find((l) => l.code === defaultLang)?.name || defaultLang}）中填写信息标题`)
+      setActiveTab(defaultLang)
+      return
+    }
+
+    for (const f of translatableFields) {
+      if (f.field_name !== "title" && mustFieldSet.has(f.field_name)) {
+        const val = getTranslationFieldValue(defaultLang, f.field_name)
+        const isEmpty =
+          val === undefined ||
+          val === null ||
+          (Array.isArray(val) ? val.length === 0 : String(val).trim() === "")
+        if (isEmpty) {
+          setCustomError(`请在默认语言中填写必填字段：${f.field_label}`)
+          setActiveTab(defaultLang)
+          return
+        }
+      }
+    }
+
     setCustomError("")
-    onSave(
-      {
-        ...form,
-        model_id: currentModelId,
-        extra_data: form.extra_data || {},
+    const payload: ContentInput = {
+      ...form,
+      title: defaultTitle,
+      summary: defaultTrans?.summary ?? form.summary,
+      content: defaultTrans?.content ?? form.content,
+      keywords: defaultTrans?.keywords ?? form.keywords,
+      description: defaultTrans?.description ?? form.description,
+      model_id: currentModelId,
+      extra_data: {
+        ...(form.extra_data || {}),
+        ...(defaultTrans?.extra_data || {}),
       },
-      publish,
-    )
+      translations,
+    }
+    onSave(payload, publish)
   }
+
+  const defaultTitle = translations[defaultLang]?.title?.trim() || form.title?.trim() || ""
+  const isSaveDisabled = saving || bodyUploading || !defaultTitle
 
   return (
     <>
@@ -739,329 +1126,188 @@ function ContentEditor({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <DialogTitle>{content.title ? "编辑内容" : "新增内容"}</DialogTitle>
-            {activeLang && (
-              <Badge variant="outline" className="text-xs">
-                {currentLanguage?.name || activeLang}
-              </Badge>
-            )}
           </div>
           <Badge variant="outline" className="text-xs font-normal">
             模型：{currentModel?.name || "通用模型"}
           </Badge>
         </div>
         <DialogDescription>
-          根据所属分类绑定的系统模型动态配置录入表单。
+          默认显示非翻译的基础信息，切换到对应语言标签页可编辑多语言翻译字段。
         </DialogDescription>
       </DialogHeader>
-
-      {isMultiLangActive && (
-        <div className="bg-amber-500/10 text-amber-900 dark:text-amber-200 border border-amber-500/20 rounded-md px-4 py-2.5 text-xs flex items-center gap-2">
-          <Languages className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-          <span>当前正在编辑 <strong>{currentLanguage?.name || activeLang}</strong> 语言的内容。标有“多语言”的字段独立保存并支持兜底；标有“通用”的字段在所有语言间共享。</span>
-        </div>
-      )}
 
       <div className="space-y-4 py-2">
         {customError ? <InlineAlert>{customError}</InlineAlert> : null}
 
-        {/* 顶部栏目与模型联动控制 */}
-        <div className="rounded-lg border bg-muted/40 p-3.5 space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Label className="font-semibold text-sm">所属栏目分类</Label>
-            <span className="text-xs text-muted-foreground">
-              关联模型：<strong className="text-foreground">{currentModel?.name || "默认模型"}</strong> ({activeFields.length} 个字段)
-            </span>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <div className="w-full max-w-full overflow-x-auto overscroll-x-contain pb-1">
+            <TabsList className="w-max min-w-full justify-start h-9 p-1 bg-muted/60">
+              <TabsTrigger value="base" className="flex-none">基础信息</TabsTrigger>
+              {enabledLanguages.map((lang) => (
+                <TabsTrigger key={lang.id} value={lang.code} className="flex-none">
+                  {lang.name}
+                  {lang.code === defaultLang ? " *" : ""}
+                  {lang.code === fallbackLang && lang.code !== defaultLang ? " (兜底)" : ""}
+                </TabsTrigger>
+              ))}
+            </TabsList>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5 sm:col-span-2">
-              <Select
-                value={String(form.category_id)}
-                onValueChange={(value) => {
-                  const catId = Number(value ?? 0)
-                  const cat = categoryOptions.find((c) => c.id === catId)
-                  setForm((curr) => ({
-                    ...curr,
-                    category_id: catId,
-                    model_id: cat?.model_id || curr.model_id || 1,
-                  }))
-                }}
-              >
-                <SelectTrigger className="w-full bg-background">
-                  <SelectValue>
-                    {(value) => {
-                      const selectedID = Number(value ?? 0)
-                      return selectedID > 0
-                        ? categoryOptions.find((category) => category.id === selectedID)?.name ?? "选择分类"
-                        : "未分类"
-                    }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="0">未分类</SelectItem>
-                  {categoryOptions.map((category) => (
-                    <SelectItem key={category.id} value={String(category.id)}>
-                      <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </div>
 
-        {/* 核心动态字段流：依据当前模型的 entry_fields 顺序与别名渲染 */}
-        <div className="grid gap-5 sm:grid-cols-2">
-          {activeFields.map((field) => {
-            const isRequired = mustFieldSet.has(field.field_name)
-            const val = getFieldValue(field.field_name)
-
-            if (field.field_type === "morepic") {
-              return (
-                <MultiImageField
-                  key={field.field_name}
-                  field={field}
-                  value={val}
-                  isRequired={isRequired}
-                  isMultiLangActive={isMultiLangActive}
-                  onChange={(nextVal) => setFieldValue(field.field_name, nextVal)}
-                />
-              )
-            }
-
-            if (field.field_type === "multivalue") {
-              return (
-                <MultiValueField
-                  key={field.field_name}
-                  field={field}
-                  value={val}
-                  isRequired={isRequired}
-                  isMultiLangActive={isMultiLangActive}
-                  onChange={(nextVal) => setFieldValue(field.field_name, nextVal)}
-                />
-              )
-            }
-
-            if (field.field_type === "image") {
-              return (
-                <SingleImageField
-                  key={field.field_name}
-                  label={field.field_label}
-                  value={val || ""}
-                  isRequired={isRequired}
-                  description={field.description}
-                  isTranslatable={field.is_translatable}
-                  isMultiLangActive={isMultiLangActive}
-                  onChange={(url) => setFieldValue(field.field_name, url)}
-                />
-              )
-            }
-
-            if (field.field_type === "editor") {
-              return (
-                <div key={field.field_name} className="space-y-2 sm:col-span-2">
-                  <FieldLabel
-                    label={field.field_label}
-                    isRequired={isRequired}
-                    isTranslatable={field.is_translatable}
-                    isMultiLangActive={isMultiLangActive}
-                    htmlFor={`field-${field.field_name}`}
-                  />
-                  <RichTextEditor
-                    id={`field-${field.field_name}`}
-                    value={val || ""}
-                    onChange={(content) => setFieldValue(field.field_name, content)}
-                    onUploadingChange={setBodyUploading}
-                  />
-                  {field.description ? (
-                    <p className="text-xs text-muted-foreground">{field.description}</p>
-                  ) : null}
-                </div>
-              )
-            }
-
-            if (field.field_type === "textarea") {
-              return (
-                <div key={field.field_name} className="space-y-2 sm:col-span-2">
-                  <FieldLabel
-                    label={field.field_label}
-                    isRequired={isRequired}
-                    isTranslatable={field.is_translatable}
-                    isMultiLangActive={isMultiLangActive}
-                    htmlFor={`field-${field.field_name}`}
-                  />
-                  <Textarea
-                    id={`field-${field.field_name}`}
-                    value={val || ""}
-                    onChange={(e) => setFieldValue(field.field_name, e.target.value)}
-                    placeholder={field.description || `请输入${field.field_label}`}
-                    className="min-h-20"
-                    required={isRequired}
-                  />
-                </div>
-              )
-            }
-
-            if (field.field_type === "select" || field.field_type === "radio") {
-              const options = parseFieldOptions(field.field_options)
-              return (
-                <div key={field.field_name} className="space-y-2">
-                  <FieldLabel
-                    label={field.field_label}
-                    isRequired={isRequired}
-                    isTranslatable={field.is_translatable}
-                    isMultiLangActive={isMultiLangActive}
-                  />
+          <TabsContent value="base" className="space-y-4 pt-2">
+            {/* 顶部栏目与模型联动控制 */}
+            <div className="rounded-lg border bg-muted/40 p-3.5 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label className="font-semibold text-sm">所属栏目分类</Label>
+                <span className="text-xs text-muted-foreground">
+                  关联模型：<strong className="text-foreground">{currentModel?.name || "默认模型"}</strong> ({activeFields.length} 个字段)
+                </span>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:col-span-2">
                   <Select
-                    value={val ? String(val) : ""}
-                    onValueChange={(value) => setFieldValue(field.field_name, value ?? "")}
+                    value={String(form.category_id)}
+                    onValueChange={(value) => {
+                      const catId = Number(value ?? 0)
+                      const cat = categoryOptions.find((c) => c.id === catId)
+                      setForm((curr) => ({
+                        ...curr,
+                        category_id: catId,
+                        model_id: cat?.model_id || curr.model_id || 1,
+                      }))
+                    }}
                   >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder={`选择${field.field_label}`} />
+                    <SelectTrigger className="w-full bg-background">
+                      <SelectValue>
+                        {(value) => {
+                          const selectedID = Number(value ?? 0)
+                          return selectedID > 0
+                            ? categoryOptions.find((category) => category.id === selectedID)?.name ?? "选择分类"
+                            : "未分类"
+                        }}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {options.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
+                      <SelectItem value="0">未分类</SelectItem>
+                      {categoryOptions.map((category) => (
+                        <SelectItem key={category.id} value={String(category.id)}>
+                          <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {field.description ? (
-                    <p className="text-xs text-muted-foreground">{field.description}</p>
-                  ) : null}
                 </div>
-              )
-            }
-
-            if (field.field_type === "date") {
-              return (
-                <div key={field.field_name} className="space-y-2">
-                  <FieldLabel
-                    label={field.field_label}
-                    isRequired={isRequired}
-                    isTranslatable={field.is_translatable}
-                    isMultiLangActive={isMultiLangActive}
-                    htmlFor={`field-${field.field_name}`}
-                  />
-                  <Input
-                    id={`field-${field.field_name}`}
-                    type="datetime-local"
-                    value={dateTimeInput(val || "")}
-                    onChange={(e) => setFieldValue(field.field_name, dateTimeValue(e.target.value))}
-                    required={isRequired}
-                  />
-                  {field.description ? (
-                    <p className="text-xs text-muted-foreground">{field.description}</p>
-                  ) : null}
-                </div>
-              )
-            }
-
-            if (field.field_type === "number") {
-              return (
-                <div key={field.field_name} className="space-y-2">
-                  <FieldLabel
-                    label={field.field_label}
-                    isRequired={isRequired}
-                    isTranslatable={field.is_translatable}
-                    isMultiLangActive={isMultiLangActive}
-                    htmlFor={`field-${field.field_name}`}
-                  />
-                  <Input
-                    id={`field-${field.field_name}`}
-                    type="number"
-                    value={val ?? ""}
-                    onChange={(e) => setFieldValue(field.field_name, e.target.value ? Number(e.target.value) : "")}
-                    placeholder={field.description || `请输入${field.field_label}`}
-                    required={isRequired}
-                  />
-                  {field.description ? (
-                    <p className="text-xs text-muted-foreground">{field.description}</p>
-                  ) : null}
-                </div>
-              )
-            }
-
-            const isFullWidth = field.field_name === "title" || field.field_name === "keywords"
-            return (
-              <div key={field.field_name} className={`space-y-2 ${isFullWidth ? "sm:col-span-2" : ""}`}>
-                <FieldLabel
-                  label={field.field_label}
-                  isRequired={isRequired}
-                  isTranslatable={field.is_translatable}
-                  isMultiLangActive={isMultiLangActive}
-                  htmlFor={`field-${field.field_name}`}
-                />
-                <Input
-                  id={`field-${field.field_name}`}
-                  type="text"
-                  value={val || ""}
-                  onChange={(e) => setFieldValue(field.field_name, e.target.value)}
-                  placeholder={
-                    field.field_name === "keywords"
-                      ? "用 | 分隔关键词"
-                      : field.description || `请输入${field.field_label}`
-                  }
-                  required={isRequired}
-                />
-                {field.description && field.field_name !== "keywords" ? (
-                  <p className="text-xs text-muted-foreground">{field.description}</p>
-                ) : null}
-              </div>
-            )
-          })}
-
-          {/* 发布属性设置 */}
-          <div className="space-y-3 sm:col-span-2 rounded-lg border p-3.5 bg-card">
-            <p className="text-sm font-semibold text-muted-foreground border-b pb-1.5">发布与展示属性</p>
-            <div className="grid gap-3 sm:grid-cols-3 items-center">
-              <div className="space-y-1">
-                <Label htmlFor="content-order">显示排序权重</Label>
-                <Input
-                  id="content-order"
-                  type="number"
-                  min="0"
-                  value={form.order_id}
-                  onChange={(e) => update("order_id", Number(e.target.value))}
-                  placeholder="数字越大越靠前"
-                />
-              </div>
-              <div className="flex items-center justify-between rounded-md border p-2.5">
-                <div>
-                  <p className="text-sm font-medium">公开展示</p>
-                  <p className="text-xs text-muted-foreground">生成页面及链接</p>
-                </div>
-                <Switch
-                  checked={form.visible === 1}
-                  onCheckedChange={(checked) => update("visible", checked ? 1 : 0)}
-                  aria-label="公开展示"
-                />
-              </div>
-              <div className="flex items-center justify-between rounded-md border p-2.5">
-                <div>
-                  <p className="text-sm font-medium">首页推荐</p>
-                  <p className="text-xs text-muted-foreground">主题首页推荐标</p>
-                </div>
-                <Switch
-                  checked={form.featured === 1}
-                  onCheckedChange={(checked) => update("featured", checked ? 1 : 0)}
-                  aria-label="首页推荐"
-                />
               </div>
             </div>
-          </div>
-        </div>
+
+            {/* 基础通用字段（非多语言字段） */}
+            {baseFields.length > 0 && (
+              <div className="grid gap-5 sm:grid-cols-2">
+                {baseFields.map((field) => {
+                  const isRequired = mustFieldSet.has(field.field_name)
+                  const val = getBaseFieldValue(field.field_name)
+                  return renderFieldControl(
+                    field,
+                    val,
+                    (nextVal) => setBaseFieldValue(field.field_name, nextVal),
+                    isRequired,
+                    "base",
+                  )
+                })}
+              </div>
+            )}
+
+            {/* 发布与展示属性 */}
+            <div className="space-y-3 rounded-lg border p-3.5 bg-card">
+              <p className="text-sm font-semibold text-muted-foreground border-b pb-1.5">发布与展示属性</p>
+              <div className="grid gap-3 sm:grid-cols-3 items-center">
+                <div className="space-y-1">
+                  <Label htmlFor="content-order">显示排序权重</Label>
+                  <Input
+                    id="content-order"
+                    type="number"
+                    min="0"
+                    value={form.order_id}
+                    onChange={(e) => update("order_id", Number(e.target.value))}
+                    placeholder="数字越大越靠前"
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-md border p-2.5">
+                  <div>
+                    <p className="text-sm font-medium">公开展示</p>
+                    <p className="text-xs text-muted-foreground">生成页面及链接</p>
+                  </div>
+                  <Switch
+                    checked={form.visible === 1}
+                    onCheckedChange={(checked) => update("visible", checked ? 1 : 0)}
+                    aria-label="公开展示"
+                  />
+                </div>
+                <div className="flex items-center justify-between rounded-md border p-2.5">
+                  <div>
+                    <p className="text-sm font-medium">首页推荐</p>
+                    <p className="text-xs text-muted-foreground">主题首页推荐标</p>
+                  </div>
+                  <Switch
+                    checked={form.featured === 1}
+                    onCheckedChange={(checked) => update("featured", checked ? 1 : 0)}
+                    aria-label="首页推荐"
+                  />
+                </div>
+              </div>
+            </div>
+          </TabsContent>
+
+          {enabledLanguages.map((lang) => {
+            const isDefault = lang.code === defaultLang
+            const fallbackLangName = enabledLanguages.find((l) => l.code === fallbackLang)?.name || fallbackLang
+            return (
+              <TabsContent key={lang.id} value={lang.code} className="space-y-4 pt-2">
+                <div className={cn(
+                  "rounded-md px-4 py-2.5 text-xs flex items-center gap-2 border",
+                  isDefault
+                    ? "bg-blue-500/10 text-blue-900 dark:text-blue-200 border-blue-500/20"
+                    : "bg-amber-500/10 text-amber-900 dark:text-amber-200 border-amber-500/20"
+                )}>
+                  <Languages className={cn("size-4 shrink-0", isDefault ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400")} />
+                  {isDefault ? (
+                    <span>这是默认主站语言（<strong>{lang.name}</strong>），标题为必填项。其他语言对应字段留空时，系统将使用兜底语言进行回退展示。</span>
+                  ) : (
+                    <span>当前正在编辑 <strong>{lang.name}</strong> 语言的翻译内容。如果标题、摘要或正文等留空，系统将自动使用兜底语言（<strong>{fallbackLangName}</strong>）的内容。</span>
+                  )}
+                </div>
+
+                <div className="grid gap-5 sm:grid-cols-2">
+                  {translatableFields.map((field) => {
+                    const isRequired = isDefault && (field.field_name === "title" || mustFieldSet.has(field.field_name))
+                    const val = getTranslationFieldValue(lang.code, field.field_name)
+                    const placeholderNote = !isDefault
+                      ? `留空将使用兜底语言（${fallbackLangName}）的内容`
+                      : undefined
+                    return renderFieldControl(
+                      field,
+                      val,
+                      (nextVal) => setTranslationFieldValue(lang.code, field.field_name, nextVal),
+                      isRequired,
+                      `lang-${lang.code}`,
+                      placeholderNote,
+                    )
+                  })}
+                </div>
+              </TabsContent>
+            )
+          })}
+        </Tabs>
       </div>
 
       <DialogFooter>
         <Button variant="outline" onClick={onCancel} disabled={saving || bodyUploading}>
           取消
         </Button>
-        <Button onClick={() => handleSave(false)} disabled={saving || bodyUploading || !String(getFieldValue("title") || "").trim()}>
+        <Button onClick={() => handleSave(false)} disabled={isSaveDisabled}>
           {saving ? <LoaderCircle className="animate-spin" /> : null}
           仅保存
         </Button>
-        <Button onClick={() => handleSave(true)} disabled={saving || bodyUploading || !String(getFieldValue("title") || "").trim()}>
+        <Button onClick={() => handleSave(true)} disabled={isSaveDisabled}>
           保存并发布
         </Button>
       </DialogFooter>
@@ -1090,7 +1336,7 @@ export function ContentPage() {
   const [deleting, setDeleting] = useState<Content | null>(null)
   const [deleteSaving, setDeleteSaving] = useState(false)
 
-  const { activeLang, setActiveLang, languages, currentLanguage } = useLanguage()
+  const { activeLang, setActiveLang, languages, currentLanguage, refreshLanguages } = useLanguage()
 
   const categoryOptions = useMemo(() => flattenCategoryTree(categories), [categories])
 
@@ -1175,12 +1421,14 @@ export function ContentPage() {
   }
 
   function openNew() {
+    void refreshLanguages()
     setEditing(null)
     setEditingDetail(null)
     setEditorOpen(true)
   }
 
   async function openEdit(item: Content) {
+    void refreshLanguages()
     setEditing(item)
     setEditingDetail(null)
     setEditorOpen(true)

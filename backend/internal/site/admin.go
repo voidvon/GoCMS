@@ -377,6 +377,15 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	payload.Name = strings.TrimSpace(payload.Name)
+	if payload.Name == "" && payload.Translations != nil {
+		defaultLang, _ := s.getDefaultAndFallbackLang(request.Context())
+		if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Name) != "" {
+			payload.Name = strings.TrimSpace(def.Name)
+			payload.Keywords = def.Keywords
+			payload.Description = def.Description
+			payload.CoverContent = def.CoverContent
+		}
+	}
 	if payload.Name == "" {
 		http.Error(response, "category name is required", http.StatusBadRequest)
 		return

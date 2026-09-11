@@ -18,6 +18,8 @@ import {
   updateCategory,
   type CategoryInput,
   type CategoryItem,
+  type CategoryTranslationItem,
+  type Language,
   type SaveResponse,
   type SystemModel,
   type ThemeFile,
@@ -25,15 +27,59 @@ import {
 } from "@/lib/api"
 import { useLanguage } from "@/lib/language-context"
 import { buildCategoryTree, flattenCategoryTree, type CategoryNode } from "@/lib/category-tree"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog, IconButton, InlineAlert } from "@/components/app/app-ui"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
+
+function buildInitialCategoryTranslations(
+  category: CategoryInput,
+  defaultLang: string,
+  availableLanguages: Array<{ code: string }>,
+): Record<string, CategoryTranslationItem> {
+  const source = category.translations || {}
+  const output: Record<string, CategoryTranslationItem> = {}
+
+  for (const lang of availableLanguages) {
+    if (source[lang.code]) {
+      output[lang.code] = {
+        name: source[lang.code].name || "",
+        keywords: source[lang.code].keywords || "",
+        description: source[lang.code].description || "",
+        cover_content: source[lang.code].cover_content || "",
+      }
+    } else {
+      output[lang.code] = {
+        name: "",
+        keywords: "",
+        description: "",
+        cover_content: "",
+      }
+    }
+  }
+
+  if (!output[defaultLang]) {
+    output[defaultLang] = {
+      name: category.name || "",
+      keywords: category.keywords || "",
+      description: category.description || "",
+      cover_content: category.cover_content || "",
+    }
+  } else if (!output[defaultLang].name && category.name) {
+    output[defaultLang].name = category.name
+    output[defaultLang].keywords = category.keywords || output[defaultLang].keywords
+    output[defaultLang].description = category.description || output[defaultLang].description
+    output[defaultLang].cover_content = category.cover_content || output[defaultLang].cover_content
+  }
+
+  return output
+}
 
 const emptyCategory: CategoryInput = {
   name: "",
@@ -137,6 +183,10 @@ function categoryInput(category: CategoryItem, templateGroups: ThemeTemplateGrou
     detail_file_pattern: category.detail_file_pattern,
     detail_template: category.detail_template,
     model_id: category.model_id || 1,
+    keywords: category.keywords || "",
+    description: category.description || "",
+    cover_content: category.cover_content || "",
+    translations: category.translations || {},
   }
 }
 
@@ -234,7 +284,50 @@ export function CategoriesPage() {
   const [deleting, setDeleting] = useState<CategoryItem | null>(null)
   const [deleteSaving, setDeleteSaving] = useState(false)
 
-  const { activeLang, setActiveLang, languages, defaultLang, currentLanguage } = useLanguage()
+  const { activeLang, setActiveLang, languages, defaultLang, fallbackLang, currentLanguage, refreshLanguages } = useLanguage()
+
+  const enabledLanguages: Language[] = useMemo(() => {
+    const list = languages.filter((l) => l.is_enabled === 1)
+    return list.length > 0
+      ? list
+      : [{ id: 1, code: defaultLang || "zh-CN", name: "默认语言", is_default: 1, is_enabled: 1, is_fallback: 0, sort_order: 0, path_prefix: "" }]
+  }, [languages, defaultLang])
+
+  const [categoryActiveTab, setCategoryActiveTab] = useState("base")
+  const [translations, setTranslations] = useState<Record<string, CategoryTranslationItem>>({})
+
+  function updateTranslation(langCode: string, patch: Partial<CategoryTranslationItem>) {
+    setTranslations((prev) => ({
+      ...prev,
+      [langCode]: {
+        name: "",
+        keywords: "",
+        description: "",
+        cover_content: "",
+        ...(prev[langCode] || {}),
+        ...patch,
+      },
+    }))
+  }
+
+  useEffect(() => {
+    setTranslations((prev) => {
+      let changed = false
+      const next = { ...prev }
+      for (const lang of enabledLanguages) {
+        if (!next[lang.code]) {
+          next[lang.code] = {
+            name: "",
+            keywords: "",
+            description: "",
+            cover_content: "",
+          }
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [enabledLanguages])
 
   const tree = useMemo(() => buildCategoryTree(categories), [categories])
   const parentOptions = useMemo(() => flattenCategoryTree(categories, editing?.id), [categories, editing?.id])
@@ -264,6 +357,7 @@ export function CategoriesPage() {
             const updated = nextCategories.find((category) => category.id === prevEditing.id)
             if (updated) {
               setForm(categoryInput(updated, theme.template_groups, theme.template_files))
+              setTranslations(buildInitialCategoryTranslations(updated, defaultLang, enabledLanguages))
               return updated
             }
           }
@@ -282,7 +376,7 @@ export function CategoriesPage() {
     return () => {
       active = false
     }
-  }, [activeLang])
+  }, [activeLang, defaultLang, enabledLanguages])
 
   function update<K extends keyof CategoryInput>(key: K, value: CategoryInput[K]) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -331,10 +425,12 @@ export function CategoriesPage() {
   }
 
   function openNew(parentID = 0) {
+    void refreshLanguages()
     const parent = categories.find((category) => category.id === parentID)
     const listPath = defaultListPath(parentID, parent)
     setEditing(null)
-    setForm({
+    setCategoryActiveTab("base")
+    const initial: CategoryInput = {
       ...emptyCategory,
       parent_id: parentID,
       list_path: listPath,
@@ -342,13 +438,19 @@ export function CategoriesPage() {
       cover_template: defaultCoverTemplate(parent, templateGroups, templateFiles),
       detail_path: defaultDetailPath(listPath, parent),
       detail_template: defaultDetailTemplate(listPath, parent),
-    })
+    }
+    setForm(initial)
+    setTranslations(buildInitialCategoryTranslations(initial, defaultLang, enabledLanguages))
     setEditorActive(true)
   }
 
   function openEdit(category: CategoryItem) {
+    void refreshLanguages()
     setEditing(category)
-    setForm(categoryInput(category, templateGroups, templateFiles))
+    setCategoryActiveTab("base")
+    const initial = categoryInput(category, templateGroups, templateFiles)
+    setForm(initial)
+    setTranslations(buildInitialCategoryTranslations(category, defaultLang, enabledLanguages))
     setEditorActive(true)
   }
 
@@ -356,15 +458,28 @@ export function CategoriesPage() {
     setEditorActive(false)
     setEditing(null)
     setForm(emptyCategory)
+    setTranslations({})
+    setCategoryActiveTab("base")
   }
 
   async function save(publish = false) {
-    const name = form.name.trim()
-    if (!name) return
+    const defaultName = translations[defaultLang]?.name?.trim() || form.name.trim()
+    if (!defaultName) {
+      setError(`请在默认语言（${enabledLanguages.find((l) => l.code === defaultLang)?.name || defaultLang}）中填写分类名称`)
+      setCategoryActiveTab(defaultLang)
+      return
+    }
     setSaving(true)
     setError("")
     try {
-      const payload = { ...form, name }
+      const payload: CategoryInput = {
+        ...form,
+        name: defaultName,
+        keywords: translations[defaultLang]?.keywords ?? form.keywords,
+        description: translations[defaultLang]?.description ?? form.description,
+        cover_content: translations[defaultLang]?.cover_content ?? form.cover_content,
+        translations,
+      }
       const result = editing
         ? await updateCategory(editing.id, payload, publish, activeLang)
         : await createCategory(payload, publish, activeLang)
@@ -375,6 +490,7 @@ export function CategoriesPage() {
         if (updated) {
           setEditing(updated)
           setForm(categoryInput(updated, templateGroups, templateFiles))
+          setTranslations(buildInitialCategoryTranslations(updated, defaultLang, enabledLanguages))
           setEditorActive(true)
         } else {
           closeEditor()
@@ -504,216 +620,298 @@ export function CategoriesPage() {
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <CardTitle>{editing ? `编辑：${editing.name}` : "新增栏目"}</CardTitle>
-                    <CardDescription>栏目用于归类内容，并配置列表、详情模板与静态路径。</CardDescription>
+                    <CardDescription>默认显示非翻译的基础数据，切换到语言标签页可配置多语言翻译字段。</CardDescription>
                   </div>
-                  {activeLang && (
-                    <Badge variant="outline" className="shrink-0 text-xs">
-                      {currentLanguage?.name || activeLang}
-                    </Badge>
-                  )}
                 </div>
               </CardHeader>
-              {activeLang !== defaultLang && (
-                <div className="bg-amber-500/10 text-amber-900 dark:text-amber-200 border-b border-amber-500/20 px-6 py-2.5 text-xs flex items-center gap-2">
-                  <Languages className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  <span>当前正在编辑 <strong>{currentLanguage?.name || activeLang}</strong> 语言的栏目翻译。名称、关键词、描述等翻译字段留空时，将自动使用兜底语言内容。</span>
-                </div>
-              )}
-              <CardContent className="grid gap-5 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="category-name">分类名称</Label>
-                  <Input id="category-name" value={form.name} onChange={(event) => update("name", event.target.value)} autoFocus required />
-                </div>
-                <div className="space-y-2">
-                  <Label>父分类</Label>
-                  <Select value={String(form.parent_id)} onValueChange={(value) => update("parent_id", Number(value ?? 0))}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue>
-                        {(value) => {
-                          const selectedID = Number(value ?? 0)
-                          return selectedID > 0
-                            ? parentOptions.find((category) => category.id === selectedID)?.name ?? "选择父分类"
-                            : "顶级栏目"
-                        }}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">顶级栏目</SelectItem>
-                      {parentOptions.map((category) => (
-                        <SelectItem key={category.id} value={String(category.id)}>
-                          <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
-                        </SelectItem>
+
+              <Tabs value={categoryActiveTab} onValueChange={setCategoryActiveTab} className="w-full">
+                <div className="border-b px-6 py-2 bg-muted/30">
+                  <div className="w-full max-w-full overflow-x-auto overscroll-x-contain pb-1">
+                    <TabsList className="w-max min-w-full justify-start h-9 p-1">
+                      <TabsTrigger className="flex-none" value="base">基础数据</TabsTrigger>
+                      {enabledLanguages.map((lang) => (
+                        <TabsTrigger className="flex-none" key={lang.id} value={lang.code}>
+                          {lang.name}
+                          {lang.code === defaultLang ? " *" : ""}
+                          {lang.code === fallbackLang && lang.code !== defaultLang ? " (兜底)" : ""}
+                        </TabsTrigger>
                       ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>栏目类型</Label>
-                  <Select value={form.page_type} onValueChange={(value) => updatePageType(value ?? "list")}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="选择栏目类型">
-                        {(value) => (value === "cover" ? "封面式" : "列表式")}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="list">列表式</SelectItem>
-                      <SelectItem value="cover">封面式</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>所属系统模型</Label>
-                  <Select
-                    value={String(form.model_id ?? 1)}
-                    onValueChange={(value) => update("model_id", Number(value ?? 1))}
-                    disabled={Boolean(editing)}
-                  >
-                    <SelectTrigger className="w-full" disabled={Boolean(editing)}>
-                      <SelectValue>
-                        {(value) => {
-                          const selectedID = Number(value ?? 0)
-                          const m = models.find((model) => model.id === selectedID)
-                          return m ? `${m.name} (${m.table_name || `表ID ${m.table_id}`})` : "选择系统模型"
-                        }}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {models.map((model) => (
-                        <SelectItem key={model.id} value={String(model.id)}>
-                          {model.name} ({model.table_name || `表ID ${model.table_id}`})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {editing
-                      ? "已创建栏目的系统模型已锁定不可变更，以保障内容数据表一致性。"
-                      : "新建栏目时选择对应数据模型，创建后不可更改。"}
-                  </p>
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="category-order">排序值</Label>
-                  <Input id="category-order" type="number" min="0" value={form.order_id} onChange={(event) => update("order_id", Number(event.target.value))} />
-                  <p className="text-xs text-muted-foreground">同一父分类下数值越小越靠前。</p>
-                </div>
-                {form.page_type === "list" ? <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="category-page-size">每页内容数</Label>
-                  <Input id="category-page-size" type="number" min="1" max="200" value={form.list_page_size} onChange={(event) => update("list_page_size", Number(event.target.value))} />
-                  <p className="text-xs text-muted-foreground">栏目列表页按这个数量生成分页。</p>
-                </div> : null}
-                <div className="space-y-2">
-                  <Label htmlFor="category-list-path">
-                    {form.page_type === "cover" ? "封面 URL 目录" : "栏目 URL 目录"}
-                  </Label>
-                  <Input
-                    id="category-list-path"
-                    value={form.list_path}
-                    onChange={(event) => update("list_path", event.target.value)}
-                    placeholder={form.page_type === "cover" ? "可留空，表示站点根目录" : "category"}
-                    required={form.page_type === "list"}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {form.page_type === "cover" ? "封面式栏目允许留空，页面会直接生成在站点根目录。" : "列表页存放的目录路径，如 category。"}
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="category-list-file-pattern">
-                    {form.page_type === "cover" ? "封面文件名规则" : "列表文件名规则"}
-                  </Label>
-                  <Input
-                    id="category-list-file-pattern"
-                    value={form.list_file_pattern}
-                    onChange={(event) => update("list_file_pattern", event.target.value)}
-                    placeholder={form.page_type === "cover" ? "index.html 或 {id}.html" : "{id}.html"}
-                    required
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {form.page_type === "cover"
-                      ? "封面式可填写固定文件名（如 index.html）或包含 {id}。"
-                      : "列表式必须包含 {id}，分页会自动追加页码。"}
-                  </p>
-                </div>
-                {form.page_type === "list" ? (
-                  <div key="field-list-template" className="space-y-2">
-                    <Label>列表模板</Label>
-                    <Select
-                      key="select-list-template"
-                      value={form.list_template}
-                      onValueChange={(value) => update("list_template", value ?? "")}
-                      disabled={templatesLoading}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="选择列表模板">
-                          {(val) => val || "选择列表模板"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {templateOptions(form.list_template, "list").map((file) => (
-                          <SelectItem key={file.path} value={file.path}>
-                            {file.path}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">此栏目生成列表页时使用的 HTML 模板。</p>
+                    </TabsList>
                   </div>
-                ) : (
-                  <div key="field-cover-template" className="space-y-2">
-                    <Label>封面模板</Label>
-                    <Select
-                      key="select-cover-template"
-                      value={form.cover_template}
-                      onValueChange={(value) => update("cover_template", value ?? "")}
-                      disabled={templatesLoading}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="选择封面模板">
-                          {(val) => val || "选择封面模板"}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {templateOptions(form.cover_template, "cover").map((file) => (
-                          <SelectItem key={file.path} value={file.path}>
-                            {file.path}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">此栏目生成封面页时使用的 HTML 模板。</p>
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="category-detail-path">内容详情目录</Label>
-                  <Input id="category-detail-path" value={form.detail_path} onChange={(event) => update("detail_path", event.target.value)} placeholder="content" required />
-                  <p className="text-xs text-muted-foreground">详情页按内容所属栏目解析目录。</p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="category-detail-file-pattern">详情文件名规则</Label>
-                  <Input id="category-detail-file-pattern" value={form.detail_file_pattern} onChange={(event) => update("detail_file_pattern", event.target.value)} placeholder="{id}.html" required />
-                  <p className="text-xs text-muted-foreground">使用 {"{id}"} 代表内容编号。</p>
-                </div>
-                <div className="space-y-2">
-                  <Label>详情模板</Label>
-                  <Select value={form.detail_template} onValueChange={(value) => update("detail_template", value ?? "")} disabled={templatesLoading}>
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="选择详情模板">
-                        {(val) => val || "选择详情模板"}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {templateOptions(form.detail_template, "content").map((file) => <SelectItem key={file.path} value={file.path}>{file.path}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">此栏目下内容详情页使用的 HTML 模板。</p>
-                </div>
-              </CardContent>
+
+                <TabsContent value="base" className="mt-0">
+                  <CardContent className="grid gap-5 sm:grid-cols-2 pt-6">
+                    <div className="space-y-2">
+                      <Label>父分类</Label>
+                      <Select value={String(form.parent_id)} onValueChange={(value) => update("parent_id", Number(value ?? 0))}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue>
+                            {(value) => {
+                              const selectedID = Number(value ?? 0)
+                              return selectedID > 0
+                                ? parentOptions.find((category) => category.id === selectedID)?.name ?? "选择父分类"
+                                : "顶级栏目"
+                            }}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="0">顶级栏目</SelectItem>
+                          {parentOptions.map((category) => (
+                            <SelectItem key={category.id} value={String(category.id)}>
+                              <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>栏目类型</Label>
+                      <Select value={form.page_type} onValueChange={(value) => updatePageType(value ?? "list")}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="选择栏目类型">
+                            {(value) => (value === "cover" ? "封面式" : "列表式")}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="list">列表式</SelectItem>
+                          <SelectItem value="cover">封面式</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>所属系统模型</Label>
+                      <Select
+                        value={String(form.model_id ?? 1)}
+                        onValueChange={(value) => update("model_id", Number(value ?? 1))}
+                        disabled={Boolean(editing)}
+                      >
+                        <SelectTrigger className="w-full" disabled={Boolean(editing)}>
+                          <SelectValue>
+                            {(value) => {
+                              const selectedID = Number(value ?? 0)
+                              const m = models.find((model) => model.id === selectedID)
+                              return m ? `${m.name} (${m.table_name || `表ID ${m.table_id}`})` : "选择系统模型"
+                            }}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {models.map((model) => (
+                            <SelectItem key={model.id} value={String(model.id)}>
+                              {model.name} ({model.table_name || `表ID ${model.table_id}`})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        {editing
+                          ? "已创建栏目的系统模型已锁定不可变更，以保障内容数据表一致性。"
+                          : "新建栏目时选择对应数据模型，创建后不可更改。"}
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="category-order">排序值</Label>
+                      <Input id="category-order" type="number" min="0" value={form.order_id} onChange={(event) => update("order_id", Number(event.target.value))} />
+                      <p className="text-xs text-muted-foreground">同一父分类下数值越小越靠前。</p>
+                    </div>
+                    {form.page_type === "list" ? (
+                      <div className="space-y-2 sm:col-span-2">
+                        <Label htmlFor="category-page-size">每页内容数</Label>
+                        <Input id="category-page-size" type="number" min="1" max="200" value={form.list_page_size} onChange={(event) => update("list_page_size", Number(event.target.value))} />
+                        <p className="text-xs text-muted-foreground">栏目列表页按这个数量生成分页。</p>
+                      </div>
+                    ) : null}
+                    <div className="space-y-2">
+                      <Label htmlFor="category-list-path">
+                        {form.page_type === "cover" ? "封面 URL 目录" : "栏目 URL 目录"}
+                      </Label>
+                      <Input
+                        id="category-list-path"
+                        value={form.list_path}
+                        onChange={(event) => update("list_path", event.target.value)}
+                        placeholder={form.page_type === "cover" ? "可留空，表示站点根目录" : "category"}
+                        required={form.page_type === "list"}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {form.page_type === "cover" ? "封面式栏目允许留空，页面会直接生成在站点根目录。" : "列表页存放的目录路径，如 category。"}
+                      </p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="category-list-file-pattern">
+                        {form.page_type === "cover" ? "封面文件名规则" : "列表文件名规则"}
+                      </Label>
+                      <Input
+                        id="category-list-file-pattern"
+                        value={form.list_file_pattern}
+                        onChange={(event) => update("list_file_pattern", event.target.value)}
+                        placeholder={form.page_type === "cover" ? "index.html 或 {id}.html" : "{id}.html"}
+                        required
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {form.page_type === "cover"
+                          ? "封面式可填写固定文件名（如 index.html）或包含 {id}。"
+                          : "列表式必须包含 {id}，分页会自动追加页码。"}
+                      </p>
+                    </div>
+                    {form.page_type === "list" ? (
+                      <div key="field-list-template" className="space-y-2">
+                        <Label>列表模板</Label>
+                        <Select
+                          key="select-list-template"
+                          value={form.list_template}
+                          onValueChange={(value) => update("list_template", value ?? "")}
+                          disabled={templatesLoading}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="选择列表模板">
+                              {(val) => val || "选择列表模板"}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {templateOptions(form.list_template, "list").map((file) => (
+                              <SelectItem key={file.path} value={file.path}>
+                                {file.path}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">此栏目生成列表页时使用的 HTML 模板。</p>
+                      </div>
+                    ) : (
+                      <div key="field-cover-template" className="space-y-2">
+                        <Label>封面模板</Label>
+                        <Select
+                          key="select-cover-template"
+                          value={form.cover_template}
+                          onValueChange={(value) => update("cover_template", value ?? "")}
+                          disabled={templatesLoading}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="选择封面模板">
+                              {(val) => val || "选择封面模板"}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent>
+                            {templateOptions(form.cover_template, "cover").map((file) => (
+                              <SelectItem key={file.path} value={file.path}>
+                                {file.path}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">此栏目生成封面页时使用的 HTML 模板。</p>
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="category-detail-path">内容详情目录</Label>
+                      <Input id="category-detail-path" value={form.detail_path} onChange={(event) => update("detail_path", event.target.value)} placeholder="content" required />
+                      <p className="text-xs text-muted-foreground">详情页按内容所属栏目解析目录。</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="category-detail-file-pattern">详情文件名规则</Label>
+                      <Input id="category-detail-file-pattern" value={form.detail_file_pattern} onChange={(event) => update("detail_file_pattern", event.target.value)} placeholder="{id}.html" required />
+                      <p className="text-xs text-muted-foreground">使用 {"{id}"} 代表内容编号。</p>
+                    </div>
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label>详情模板</Label>
+                      <Select value={form.detail_template} onValueChange={(value) => update("detail_template", value ?? "")} disabled={templatesLoading}>
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="选择详情模板">
+                            {(val) => val || "选择详情模板"}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {templateOptions(form.detail_template, "content").map((file) => <SelectItem key={file.path} value={file.path}>{file.path}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">此栏目下内容详情页使用的 HTML 模板。</p>
+                    </div>
+                  </CardContent>
+                </TabsContent>
+
+                {enabledLanguages.map((lang) => {
+                  const isDefault = lang.code === defaultLang
+                  const fallbackLangName = enabledLanguages.find((l) => l.code === fallbackLang)?.name || fallbackLang
+                  const trans = translations[lang.code] || { name: "", keywords: "", description: "", cover_content: "" }
+                  return (
+                    <TabsContent key={lang.id} value={lang.code} className="mt-0">
+                      <CardContent className="space-y-4 pt-6">
+                        <div className={cn(
+                          "rounded-md px-4 py-2.5 text-xs flex items-center gap-2 border",
+                          isDefault
+                            ? "bg-blue-500/10 text-blue-900 dark:text-blue-200 border-blue-500/20"
+                            : "bg-amber-500/10 text-amber-900 dark:text-amber-200 border-amber-500/20"
+                        )}>
+                          <Languages className={cn("size-4 shrink-0", isDefault ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400")} />
+                          {isDefault ? (
+                            <span>这是默认主站语言（<strong>{lang.name}</strong>），栏目名称为必填项。</span>
+                          ) : (
+                            <span>当前正在编辑 <strong>{lang.name}</strong> 语言的栏目翻译。名称、关键词、描述等翻译字段留空时，将自动使用兜底语言（<strong>{fallbackLangName}</strong>）的内容。</span>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor={`category-name-${lang.code}`}>
+                            分类名称
+                            {isDefault && <span className="text-destructive"> *</span>}
+                          </Label>
+                          <Input
+                            id={`category-name-${lang.code}`}
+                            value={trans.name || ""}
+                            onChange={(event) => updateTranslation(lang.code, { name: event.target.value })}
+                            placeholder={isDefault ? "请输入分类名称" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                            autoFocus={isDefault}
+                            required={isDefault}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor={`category-keywords-${lang.code}`}>SEO 关键词</Label>
+                          <Input
+                            id={`category-keywords-${lang.code}`}
+                            value={trans.keywords || ""}
+                            onChange={(event) => updateTranslation(lang.code, { keywords: event.target.value })}
+                            placeholder={isDefault ? "用 | 或逗号分隔关键词" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor={`category-description-${lang.code}`}>SEO 描述</Label>
+                          <Textarea
+                            id={`category-description-${lang.code}`}
+                            value={trans.description || ""}
+                            onChange={(event) => updateTranslation(lang.code, { description: event.target.value })}
+                            placeholder={isDefault ? "请输入栏目 SEO 描述" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                            className="min-h-20"
+                          />
+                        </div>
+
+                        {form.page_type === "cover" && (
+                          <div className="space-y-2">
+                            <Label htmlFor={`category-cover-content-${lang.code}`}>封面内容 / 介绍</Label>
+                            <Textarea
+                              id={`category-cover-content-${lang.code}`}
+                              value={trans.cover_content || ""}
+                              onChange={(event) => updateTranslation(lang.code, { cover_content: event.target.value })}
+                              placeholder={isDefault ? "请输入封面介绍内容（支持 HTML 或文本）" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                              className="min-h-28"
+                            />
+                          </div>
+                        )}
+                      </CardContent>
+                    </TabsContent>
+                  )
+                })}
+              </Tabs>
+
               <CardFooter className="flex flex-wrap justify-end gap-2 border-t">
                 <Button variant="outline" onClick={closeEditor} disabled={saving}>取消</Button>
-                <Button onClick={() => save()} disabled={saving || !form.name.trim()}>
+                <Button onClick={() => save()} disabled={saving || !(translations[defaultLang]?.name?.trim() || form.name.trim())}>
                   {saving ? <LoaderCircle className="animate-spin" /> : null}
                   仅保存
                 </Button>
-                <Button onClick={() => save(true)} disabled={saving || !form.name.trim()}>保存并发布</Button>
+                <Button onClick={() => save(true)} disabled={saving || !(translations[defaultLang]?.name?.trim() || form.name.trim())}>保存并发布</Button>
               </CardFooter>
             </>
           ) : (
