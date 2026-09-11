@@ -50,7 +50,7 @@ func TestAdminTemplateLabelManagement(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	labelResponse := request(http.MethodPost, "/api/admin/theme/label-templates", `{"key":"article-card","name":"文章卡片","category_id":`+strconv.FormatInt(createdCategory.Category.ID, 10)+`,"context":"list","description":"列表卡片","content":"<article>{{.Title}}</article>"}`)
+	labelResponse := request(http.MethodPost, "/api/admin/theme/label-templates", `{"key":"article-card","name":"文章卡片","category_id":`+strconv.FormatInt(createdCategory.Category.ID, 10)+`,"context":"list","description":"列表卡片","temptext":"<ul>[!--list.temp--]<!--list.var1-->[!--list.temp--]</ul>","listvar":"<li><a href=\"[!--url--]\">[!--title--]</a></li>"}`)
 	if labelResponse.Code != http.StatusOK {
 		t.Fatalf("create template label status = %d: %s", labelResponse.Code, labelResponse.Body.String())
 	}
@@ -77,7 +77,7 @@ func TestAdminTemplateLabelManagement(t *testing.T) {
 	}
 
 	id := strconv.FormatInt(createdLabel.Item.ID, 10)
-	updateResponse := request(http.MethodPut, "/api/admin/theme/label-templates/"+id, `{"key":"article-card","name":"文章卡片新版","category_id":`+strconv.FormatInt(createdCategory.Category.ID, 10)+`,"context":"detail","content":"<article>{{.title}}</article>"}`)
+	updateResponse := request(http.MethodPut, "/api/admin/theme/label-templates/"+id, `{"key":"article-card","name":"文章卡片新版","category_id":`+strconv.FormatInt(createdCategory.Category.ID, 10)+`,"context":"detail","temptext":"<ul class=\"news-list\">[!--list.temp--]<!--list.var1-->[!--list.temp--]</ul>","listvar":"<li><a href=\"[!--url--]\">[!--title--]</a></li>"}`)
 	if updateResponse.Code != http.StatusOK {
 		t.Fatalf("update template label status = %d: %s", updateResponse.Code, updateResponse.Body.String())
 	}

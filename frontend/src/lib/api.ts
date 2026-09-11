@@ -177,6 +177,11 @@ export type TemplateLabel = {
   context: TemplateLabelContext
   description: string
   content: string
+  temptext?: string
+  listvar?: string
+  rownum?: number
+  subnews?: number
+  showdate?: string
   sort_order: number
   created_at: string
   updated_at: string
@@ -189,6 +194,11 @@ export type TemplateLabelInput = {
   context: TemplateLabelContext
   description: string
   content: string
+  temptext?: string
+  listvar?: string
+  rownum?: number
+  subnews?: number
+  showdate?: string
   sort_order: number
 }
 

@@ -38,6 +38,11 @@ type Label struct {
 	Context      string `json:"context"`
 	Description  string `json:"description"`
 	Content      string `json:"content"`
+	Temptext     string `json:"temptext"`
+	Listvar      string `json:"listvar"`
+	Rownum       int    `json:"rownum"`
+	Subnews      int    `json:"subnews"`
+	Showdate     string `json:"showdate"`
 	SortOrder    int64  `json:"sort_order"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
@@ -50,6 +55,11 @@ type Input struct {
 	Context     string `json:"context"`
 	Description string `json:"description"`
 	Content     string `json:"content"`
+	Temptext    string `json:"temptext"`
+	Listvar     string `json:"listvar"`
+	Rownum      int    `json:"rownum"`
+	Subnews     int    `json:"subnews"`
+	Showdate    string `json:"showdate"`
 	SortOrder   int64  `json:"sort_order"`
 }
 
@@ -84,6 +94,11 @@ func Ensure(ctx context.Context, database *sql.DB) error {
 			"context" TEXT NOT NULL DEFAULT 'any',
 			"description" TEXT NOT NULL DEFAULT '',
 			"content" TEXT NOT NULL DEFAULT '',
+			"temptext" TEXT NOT NULL DEFAULT '',
+			"listvar" TEXT NOT NULL DEFAULT '',
+			"rownum" INTEGER NOT NULL DEFAULT 1,
+			"subnews" INTEGER NOT NULL DEFAULT 0,
+			"showdate" TEXT NOT NULL DEFAULT 'Y-m-d H:i:s',
 			"sort_order" INTEGER NOT NULL DEFAULT 0,
 			"created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			"updated_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -101,19 +116,143 @@ func Ensure(ctx context.Context, database *sql.DB) error {
 	return nil
 }
 
+// ConvertTemplateVars converts template field tags to Go template placeholders.
+func ConvertTemplateVars(content string) string {
+	replacements := []struct {
+		old string
+		new string
+	}{
+		// 标准现代化字段标记
+		{"[!--title--]", "{{.Title}}"},
+		{"[!--oldtitle--]", "{{.Title}}"},
+		{"[!--url--]", "{{.URL}}"},
+		{"[!--titleurl--]", "{{.URL}}"},
+		{"[!--image--]", "{{.Image}}"},
+		{"[!--titlepic--]", "{{.Image}}"},
+		{"[!--summary--]", "{{.Summary}}"},
+		{"[!--smalltext--]", "{{.Summary}}"},
+		{"[!--date--]", "{{.Date}}"},
+		{"[!--newstime--]", "{{.Date}}"},
+		{"[!--id--]", "{{.ID}}"},
+		{"[!--index--]", "{{.Index}}"},
+		{"[!--no.num--]", "{{.Index}}"},
+		{"[!--category.name--]", "{{.CategoryName}}"},
+		{"[!--class.name--]", "{{.CategoryName}}"},
+		{"[!--this.classname--]", "{{.CategoryName}}"},
+		{"[!--category.url--]", "{{.CategoryURL}}"},
+		{"[!--this.classlink--]", "{{.CategoryURL}}"},
+		{"[!--classurl--]", "{{.CategoryURL}}"},
+		{"[!--the.classname--]", "{{.category_name}}"},
+		{"[!--the.classid--]", "{{.category_id}}"},
+		{"[!--the.classurl--]", "{{.category_url}}"},
+		{"[!--site.name--]", `{{setting "site_name"}}`},
+		{"[!--site.url--]", `{{setting "site_url"}}`},
+	}
+	result := content
+	for _, r := range replacements {
+		result = strings.ReplaceAll(result, r.old, r.new)
+	}
+	return result
+}
+
+func findListMarker(temptext string) string {
+	markers := []string{
+		"[!--list.temp--]",
+		"[!--list.loop--]",
+		"[!--listtemp--]",
+	}
+	for _, m := range markers {
+		if strings.Contains(temptext, m) {
+			return m
+		}
+	}
+	return ""
+}
+
+// CompileContent combines temptext (页面模板内容) and listvar (列表内容模板) into an executable Go template.
+func CompileContent(temptext, listvar string, rownum int) string {
+	temptext = strings.TrimSpace(temptext)
+	listvar = strings.TrimSpace(listvar)
+	if temptext == "" || listvar == "" {
+		return ""
+	}
+	listvar = ConvertTemplateVars(listvar)
+
+	if marker := findListMarker(temptext); marker != "" {
+		parts := strings.Split(temptext, marker)
+		if len(parts) >= 3 {
+			header := ConvertTemplateVars(parts[0])
+			loopBody := parts[1]
+			footer := ConvertTemplateVars(parts[2])
+
+			compiledLoopBody := loopBody
+			if strings.Contains(compiledLoopBody, "<!--list.var") {
+				for i := 1; i <= 20; i++ {
+					tag := fmt.Sprintf("<!--list.var%d-->", i)
+					compiledLoopBody = strings.ReplaceAll(compiledLoopBody, tag, listvar)
+				}
+			} else {
+				compiledLoopBody = listvar
+			}
+
+			var builder strings.Builder
+			builder.WriteString(header)
+			builder.WriteString("\n{{if listItems .}}\n{{range listItems .}}\n")
+			builder.WriteString(compiledLoopBody)
+			builder.WriteString("\n{{end}}\n{{else if .}}\n{{range .}}\n")
+			builder.WriteString(compiledLoopBody)
+			builder.WriteString("\n{{end}}\n{{end}}\n")
+			builder.WriteString(footer)
+			return strings.TrimSpace(builder.String())
+		}
+	}
+
+	if strings.Contains(temptext, "<!--list.var") {
+		result := temptext
+		for i := 1; i <= 20; i++ {
+			tag := fmt.Sprintf("<!--list.var%d-->", i)
+			result = strings.ReplaceAll(result, tag, listvar)
+		}
+		return strings.TrimSpace(ConvertTemplateVars(result))
+	}
+
+	return strings.TrimSpace(ConvertTemplateVars(temptext))
+}
+
 func NormalizeInput(input Input) (Input, error) {
 	input.Key = strings.ToLower(strings.TrimSpace(input.Key))
 	input.Name = strings.TrimSpace(input.Name)
 	input.Context = strings.TrimSpace(input.Context)
 	input.Description = strings.TrimSpace(input.Description)
+	input.Temptext = strings.TrimSpace(input.Temptext)
+	input.Listvar = strings.TrimSpace(input.Listvar)
+	input.Showdate = strings.TrimSpace(input.Showdate)
+	if input.Showdate == "" {
+		input.Showdate = "Y-m-d H:i:s"
+	}
+	if input.Rownum <= 0 {
+		input.Rownum = 1
+	}
+	if input.Subnews < 0 {
+		input.Subnews = 0
+	}
+
 	if input.Key == "" || !keyPattern.MatchString(input.Key) {
 		return Input{}, fmt.Errorf("标签调用名只能以字母开头，并使用字母、数字、下划线或短横线")
 	}
 	if input.Name == "" {
 		return Input{}, fmt.Errorf("标签模板名称不能为空")
 	}
+	if input.Temptext == "" {
+		return Input{}, fmt.Errorf("页面模板内容不能为空")
+	}
+	if input.Listvar == "" {
+		return Input{}, fmt.Errorf("列表内容模板(list.var)不能为空")
+	}
+
+	input.Content = CompileContent(input.Temptext, input.Listvar, input.Rownum)
 	if strings.TrimSpace(input.Content) == "" {
-		return Input{}, fmt.Errorf("标签模板内容不能为空")
+		return Input{}, fmt.Errorf("标签模板编译内容不能为空")
 	}
 	if input.Context == "" {
 		input.Context = ContextAny
@@ -197,7 +336,8 @@ func List(ctx context.Context, database *sql.DB, query string, categoryID int64,
 	args = append(args, pageSize, (page-1)*pageSize)
 	rows, err := database.QueryContext(ctx, `
 		SELECT l."id", l."key", l."name", l."category_id", COALESCE(c."name", ''), l."context",
-		       l."description", l."content", l."sort_order", l."created_at", l."updated_at"
+		       l."description", l."content", l."temptext", l."listvar", l."rownum", l."subnews", l."showdate",
+		       l."sort_order", l."created_at", l."updated_at"
 		FROM "gocms_template_label" l
 		LEFT JOIN "gocms_template_label_category" c ON c."id" = l."category_id"
 		WHERE `+where+`
@@ -216,7 +356,8 @@ func List(ctx context.Context, database *sql.DB, query string, categoryID int64,
 func Load(ctx context.Context, query queryer) ([]Label, error) {
 	rows, err := query.QueryContext(ctx, `
 		SELECT l."id", l."key", l."name", l."category_id", COALESCE(c."name", ''), l."context",
-		       l."description", l."content", l."sort_order", l."created_at", l."updated_at"
+		       l."description", l."content", l."temptext", l."listvar", l."rownum", l."subnews", l."showdate",
+		       l."sort_order", l."created_at", l."updated_at"
 		FROM "gocms_template_label" l
 		LEFT JOIN "gocms_template_label_category" c ON c."id" = l."category_id"
 		ORDER BY l."sort_order" ASC, l."id" ASC`)
@@ -252,7 +393,8 @@ func scanLabels(rows *sql.Rows, capacity int) ([]Label, error) {
 func scanLabel(source scanner, item *Label) error {
 	if err := source.Scan(
 		&item.ID, &item.Key, &item.Name, &item.CategoryID, &item.CategoryName, &item.Context,
-		&item.Description, &item.Content, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt,
+		&item.Description, &item.Content, &item.Temptext, &item.Listvar, &item.Rownum, &item.Subnews, &item.Showdate,
+		&item.SortOrder, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return fmt.Errorf("scan template label: %w", err)
 	}
@@ -263,12 +405,14 @@ func Get(ctx context.Context, database *sql.DB, id int64) (Label, error) {
 	var item Label
 	err := database.QueryRowContext(ctx, `
 		SELECT l."id", l."key", l."name", l."category_id", COALESCE(c."name", ''), l."context",
-		       l."description", l."content", l."sort_order", l."created_at", l."updated_at"
+		       l."description", l."content", l."temptext", l."listvar", l."rownum", l."subnews", l."showdate",
+		       l."sort_order", l."created_at", l."updated_at"
 		FROM "gocms_template_label" l
 		LEFT JOIN "gocms_template_label_category" c ON c."id" = l."category_id"
 		WHERE l."id" = ?`, id).Scan(
 		&item.ID, &item.Key, &item.Name, &item.CategoryID, &item.CategoryName, &item.Context,
-		&item.Description, &item.Content, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt,
+		&item.Description, &item.Content, &item.Temptext, &item.Listvar, &item.Rownum, &item.Subnews, &item.Showdate,
+		&item.SortOrder, &item.CreatedAt, &item.UpdatedAt,
 	)
 	if err != nil {
 		return Label{}, err
@@ -288,8 +432,8 @@ func Create(ctx context.Context, database *sql.DB, input Input) (Label, error) {
 		return Label{}, err
 	}
 	result, err := database.ExecContext(ctx, `
-		INSERT INTO "gocms_template_label" ("key", "name", "category_id", "context", "description", "content", "sort_order")
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, input.Key, input.Name, input.CategoryID, input.Context, input.Description, input.Content, input.SortOrder)
+		INSERT INTO "gocms_template_label" ("key", "name", "category_id", "context", "description", "content", "temptext", "listvar", "rownum", "subnews", "showdate", "sort_order")
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, input.Key, input.Name, input.CategoryID, input.Context, input.Description, input.Content, input.Temptext, input.Listvar, input.Rownum, input.Subnews, input.Showdate, input.SortOrder)
 	if err != nil {
 		return Label{}, normalizeDatabaseError(err)
 	}
@@ -316,8 +460,8 @@ func Update(ctx context.Context, database *sql.DB, id int64, input Input) (Label
 	}
 	result, err := database.ExecContext(ctx, `
 		UPDATE "gocms_template_label"
-		SET "key" = ?, "name" = ?, "category_id" = ?, "context" = ?, "description" = ?, "content" = ?, "sort_order" = ?, "updated_at" = CURRENT_TIMESTAMP
-		WHERE "id" = ?`, input.Key, input.Name, input.CategoryID, input.Context, input.Description, input.Content, input.SortOrder, id)
+		SET "key" = ?, "name" = ?, "category_id" = ?, "context" = ?, "description" = ?, "content" = ?, "temptext" = ?, "listvar" = ?, "rownum" = ?, "subnews" = ?, "showdate" = ?, "sort_order" = ?, "updated_at" = CURRENT_TIMESTAMP
+		WHERE "id" = ?`, input.Key, input.Name, input.CategoryID, input.Context, input.Description, input.Content, input.Temptext, input.Listvar, input.Rownum, input.Subnews, input.Showdate, input.SortOrder, id)
 	if err != nil {
 		return Label{}, normalizeDatabaseError(err)
 	}
