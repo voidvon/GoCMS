@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react"
-import { FileText, ImagePlus, Library, LoaderCircle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react"
+import { ArrowDown, ArrowUp, FileText, ImagePlus, Library, LoaderCircle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react"
 
 import {
   createContent,
@@ -7,14 +7,19 @@ import {
   getCategories,
   getContent,
   getContentItem,
+  getModelFields,
+  getSystemModels,
   uploadMedia,
   type CategoryItem,
   type Content,
   type ContentInput,
   type MediaAsset,
+  type ModelField,
   type SaveResponse,
+  type SystemModel,
   updateContent,
 } from "@/lib/api"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -45,6 +50,8 @@ const emptyContent: ContentInput = {
   order_id: 0,
   featured: 0,
   visible: 1,
+  model_id: 1,
+  extra_data: {},
 }
 
 function categoryName(categories: CategoryItem[], categoryID: number) {
@@ -71,182 +78,898 @@ function publicationMessage(result: SaveResponse) {
     : "内容已保存并加入发布队列，将在当前任务完成后自动生成。"
 }
 
+function parseFieldOptions(text: string) {
+  if (!text) return []
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split("==")
+      return {
+        value: parts[0].trim(),
+        label: (parts[1] || parts[0]).trim(),
+      }
+    })
+}
+
+type PhotoItem = {
+  url: string
+  title: string
+}
+
+function parsePhotos(raw: any): PhotoItem[] {
+  if (Array.isArray(raw)) {
+    return raw.map((item) => {
+      if (typeof item === "string") return { url: item, title: "" }
+      return { url: item?.url || "", title: item?.title || "" }
+    })
+  }
+  if (typeof raw === "string") {
+    const trimmed = raw.trim()
+    if (!trimmed) return []
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (Array.isArray(parsed)) {
+          return parsed.map((item) => {
+            if (typeof item === "string") return { url: item, title: "" }
+            return { url: item?.url || "", title: item?.title || "" }
+          })
+        }
+      } catch {
+        // fallback to delimited format
+      }
+    }
+    return trimmed
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const parts = line.split("::::::")
+        if (parts.length >= 3) {
+          return { url: parts[0].trim(), title: parts[2].trim() }
+        } else if (parts.length === 2) {
+          return { url: parts[0].trim(), title: parts[1].trim() }
+        }
+        return { url: parts[0].trim(), title: "" }
+      })
+  }
+  return []
+}
+
+function MultiImageField({
+  field,
+  value,
+  isRequired,
+  onChange,
+}: {
+  field: { field_name: string; field_label: string; description?: string }
+  value: any
+  isRequired: boolean
+  onChange: (value: PhotoItem[]) => void
+}) {
+  const photos = useMemo(() => parsePhotos(value), [value])
+  const [mediaPickerOpen, setMediaPickerOpen] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  function updateItem(index: number, key: keyof PhotoItem, val: string) {
+    const next = photos.map((item, i) => (i === index ? { ...item, [key]: val } : item))
+    onChange(next)
+  }
+
+  function removeItem(index: number) {
+    onChange(photos.filter((_, i) => i !== index))
+  }
+
+  function moveItem(index: number, direction: -1 | 1) {
+    const target = index + direction
+    if (target < 0 || target >= photos.length) return
+    const next = [...photos]
+    const [moved] = next.splice(index, 1)
+    next.splice(target, 0, moved)
+    onChange(next)
+  }
+
+  function addItem(url = "", title = "") {
+    onChange([...photos, { url, title }])
+  }
+
+  async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
+    const files = e.target.files
+    if (!files || files.length === 0) return
+    setUploading(true)
+    try {
+      const added: PhotoItem[] = []
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        const res = await uploadMedia(file)
+        if (res.asset) {
+          added.push({ url: res.asset.url, title: res.asset.original_name || "" })
+        }
+      }
+      onChange([...photos, ...added])
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "图片上传失败")
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ""
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border bg-background/50 p-3 sm:col-span-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+        <div>
+          <Label className="text-sm font-medium">
+            {field.field_label}
+            {isRequired ? <span className="text-destructive"> *</span> : null}
+          </Label>
+          {field.description ? (
+            <p className="text-xs text-muted-foreground">{field.description}</p>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml"
+            className="hidden"
+            onChange={handleFileUpload}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {uploading ? <LoaderCircle className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+            本地上传
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setMediaPickerOpen(true)}
+          >
+            <Library className="size-3.5" />
+            媒体库选取
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => addItem()}
+          >
+            <Plus className="size-3.5" />
+            添加图片项
+          </Button>
+        </div>
+      </div>
+
+      {photos.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-6 text-center text-xs text-muted-foreground">
+          <ImagePlus className="size-8 mb-1 opacity-50" />
+          <span>暂无图片，点击上方按钮上传或选取</span>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {photos.map((item, index) => (
+            <div
+              key={index}
+              className="flex items-center gap-3 rounded-lg border bg-muted/30 p-2.5 transition-colors hover:bg-muted/50"
+            >
+              <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded border bg-background">
+                {item.url ? (
+                  <img
+                    src={item.url}
+                    alt={item.title || `图片 ${index + 1}`}
+                    className="size-full object-cover"
+                    onError={(e) => {
+                      ;(e.target as HTMLElement).style.display = "none"
+                    }}
+                  />
+                ) : (
+                  <ImagePlus className="size-5 text-muted-foreground/40" />
+                )}
+              </div>
+              <div className="grid flex-1 gap-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <span className="text-[11px] text-muted-foreground">图片地址 (URL)</span>
+                  <Input
+                    value={item.url}
+                    onChange={(e) => updateItem(index, "url", e.target.value)}
+                    placeholder="/images/example.jpg"
+                    className="h-8 text-xs"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[11px] text-muted-foreground">图片名称/说明</span>
+                  <Input
+                    value={item.title}
+                    onChange={(e) => updateItem(index, "title", e.target.value)}
+                    placeholder="如：外观正视图"
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <IconButton
+                  variant="ghost"
+                  size="icon-xs"
+                  label="上移"
+                  disabled={index === 0}
+                  onClick={() => moveItem(index, -1)}
+                >
+                  <ArrowUp className="size-3.5" />
+                </IconButton>
+                <IconButton
+                  variant="ghost"
+                  size="icon-xs"
+                  label="下移"
+                  disabled={index === photos.length - 1}
+                  onClick={() => moveItem(index, 1)}
+                >
+                  <ArrowDown className="size-3.5" />
+                </IconButton>
+                <IconButton
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-destructive hover:text-destructive"
+                  label="删除"
+                  onClick={() => removeItem(index)}
+                >
+                  <Trash2 className="size-3.5" />
+                </IconButton>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <MediaPickerDialog
+        open={mediaPickerOpen}
+        onOpenChange={setMediaPickerOpen}
+        onSelect={(media) => {
+          addItem(media.url, media.original_name || "")
+          setMediaPickerOpen(false)
+        }}
+      />
+    </div>
+  )
+}
+
+function parseMultiValue(raw: any): string[] {
+  if (Array.isArray(raw)) return raw.map(String)
+  if (typeof raw === "string") {
+    const trimmed = raw.trim()
+    if (!trimmed) return []
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        const parsed = JSON.parse(trimmed)
+        if (Array.isArray(parsed)) return parsed.map(String)
+      } catch {}
+    }
+    return trimmed.split("\n").map((l) => l.trim()).filter(Boolean)
+  }
+  return []
+}
+
+function MultiValueField({
+  field,
+  value,
+  isRequired,
+  onChange,
+}: {
+  field: { field_name: string; field_label: string; description?: string }
+  value: any
+  isRequired: boolean
+  onChange: (value: string[]) => void
+}) {
+  const items = useMemo(() => parseMultiValue(value), [value])
+
+  function updateItem(index: number, val: string) {
+    const next = items.map((item, i) => (i === index ? val : item))
+    onChange(next)
+  }
+
+  function removeItem(index: number) {
+    onChange(items.filter((_, i) => i !== index))
+  }
+
+  function addItem() {
+    onChange([...items, ""])
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border bg-background/50 p-3 sm:col-span-2">
+      <div className="flex items-center justify-between border-b pb-2">
+        <div>
+          <Label className="text-sm font-medium">
+            {field.field_label}
+            {isRequired ? <span className="text-destructive"> *</span> : null}
+          </Label>
+          {field.description ? (
+            <p className="text-xs text-muted-foreground">{field.description}</p>
+          ) : null}
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={addItem}>
+          <Plus className="size-3.5" />
+          添加项
+        </Button>
+      </div>
+      {items.length === 0 ? (
+        <p className="py-3 text-center text-xs text-muted-foreground">暂无项目，点击上方“添加项”输入</p>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((item, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <span className="w-6 text-center text-xs text-muted-foreground font-mono">{index + 1}.</span>
+              <Input
+                value={item}
+                onChange={(e) => updateItem(index, e.target.value)}
+                placeholder={`输入${field.field_label}项目`}
+                className="h-8 text-xs flex-1"
+              />
+              <IconButton
+                variant="ghost"
+                size="icon-xs"
+                className="text-destructive hover:text-destructive"
+                label="删除"
+                onClick={() => removeItem(index)}
+              >
+                <Trash2 className="size-3.5" />
+              </IconButton>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function isSystemField(name: string): boolean {
+  return [
+    "title",
+    "code",
+    "summary",
+    "body",
+    "content",
+    "cover_image",
+    "published_at",
+    "source",
+    "keywords",
+    "description",
+  ].includes(name)
+}
+
+function defaultFieldLabel(name: string): string {
+  const map: Record<string, string> = {
+    title: "信息标题",
+    code: "编号/型号",
+    summary: "内容摘要",
+    body: "正文内容",
+    content: "正文内容",
+    cover_image: "缩略图",
+    published_at: "发布时间",
+    source: "信息来源",
+    keywords: "关键词",
+    description: "描述",
+  }
+  return map[name] || name
+}
+
+function defaultFieldType(name: string): string {
+  if (name === "body" || name === "content") return "editor"
+  if (name === "cover_image") return "image"
+  if (name === "summary" || name === "description") return "textarea"
+  if (name === "published_at") return "date"
+  return "text"
+}
+
+function SingleImageField({
+  label,
+  value,
+  isRequired,
+  description,
+  onChange,
+}: {
+  label: string
+  value: string
+  isRequired: boolean
+  description?: string
+  onChange: (url: string) => void
+}) {
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState("")
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  async function handleUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    setUploading(true)
+    setError("")
+    try {
+      const res = await uploadMedia(file)
+      if (res.asset) onChange(res.asset.url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "图片上传失败")
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-2 sm:col-span-2">
+      <div className="flex items-center justify-between">
+        <Label>
+          {label}
+          {isRequired ? <span className="text-destructive"> *</span> : null}
+        </Label>
+        {description ? <span className="text-xs text-muted-foreground">{description}</span> : null}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        className="hidden"
+        onChange={handleUpload}
+      />
+      <div className="overflow-hidden rounded-lg border bg-muted">
+        {value ? (
+          <img src={value} alt={label} className="aspect-[3/1] max-h-48 w-full object-contain" />
+        ) : (
+          <div className="flex aspect-[3/1] max-h-36 items-center justify-center gap-2 text-sm text-muted-foreground">
+            <ImagePlus className="size-5" />
+            暂未选择{label}
+          </div>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={uploading}>
+          {uploading ? <LoaderCircle className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
+          {uploading ? "上传中" : `上传${label}`}
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={() => setPickerOpen(true)} disabled={uploading}>
+          <Library className="size-3.5" />素材库
+        </Button>
+        {value ? (
+          <IconButton label={`清除${label}`} variant="ghost" size="icon-sm" onClick={() => onChange("")}>
+            <X />
+          </IconButton>
+        ) : null}
+      </div>
+      {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
+      <MediaPickerDialog
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onSelect={(media: MediaAsset) => {
+          onChange(media.url)
+          setPickerOpen(false)
+        }}
+      />
+    </div>
+  )
+}
+
 function ContentEditor({
   content,
   categories,
+  models,
+  modelFields,
   onSave,
   onCancel,
   saving,
 }: {
   content: ContentInput
   categories: CategoryItem[]
+  models: SystemModel[]
+  modelFields: ModelField[]
   onSave: (content: ContentInput, publish?: boolean) => void
   onCancel: () => void
   saving: boolean
 }) {
   const [form, setForm] = useState(content)
+  const [customError, setCustomError] = useState("")
   const categoryOptions = flattenCategoryTree(categories)
-  const coverInputRef = useRef<HTMLInputElement>(null)
-  const [coverUploading, setCoverUploading] = useState(false)
   const [bodyUploading, setBodyUploading] = useState(false)
-  const [coverError, setCoverError] = useState("")
-  const [mediaPickerOpen, setMediaPickerOpen] = useState(false)
-  const uploading = coverUploading || bodyUploading
 
   function update<K extends keyof ContentInput>(key: K, value: ContentInput[K]) {
     setForm((current) => ({ ...current, [key]: value }))
   }
 
-  function chooseCoverImage() {
-    if (!coverUploading) coverInputRef.current?.click()
+  function updateExtra(field: string, value: any) {
+    setForm((current) => ({
+      ...current,
+      extra_data: {
+        ...(current.extra_data || {}),
+        [field]: value,
+      },
+    }))
   }
 
-  async function handleCoverUpload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    event.target.value = ""
-    if (!file) return
-    setCoverUploading(true)
-    setCoverError("")
-    try {
-      const result = await uploadMedia(file)
-      update("cover_image", result.asset.url)
-    } catch (uploadError) {
-      setCoverError(uploadError instanceof Error ? uploadError.message : "封面上传失败")
-    } finally {
-      setCoverUploading(false)
+  const selectedCategory = categoryOptions.find((c) => c.id === form.category_id)
+  const currentModelId = selectedCategory?.model_id || form.model_id || 1
+  const currentModel = models.find((m) => m.id === currentModelId) || models[0]
+
+  const mustFieldSet = useMemo(() => {
+    return new Set(currentModel?.must_fields || ["title"])
+  }, [currentModel])
+
+  const activeFields = useMemo(() => {
+    if (!currentModel) return []
+    const tableFields = modelFields.filter((f) => f.table_id === currentModel.table_id)
+    const tableFieldMap = new Map(tableFields.map((f) => [f.field_name, f]))
+
+    if (currentModel.entry_fields && currentModel.entry_fields.length > 0) {
+      return currentModel.entry_fields.map((ef) => {
+        const fieldDef = tableFieldMap.get(ef.field)
+        return {
+          field_name: ef.field,
+          field_label: ef.label || fieldDef?.field_label || defaultFieldLabel(ef.field),
+          field_type: fieldDef?.field_type || defaultFieldType(ef.field),
+          field_options: fieldDef?.field_options || "",
+          description: fieldDef?.description || "",
+          is_system: fieldDef?.is_system ?? (isSystemField(ef.field) ? 1 : 0),
+        }
+      })
+    }
+
+    return [...tableFields].sort((a, b) => a.sort_order - b.sort_order).map((f) => ({
+      field_name: f.field_name,
+      field_label: f.field_label,
+      field_type: f.field_type,
+      field_options: f.field_options,
+      description: f.description,
+      is_system: f.is_system,
+    }))
+  }, [currentModel, modelFields])
+
+  function getFieldValue(fieldName: string): any {
+    if (fieldName === "body" || fieldName === "content") return form.content
+    if (fieldName in form && fieldName !== "extra_data") {
+      return (form as any)[fieldName] ?? ""
+    }
+    return form.extra_data?.[fieldName] ?? ""
+  }
+
+  function setFieldValue(fieldName: string, value: any) {
+    if (fieldName === "body" || fieldName === "content") {
+      update("content", value)
+    } else if (fieldName in form && fieldName !== "extra_data") {
+      update(fieldName as keyof ContentInput, value)
+    } else {
+      updateExtra(fieldName, value)
     }
   }
 
-  function selectCover(asset: MediaAsset) {
-    setCoverError("")
-    update("cover_image", asset.url)
+  function handleSave(publish = false) {
+    for (const f of activeFields) {
+      if (mustFieldSet.has(f.field_name)) {
+        const val = getFieldValue(f.field_name)
+        const isEmpty =
+          val === undefined ||
+          val === null ||
+          (Array.isArray(val) ? val.length === 0 : String(val).trim() === "")
+        if (isEmpty) {
+          setCustomError(`请填写必填字段：${f.field_label}`)
+          return
+        }
+      }
+    }
+    setCustomError("")
+    onSave(
+      {
+        ...form,
+        model_id: currentModelId,
+        extra_data: form.extra_data || {},
+      },
+      publish,
+    )
   }
 
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{content.title ? "编辑内容" : "新增内容"}</DialogTitle>
-        <DialogDescription>内容使用所属分类的列表模板、详情模板和生成路径。</DialogDescription>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <DialogTitle>{content.title ? "编辑内容" : "新增内容"}</DialogTitle>
+          <Badge variant="outline" className="text-xs font-normal">
+            模型：{currentModel?.name || "通用模型"}
+          </Badge>
+        </div>
+        <DialogDescription>
+          根据所属分类绑定的系统模型动态配置录入表单。
+        </DialogDescription>
       </DialogHeader>
-      <div className="grid gap-5 py-2 sm:grid-cols-2">
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="content-title">标题</Label>
-          <Input id="content-title" value={form.title} onChange={(event) => update("title", event.target.value)} required />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="content-code">编号 / 型号</Label>
-          <Input id="content-code" value={form.code} onChange={(event) => update("code", event.target.value)} />
-        </div>
-        <div className="space-y-2">
-          <Label>所属分类</Label>
-          <Select value={String(form.category_id)} onValueChange={(value) => update("category_id", Number(value ?? 0))}>
-            <SelectTrigger className="w-full">
-              <SelectValue>
-                {(value) => {
-                  const selectedID = Number(value ?? 0)
-                  return selectedID > 0
-                    ? categoryOptions.find((category) => category.id === selectedID)?.name ?? "选择分类"
-                    : "未分类"
+
+      <div className="space-y-4 py-2">
+        {customError ? <InlineAlert>{customError}</InlineAlert> : null}
+
+        {/* 顶部栏目与模型联动控制 */}
+        <div className="rounded-lg border bg-muted/40 p-3.5 space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label className="font-semibold text-sm">所属栏目分类</Label>
+            <span className="text-xs text-muted-foreground">
+              关联模型：<strong className="text-foreground">{currentModel?.name || "默认模型"}</strong> ({activeFields.length} 个字段)
+            </span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Select
+                value={String(form.category_id)}
+                onValueChange={(value) => {
+                  const catId = Number(value ?? 0)
+                  const cat = categoryOptions.find((c) => c.id === catId)
+                  setForm((curr) => ({
+                    ...curr,
+                    category_id: catId,
+                    model_id: cat?.model_id || curr.model_id || 1,
+                  }))
                 }}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="0">未分类</SelectItem>
-              {categoryOptions.map((category) => (
-                <SelectItem key={category.id} value={String(category.id)}>
-                  <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              >
+                <SelectTrigger className="w-full bg-background">
+                  <SelectValue>
+                    {(value) => {
+                      const selectedID = Number(value ?? 0)
+                      return selectedID > 0
+                        ? categoryOptions.find((category) => category.id === selectedID)?.name ?? "选择分类"
+                        : "未分类"
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">未分类</SelectItem>
+                  {categoryOptions.map((category) => (
+                    <SelectItem key={category.id} value={String(category.id)}>
+                      <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         </div>
-        <div className="space-y-2">
-          <Label htmlFor="content-published-at">发布日期</Label>
-          <Input id="content-published-at" type="datetime-local" value={dateTimeInput(form.published_at)} onChange={(event) => update("published_at", dateTimeValue(event.target.value))} />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="content-source">来源</Label>
-          <Input id="content-source" value={form.source} onChange={(event) => update("source", event.target.value)} />
-        </div>
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="content-summary">摘要</Label>
-          <Textarea id="content-summary" value={form.summary} onChange={(event) => update("summary", event.target.value)} className="min-h-20" />
-        </div>
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="content-body">正文</Label>
-          <RichTextEditor id="content-body" value={form.content} onChange={(value) => update("content", value)} onUploadingChange={setBodyUploading} />
-        </div>
-        <div className="space-y-3 sm:col-span-2">
-          <Label>封面图片</Label>
-          <input
-            ref={coverInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/gif"
-            className="hidden"
-            onChange={(event) => void handleCoverUpload(event)}
-          />
-          <div className="overflow-hidden rounded-lg border bg-muted">
-            {form.cover_image ? (
-              <img src={form.cover_image} alt="内容封面预览" className="aspect-[3/1] max-h-52 w-full object-contain" />
-            ) : (
-              <div className="flex aspect-[3/1] max-h-52 items-center justify-center gap-2 text-sm text-muted-foreground">
-                <ImagePlus className="size-5" />
-                暂未选择封面
+
+        {/* 核心动态字段流：依据当前模型的 entry_fields 顺序与别名渲染 */}
+        <div className="grid gap-5 sm:grid-cols-2">
+          {activeFields.map((field) => {
+            const isRequired = mustFieldSet.has(field.field_name)
+            const val = getFieldValue(field.field_name)
+
+            if (field.field_type === "morepic") {
+              return (
+                <MultiImageField
+                  key={field.field_name}
+                  field={field}
+                  value={val}
+                  isRequired={isRequired}
+                  onChange={(nextVal) => setFieldValue(field.field_name, nextVal)}
+                />
+              )
+            }
+
+            if (field.field_type === "multivalue") {
+              return (
+                <MultiValueField
+                  key={field.field_name}
+                  field={field}
+                  value={val}
+                  isRequired={isRequired}
+                  onChange={(nextVal) => setFieldValue(field.field_name, nextVal)}
+                />
+              )
+            }
+
+            if (field.field_type === "image") {
+              return (
+                <SingleImageField
+                  key={field.field_name}
+                  label={field.field_label}
+                  value={val || ""}
+                  isRequired={isRequired}
+                  description={field.description}
+                  onChange={(url) => setFieldValue(field.field_name, url)}
+                />
+              )
+            }
+
+            if (field.field_type === "editor") {
+              return (
+                <div key={field.field_name} className="space-y-2 sm:col-span-2">
+                  <Label htmlFor={`field-${field.field_name}`}>
+                    {field.field_label}
+                    {isRequired ? <span className="text-destructive"> *</span> : null}
+                  </Label>
+                  <RichTextEditor
+                    id={`field-${field.field_name}`}
+                    value={val || ""}
+                    onChange={(content) => setFieldValue(field.field_name, content)}
+                    onUploadingChange={setBodyUploading}
+                  />
+                  {field.description ? (
+                    <p className="text-xs text-muted-foreground">{field.description}</p>
+                  ) : null}
+                </div>
+              )
+            }
+
+            if (field.field_type === "textarea") {
+              return (
+                <div key={field.field_name} className="space-y-2 sm:col-span-2">
+                  <Label htmlFor={`field-${field.field_name}`}>
+                    {field.field_label}
+                    {isRequired ? <span className="text-destructive"> *</span> : null}
+                  </Label>
+                  <Textarea
+                    id={`field-${field.field_name}`}
+                    value={val || ""}
+                    onChange={(e) => setFieldValue(field.field_name, e.target.value)}
+                    placeholder={field.description || `请输入${field.field_label}`}
+                    className="min-h-20"
+                    required={isRequired}
+                  />
+                </div>
+              )
+            }
+
+            if (field.field_type === "select" || field.field_type === "radio") {
+              const options = parseFieldOptions(field.field_options)
+              return (
+                <div key={field.field_name} className="space-y-2">
+                  <Label>
+                    {field.field_label}
+                    {isRequired ? <span className="text-destructive"> *</span> : null}
+                  </Label>
+                  <Select
+                    value={val ? String(val) : ""}
+                    onValueChange={(value) => setFieldValue(field.field_name, value ?? "")}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder={`选择${field.field_label}`} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {options.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {field.description ? (
+                    <p className="text-xs text-muted-foreground">{field.description}</p>
+                  ) : null}
+                </div>
+              )
+            }
+
+            if (field.field_type === "date") {
+              return (
+                <div key={field.field_name} className="space-y-2">
+                  <Label htmlFor={`field-${field.field_name}`}>
+                    {field.field_label}
+                    {isRequired ? <span className="text-destructive"> *</span> : null}
+                  </Label>
+                  <Input
+                    id={`field-${field.field_name}`}
+                    type="datetime-local"
+                    value={dateTimeInput(val || "")}
+                    onChange={(e) => setFieldValue(field.field_name, dateTimeValue(e.target.value))}
+                    required={isRequired}
+                  />
+                  {field.description ? (
+                    <p className="text-xs text-muted-foreground">{field.description}</p>
+                  ) : null}
+                </div>
+              )
+            }
+
+            if (field.field_type === "number") {
+              return (
+                <div key={field.field_name} className="space-y-2">
+                  <Label htmlFor={`field-${field.field_name}`}>
+                    {field.field_label}
+                    {isRequired ? <span className="text-destructive"> *</span> : null}
+                  </Label>
+                  <Input
+                    id={`field-${field.field_name}`}
+                    type="number"
+                    value={val ?? ""}
+                    onChange={(e) => setFieldValue(field.field_name, e.target.value ? Number(e.target.value) : "")}
+                    placeholder={field.description || `请输入${field.field_label}`}
+                    required={isRequired}
+                  />
+                  {field.description ? (
+                    <p className="text-xs text-muted-foreground">{field.description}</p>
+                  ) : null}
+                </div>
+              )
+            }
+
+            const isFullWidth = field.field_name === "title" || field.field_name === "keywords"
+            return (
+              <div key={field.field_name} className={`space-y-2 ${isFullWidth ? "sm:col-span-2" : ""}`}>
+                <Label htmlFor={`field-${field.field_name}`}>
+                  {field.field_label}
+                  {isRequired ? <span className="text-destructive"> *</span> : null}
+                </Label>
+                <Input
+                  id={`field-${field.field_name}`}
+                  type="text"
+                  value={val || ""}
+                  onChange={(e) => setFieldValue(field.field_name, e.target.value)}
+                  placeholder={
+                    field.field_name === "keywords"
+                      ? "用 | 分隔关键词"
+                      : field.description || `请输入${field.field_label}`
+                  }
+                  required={isRequired}
+                />
+                {field.description && field.field_name !== "keywords" ? (
+                  <p className="text-xs text-muted-foreground">{field.description}</p>
+                ) : null}
               </div>
-            )}
+            )
+          })}
+
+          {/* 发布属性设置 */}
+          <div className="space-y-3 sm:col-span-2 rounded-lg border p-3.5 bg-card">
+            <p className="text-sm font-semibold text-muted-foreground border-b pb-1.5">发布与展示属性</p>
+            <div className="grid gap-3 sm:grid-cols-3 items-center">
+              <div className="space-y-1">
+                <Label htmlFor="content-order">显示排序权重</Label>
+                <Input
+                  id="content-order"
+                  type="number"
+                  min="0"
+                  value={form.order_id}
+                  onChange={(e) => update("order_id", Number(e.target.value))}
+                  placeholder="数字越大越靠前"
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <div>
+                  <p className="text-sm font-medium">公开展示</p>
+                  <p className="text-xs text-muted-foreground">生成页面及链接</p>
+                </div>
+                <Switch
+                  checked={form.visible === 1}
+                  onCheckedChange={(checked) => update("visible", checked ? 1 : 0)}
+                  aria-label="公开展示"
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-2.5">
+                <div>
+                  <p className="text-sm font-medium">首页推荐</p>
+                  <p className="text-xs text-muted-foreground">主题首页推荐标</p>
+                </div>
+                <Switch
+                  checked={form.featured === 1}
+                  onCheckedChange={(checked) => update("featured", checked ? 1 : 0)}
+                  aria-label="首页推荐"
+                />
+              </div>
+            </div>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" onClick={chooseCoverImage} disabled={coverUploading}>
-              {coverUploading ? <LoaderCircle className="animate-spin" /> : <Upload />}
-              {coverUploading ? "上传中" : "上传封面"}
-            </Button>
-            <Button type="button" variant="outline" onClick={() => setMediaPickerOpen(true)} disabled={coverUploading}>
-              <Library />素材库
-            </Button>
-            {form.cover_image ? (
-              <IconButton label="清除封面" variant="ghost" size="icon-sm" onClick={() => update("cover_image", "")}>
-                <X />
-              </IconButton>
-            ) : null}
-          </div>
-          {coverError ? <p role="alert" className="text-xs text-destructive">{coverError}</p> : null}
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="content-order">排序值</Label>
-          <Input id="content-order" type="number" min="0" value={form.order_id} onChange={(event) => update("order_id", Number(event.target.value))} />
-        </div>
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="content-keywords">关键词</Label>
-          <Input id="content-keywords" value={form.keywords} onChange={(event) => update("keywords", event.target.value)} placeholder="用 | 分隔关键词" />
-        </div>
-        <div className="space-y-2 sm:col-span-2">
-          <Label htmlFor="content-description">SEO 描述</Label>
-          <Textarea id="content-description" value={form.description} onChange={(event) => update("description", event.target.value)} className="min-h-20" />
-        </div>
-        <div className="flex items-center justify-between rounded-lg border p-3 sm:col-span-2">
-          <div>
-            <p className="text-sm font-medium">公开展示</p>
-            <p className="text-xs text-muted-foreground">关闭后不会生成公开详情和列表链接。</p>
-          </div>
-          <Switch checked={form.visible === 1} onCheckedChange={(checked) => update("visible", checked ? 1 : 0)} aria-label="公开展示" />
-        </div>
-        <div className="flex items-center justify-between rounded-lg border p-3 sm:col-span-2">
-          <div>
-            <p className="text-sm font-medium">首页推荐</p>
-            <p className="text-xs text-muted-foreground">提供给主题首页的推荐内容标签使用。</p>
-          </div>
-          <Switch checked={form.featured === 1} onCheckedChange={(checked) => update("featured", checked ? 1 : 0)} aria-label="首页推荐" />
         </div>
       </div>
+
       <DialogFooter>
-        <Button variant="outline" onClick={onCancel} disabled={saving || uploading}>取消</Button>
-        <Button onClick={() => onSave(form)} disabled={saving || uploading || !form.title.trim()}>
+        <Button variant="outline" onClick={onCancel} disabled={saving || bodyUploading}>
+          取消
+        </Button>
+        <Button onClick={() => handleSave(false)} disabled={saving || bodyUploading || !String(getFieldValue("title") || "").trim()}>
           {saving ? <LoaderCircle className="animate-spin" /> : null}
           仅保存
         </Button>
-        <Button onClick={() => onSave(form, true)} disabled={saving || uploading || !form.title.trim()}>保存并发布</Button>
+        <Button onClick={() => handleSave(true)} disabled={saving || bodyUploading || !String(getFieldValue("title") || "").trim()}>
+          保存并发布
+        </Button>
       </DialogFooter>
-      <MediaPickerDialog open={mediaPickerOpen} onOpenChange={setMediaPickerOpen} onSelect={selectCover} />
     </>
   )
 }
@@ -254,6 +977,8 @@ function ContentEditor({
 export function ContentPage() {
   const [items, setItems] = useState<Content[]>([])
   const [categories, setCategories] = useState<CategoryItem[]>([])
+  const [models, setModels] = useState<SystemModel[]>([])
+  const [modelFields, setModelFields] = useState<ModelField[]>([])
   const [query, setQuery] = useState("")
   const [appliedQuery, setAppliedQuery] = useState("")
   const [categoryID, setCategoryID] = useState(0)
@@ -274,6 +999,8 @@ export function ContentPage() {
 
   useEffect(() => {
     getCategories().then(setCategories).catch(() => setCategories([]))
+    getSystemModels().then(setModels).catch(() => setModels([]))
+    getModelFields().then(setModelFields).catch(() => setModelFields([]))
   }, [])
 
   useEffect(() => {
@@ -297,7 +1024,17 @@ export function ContentPage() {
   }, [appliedQuery, categoryID, page])
 
   const formContent = useMemo<ContentInput>(() => {
-    if (!editingDetail) return emptyContent
+    if (!editingDetail) {
+      if (categoryID > 0) {
+        const cat = categoryOptions.find((c) => c.id === categoryID)
+        return {
+          ...emptyContent,
+          category_id: categoryID,
+          model_id: cat?.model_id || 1,
+        }
+      }
+      return emptyContent
+    }
     return {
       title: editingDetail.title,
       code: editingDetail.code,
@@ -312,8 +1049,10 @@ export function ContentPage() {
       order_id: editingDetail.order_id,
       featured: editingDetail.featured,
       visible: editingDetail.visible,
+      model_id: editingDetail.model_id ?? 1,
+      extra_data: editingDetail.extra_data ?? {},
     }
-  }, [editingDetail])
+  }, [editingDetail, categoryID, categoryOptions])
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -490,7 +1229,7 @@ export function ContentPage() {
           <ScrollArea className="max-h-[calc(100dvh-4rem)]" contentClassName="space-y-4 pr-2">
             {editorLoading ? (
               <><DialogHeader><DialogTitle>编辑内容</DialogTitle><DialogDescription>正在加载内容。</DialogDescription></DialogHeader><div className="flex h-32 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div></>
-            ) : <ContentEditor key={editing?.id ?? "new"} content={formContent} categories={categories} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
+            ) : <ContentEditor key={editing?.id ?? "new"} content={formContent} categories={categories} models={models} modelFields={modelFields} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
           </ScrollArea>
         </DialogContent>
       </Dialog>

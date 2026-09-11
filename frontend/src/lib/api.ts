@@ -27,6 +27,8 @@ export type Content = {
   order_id: number
   featured: number
   visible: number
+  model_id?: number
+  extra_data?: Record<string, any>
 }
 
 export type ContentInput = Omit<Content, "id" | "route_key">
@@ -63,6 +65,8 @@ export type ContentPage = {
 
 export type MessageItem = {
   id: number
+  class_id?: number
+  class_name?: string
   title: string
   name: string
   phone: string
@@ -73,6 +77,8 @@ export type MessageItem = {
   created_at: string
   state: number
   content_id: number
+  ip?: string
+  extra_data?: Record<string, any>
 }
 
 export type MessagePage = {
@@ -80,6 +86,66 @@ export type MessagePage = {
   page_size: number
   total: number
   items: MessageItem[]
+}
+
+export type FeedbackItem = MessageItem
+export type FeedbackPage = MessagePage
+
+export type ModelTable = {
+  id: number
+  table_name: string
+  name: string
+  description: string
+  is_default: number
+  created_at: string
+  field_count?: number
+}
+
+export type ModelField = {
+  id: number
+  table_id: number
+  field_name: string
+  field_label: string
+  field_type: string
+  field_options: string
+  description: string
+  sort_order: number
+  is_system: number
+}
+
+export type SystemModel = {
+  id: number
+  name: string
+  table_id: number
+  table_name?: string
+  description: string
+  entry_fields: { field: string; label: string }[]
+  must_fields: string[]
+  is_default: number
+  sort_order: number
+  created_at: string
+}
+
+export type FeedbackClass = {
+  id: number
+  name: string
+  description: string
+  fields_config: { field: string; label: string }[]
+  must_fields: string[]
+  sort_order: number
+  created_at: string
+  item_count?: number
+}
+
+export type FeedbackField = {
+  id: number
+  field_name: string
+  field_label: string
+  field_type: string
+  field_options: string
+  description: string
+  sort_order: number
+  is_system: number
 }
 
 export type CategoryItem = {
@@ -98,6 +164,7 @@ export type CategoryItem = {
   detail_path: string
   detail_file_pattern: string
   detail_template: string
+  model_id?: number
 }
 
 export type CategoryInput = Omit<CategoryItem, "id" | "route_id" | "content_count">
@@ -389,6 +456,145 @@ export function deleteMessage(id: number) {
   return request<{ ok: boolean }>(`/api/admin/messages/${id}`, {
     method: "DELETE",
   })
+}
+
+// Model Tables, Fields, Models
+export function getModelTables() {
+  return request<ModelTable[]>("/api/admin/model-tables")
+}
+
+export function saveModelTable(data: Partial<ModelTable>) {
+  if (data.id) {
+    return request<{ ok: boolean }>(`/api/admin/model-tables/${data.id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  }
+  return request<{ ok: boolean; id: number }>("/api/admin/model-tables", {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteModelTable(id: number) {
+  return request<{ ok: boolean }>(`/api/admin/model-tables/${id}`, { method: "DELETE" })
+}
+
+export function getModelFields(tableId?: number) {
+  return request<ModelField[]>(`/api/admin/model-fields${query({ table_id: tableId || undefined })}`)
+}
+
+export function saveModelField(data: Partial<ModelField>) {
+  if (data.id) {
+    return request<{ ok: boolean }>(`/api/admin/model-fields/${data.id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  }
+  return request<{ ok: boolean; id: number }>("/api/admin/model-fields", {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteModelField(id: number) {
+  return request<{ ok: boolean }>(`/api/admin/model-fields/${id}`, { method: "DELETE" })
+}
+
+export function getSystemModels() {
+  return request<SystemModel[]>("/api/admin/models")
+}
+
+export function saveSystemModel(data: Partial<SystemModel>) {
+  if (data.id) {
+    return request<{ ok: boolean }>(`/api/admin/models/${data.id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  }
+  return request<{ ok: boolean; id: number }>("/api/admin/models", {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteSystemModel(id: number) {
+  return request<{ ok: boolean }>(`/api/admin/models/${id}`, { method: "DELETE" })
+}
+
+// Custom Feedback
+export function getFeedbacks(page: number, pageSize: number, classId?: number, state?: number | string, keyword?: string) {
+  return request<FeedbackPage>(
+    `/api/admin/feedback${query({
+      page,
+      page_size: pageSize,
+      class_id: classId || undefined,
+      state: state !== "" && state !== undefined ? state : undefined,
+      keyword: keyword || undefined,
+    })}`,
+  )
+}
+
+export function updateFeedbackState(id: number, state: number) {
+  return request<{ ok: boolean }>(`/api/admin/feedback/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ state }),
+  })
+}
+
+export function deleteFeedback(id: number) {
+  return request<{ ok: boolean }>(`/api/admin/feedback/${id}`, {
+    method: "DELETE",
+  })
+}
+
+export function batchDeleteFeedbacks(ids: number[]) {
+  return request<{ ok: boolean }>("/api/admin/feedback/batch-delete", {
+    method: "POST",
+    body: JSON.stringify({ ids }),
+  })
+}
+
+export function getFeedbackClasses() {
+  return request<FeedbackClass[]>("/api/admin/feedback-classes")
+}
+
+export function saveFeedbackClass(data: Partial<FeedbackClass>) {
+  if (data.id) {
+    return request<{ ok: boolean }>(`/api/admin/feedback-classes/${data.id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  }
+  return request<{ ok: boolean; id: number }>("/api/admin/feedback-classes", {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteFeedbackClass(id: number) {
+  return request<{ ok: boolean }>(`/api/admin/feedback-classes/${id}`, { method: "DELETE" })
+}
+
+export function getFeedbackFields() {
+  return request<FeedbackField[]>("/api/admin/feedback-fields")
+}
+
+export function saveFeedbackField(data: Partial<FeedbackField>) {
+  if (data.id) {
+    return request<{ ok: boolean }>(`/api/admin/feedback-fields/${data.id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    })
+  }
+  return request<{ ok: boolean; id: number }>("/api/admin/feedback-fields", {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+}
+
+export function deleteFeedbackField(id: number) {
+  return request<{ ok: boolean }>(`/api/admin/feedback-fields/${id}`, { method: "DELETE" })
 }
 
 export type Publication = { state: "idle" | "running" | "success" | "failed"; started: string; finished: string; files: number; contents: number; error?: string }

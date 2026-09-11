@@ -33,13 +33,30 @@
         </td>
       </tr>
     </table>
-    <div class="page-products">
-      <table width="100%" border="0" cellpadding="0" cellspacing="0">
-        <tr><td height="30" class="prod_bottom_dasheds">产品介绍</td></tr>
-        <tr><td height="15" align="left" valign="top" class="prod_sp">{{.body}}</td></tr>
-      </table>
-      <div class="page_list"><div class="list_info"></div></div>
-    </div>
+      <div class="page-products">
+        <table width="100%" border="0" cellpadding="0" cellspacing="0">
+          <tr><td height="30" class="prod_bottom_dasheds">产品介绍</td></tr>
+          <tr><td height="15" align="left" valign="top" class="prod_sp">{{.body}}</td></tr>
+        </table>
+        {{with morepic .photo_list}}
+        <table width="100%" border="0" cellpadding="0" cellspacing="0" style="margin-top:15px;">
+          <tr><td height="30" class="prod_bottom_dasheds">产品图集</td></tr>
+          <tr>
+            <td style="padding:15px 0;">
+              <div style="display:flex;flex-wrap:wrap;gap:12px;">
+                {{range .}}
+                <div style="text-align:center;border:1px solid #e2e8f0;padding:6px;border-radius:4px;background:#fff;">
+                  <a href="{{.URL}}" target="_blank"><img src="{{.URL}}" alt="{{.Title}}" style="max-width:180px;max-height:140px;display:block;margin:0 auto;" /></a>
+                  {{if .Title}}<span style="display:block;margin-top:6px;font-size:12px;color:#64748b;">{{.Title}}</span>{{end}}
+                </div>
+                {{end}}
+              </div>
+            </td>
+          </tr>
+        </table>
+        {{end}}
+        <div class="page_list"><div class="list_info"></div></div>
+      </div>
   </div>
   <div class="page-left">
     <div class="left-products">

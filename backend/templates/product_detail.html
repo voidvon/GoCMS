@@ -25,6 +25,19 @@
       {{if and .image (ne .image "/images/nopicture.gif")}}<p><img src="{{.image}}" alt="{{.title}}" class="content-image"></p>{{end}}
       {{if .code}}<p>产品型号：{{.code}}</p>{{end}}
       <div class="content-body">{{.body}}</div>
+      {{with morepic .photo_list}}
+      <section class="content-gallery" style="margin-top:1.5rem;">
+        <h3 style="font-size:1.1rem;font-weight:bold;margin-bottom:0.75rem;">产品图集</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:1rem;">
+          {{range .}}
+          <div style="border:1px solid #ddd;padding:0.5rem;border-radius:4px;text-align:center;">
+            <a href="{{.URL}}" target="_blank"><img src="{{.URL}}" alt="{{.Title}}" style="max-width:180px;height:auto;display:block;" /></a>
+            {{if .Title}}<span style="font-size:0.85rem;color:#666;margin-top:0.25rem;display:block;">{{.Title}}</span>{{end}}
+          </div>
+          {{end}}
+        </div>
+      </section>
+      {{end}}
       <nav class="content-neighbors">{{if .previous_url}}<a href="{{.previous_url}}">上一条：{{.previous_title}}</a>{{end}}{{if .next_url}} <a href="{{.next_url}}">下一条：{{.next_title}}</a>{{end}}</nav>
     </article>
   </main>

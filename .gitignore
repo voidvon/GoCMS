@@ -10,6 +10,7 @@
 # Generated files compiled into the single executable.
 /backend/internal/embedded/assets/frontend/
 /backend/internal/embedded/assets/templates/
+/backend/tmp/
 
 # Published website (sources: backend/templates; resources served separately)
 /web/

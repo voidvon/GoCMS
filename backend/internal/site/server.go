@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"gocms/internal/db"
 	"gocms/internal/templateconfig"
@@ -23,9 +22,10 @@ type Server struct {
 	database     *sql.DB
 	siteRoot     string
 	fileServe    http.Handler
-	frontendRoot string
-	frontendFS   fs.FS
-	assetsRoot   string
+	frontendRoot     string
+	frontendFS       fs.FS
+	frontendDevProxy http.Handler
+	assetsRoot       string
 	themeRoot    string
 	templateRoot string
 	themeBase    string
@@ -76,7 +76,7 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 	if cleanPath != "/" {
 		cleanPath = strings.TrimSuffix(cleanPath, "/")
 	}
-	if (s.frontendRoot != "" || s.frontendFS != nil) && (cleanPath == "/admin" || strings.HasPrefix(cleanPath, "/admin/")) {
+	if (s.frontendDevProxy != nil || s.frontendRoot != "" || s.frontendFS != nil) && (cleanPath == "/admin" || strings.HasPrefix(cleanPath, "/admin/")) {
 		s.serveAdminApp(response, request)
 		return
 	}
@@ -103,8 +103,20 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminContent(response, request)
 	case "/api/admin/media":
 		s.adminMedia(response, request)
-	case "/api/admin/messages":
-		s.adminMessages(response, request)
+	case "/api/admin/messages", "/api/admin/feedback":
+		s.adminFeedbacks(response, request)
+	case "/api/admin/feedback/batch-delete":
+		s.adminFeedbackBatchDelete(response, request)
+	case "/api/admin/feedback-classes":
+		s.adminFeedbackClasses(response, request)
+	case "/api/admin/feedback-fields":
+		s.adminFeedbackFields(response, request)
+	case "/api/admin/model-tables":
+		s.adminModelTables(response, request)
+	case "/api/admin/model-fields":
+		s.adminModelFields(response, request)
+	case "/api/admin/models":
+		s.adminModels(response, request)
 	case "/api/admin/categories":
 		s.adminCategories(response, request)
 	case "/api/admin/theme/activate":
@@ -137,8 +149,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.searchJSON(response, request)
 	case "/api/content":
 		s.contentJSON(response, request)
-	case "/api/messages":
-		s.messages(response, request)
+	case "/api/messages", "/api/feedback":
+		s.feedbackSubmit(response, request)
 	case "/search":
 		target := "/search.html"
 		if request.URL.RawQuery != "" {
@@ -156,7 +168,31 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 			return
 		}
 		if strings.HasPrefix(lowerPath, "/api/admin/messages/") {
-			s.adminMessage(response, request, cleanPath[len("/api/admin/messages/"):])
+			s.adminFeedbackItem(response, request, cleanPath[len("/api/admin/messages/"):])
+			return
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/feedback/") {
+			s.adminFeedbackItem(response, request, cleanPath[len("/api/admin/feedback/"):])
+			return
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/feedback-classes/") {
+			s.adminFeedbackClassItem(response, request, cleanPath[len("/api/admin/feedback-classes/"):])
+			return
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/feedback-fields/") {
+			s.adminFeedbackFieldItem(response, request, cleanPath[len("/api/admin/feedback-fields/"):])
+			return
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/model-tables/") {
+			s.adminModelTableItem(response, request, cleanPath[len("/api/admin/model-tables/"):])
+			return
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/model-fields/") {
+			s.adminModelFieldItem(response, request, cleanPath[len("/api/admin/model-fields/"):])
+			return
+		}
+		if strings.HasPrefix(lowerPath, "/api/admin/models/") {
+			s.adminModelItem(response, request, cleanPath[len("/api/admin/models/"):])
 			return
 		}
 		if strings.HasPrefix(lowerPath, "/api/admin/categories/") {
@@ -237,32 +273,7 @@ func (s *Server) searchJSON(response http.ResponseWriter, request *http.Request)
 }
 
 func (s *Server) messages(response http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodPost {
-		methodNotAllowed(response)
-		return
-	}
-	if err := request.ParseForm(); err != nil {
-		http.Error(response, "invalid form", http.StatusBadRequest)
-		return
-	}
-	name := strings.TrimSpace(request.FormValue("name"))
-	title := strings.TrimSpace(request.FormValue("title"))
-	phone := strings.TrimSpace(request.FormValue("phone"))
-	if name == "" || title == "" || phone == "" {
-		http.Error(response, "name, title and phone are required", http.StatusBadRequest)
-		return
-	}
-	contentID := parseIntOrZero(request.FormValue("content_id"))
-	_, err := s.database.ExecContext(request.Context(), `
-		INSERT INTO "gocms_message" ("title", "name", "phone", "mobile", "fax", "email", "content", "created_at", "address", "state", "content_id")
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
-		title, name, phone, request.FormValue("mobile"), request.FormValue("fax"), request.FormValue("email"),
-		request.FormValue("content"), time.Now().Format("2006-01-02 15:04:05"), request.FormValue("address"), contentID)
-	if err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(response, http.StatusCreated, map[string]any{"ok": true})
+	s.feedbackSubmit(response, request)
 }
 
 func (s *Server) staticFile(response http.ResponseWriter, request *http.Request) {

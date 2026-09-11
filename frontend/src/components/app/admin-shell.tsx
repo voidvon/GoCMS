@@ -1,12 +1,13 @@
 import { useState, type ComponentType } from "react"
 import {
   BarChart3,
+  Boxes,
   ChevronsUpDown,
-  ClipboardList,
   FolderTree,
   LayoutDashboard,
   LogOut,
   Menu,
+  MessageSquareText,
   FileText,
   Globe,
   Palette,
@@ -37,6 +38,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 
 import { DashboardPage } from "@/components/app/dashboard-page"
 import { CategoriesPage } from "@/components/app/categories-page"
+import { ModelsPage } from "@/components/app/models-page"
 import { MessagesPage } from "@/components/app/messages-page"
 import { ContentPage } from "@/components/app/content-page"
 import { ThemePage } from "@/components/app/theme-page"
@@ -63,12 +65,13 @@ type NavigationItem = {
 }
 
 const navigationItems: NavigationItem[] = [
-  { id: "publish", label: "网站发布", icon: Globe },
-  { id: "theme", label: "模板管理", icon: Palette },
-  { id: "overview", label: "总览", icon: LayoutDashboard },
+  { id: "overview", label: "仪表盘", icon: LayoutDashboard },
   { id: "content", label: "内容", icon: FileText },
   { id: "categories", label: "分类", icon: FolderTree },
-  { id: "messages", label: "客户留言", icon: ClipboardList },
+  { id: "messages", label: "信息反馈", icon: MessageSquareText },
+  { id: "publish", label: "网站发布", icon: Globe },
+  { id: "theme", label: "模板管理", icon: Palette },
+  { id: "models", label: "系统模型", icon: Boxes },
 ]
 
 function Navigation({ activeView, onNavigate, onClose }: NavigationProps) {
@@ -173,28 +176,35 @@ function Sidebar({ activeView, onNavigate, user, onLogout }: SidebarProps) {
 
 function viewMeta(view: AdminView) {
   switch (view) {
- case "publish": return {title:"网站发布",description:"生成并发布公开站点"}
+    case "publish":
+      return { title: "网站发布", description: "生成并发布公开站点" }
     case "theme":
       return { title: "模板管理", description: "管理模板组、页面模板和自定义文件" }
     case "content":
       return { title: "内容", description: "维护内容、分类和公开展示状态" }
     case "categories":
       return { title: "分类", description: "维护统一的栏目树和页面生成规则" }
+    case "models":
+      return { title: "系统模型", description: "管理数据表、扩展字段与系统内容模型" }
     case "messages":
-      return { title: "客户留言", description: "集中处理来自网站的客户咨询" }
+      return { title: "信息反馈", description: "管理自定义反馈分类、字段及用户提交信息" }
     default:
-      return { title: "总览", description: "站点内容和运营数据" }
+      return { title: "仪表盘", description: "站点内容和运营数据" }
   }
 }
 
 function ViewContent({ view }: { view: AdminView }) {
   switch (view) {
- case "publish": return <PublishPage />
-    case "theme": return <ThemePage />
+    case "publish":
+      return <PublishPage />
+    case "theme":
+      return <ThemePage />
     case "content":
       return <ContentPage />
     case "categories":
       return <CategoriesPage />
+    case "models":
+      return <ModelsPage />
     case "messages":
       return <MessagesPage />
     default:

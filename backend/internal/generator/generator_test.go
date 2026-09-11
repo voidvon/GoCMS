@@ -212,3 +212,53 @@ func readGenerated(t *testing.T, root, relative string) string {
 	}
 	return string(body)
 }
+
+func TestParseMorepicAndMultiValue(t *testing.T) {
+	// 1. JSON array of objects
+	jsonObjs := `[{"url":"/img1.jpg","title":"图1"},{"url":"/img2.jpg","title":"图2"}]`
+	items := parseMorepic(jsonObjs)
+	if len(items) != 2 || items[0].URL != "/img1.jpg" || items[0].Title != "图1" || items[0].Order != 1 || items[1].URL != "/img2.jpg" || items[1].Title != "图2" || items[1].Order != 2 {
+		t.Fatalf("unexpected parseMorepic json items: %+v", items)
+	}
+
+	// 2. JSON array of strings
+	jsonStrs := `["/a.jpg", "/b.jpg"]`
+	items2 := parseMorepic(jsonStrs)
+	if len(items2) != 2 || items2[0].URL != "/a.jpg" || items2[0].Order != 1 || items2[1].URL != "/b.jpg" || items2[1].Order != 2 {
+		t.Fatalf("unexpected parseMorepic json strings: %+v", items2)
+	}
+
+	// 3. EmpireCMS text format
+	empireText := "/big1.jpg::::::/small1.jpg::::::说明一\r\n/big2.jpg::::::说明二\r\n/big3.jpg"
+	items3 := parseMorepic(empireText)
+	if len(items3) != 3 {
+		t.Fatalf("unexpected parseMorepic empire items count: %d", len(items3))
+	}
+	if items3[0].URL != "/big1.jpg" || items3[0].Title != "说明一" || items3[0].Order != 1 {
+		t.Errorf("unexpected item 0: %+v", items3[0])
+	}
+	if items3[1].URL != "/big2.jpg" || items3[1].Title != "说明二" || items3[1].Order != 2 {
+		t.Errorf("unexpected item 1: %+v", items3[1])
+	}
+	if items3[2].URL != "/big3.jpg" || items3[2].Title != "" || items3[2].Order != 3 {
+		t.Errorf("unexpected item 2: %+v", items3[2])
+	}
+
+	// 4. Empty / blank input
+	if itemsEmpty := parseMorepic(""); itemsEmpty != nil {
+		t.Fatalf("expected nil for empty input, got: %+v", itemsEmpty)
+	}
+
+	// 5. parseMultiValue
+	multiJSON := `["项一", "项二", "项三"]`
+	mv1 := parseMultiValue(multiJSON)
+	if len(mv1) != 3 || mv1[0] != "项一" || mv1[2] != "项三" {
+		t.Fatalf("unexpected parseMultiValue json: %+v", mv1)
+	}
+
+	multiText := "行一\r\n行二\n行三"
+	mv2 := parseMultiValue(multiText)
+	if len(mv2) != 3 || mv2[0] != "行一" || mv2[1] != "行二" || mv2[2] != "行三" {
+		t.Fatalf("unexpected parseMultiValue text: %+v", mv2)
+	}
+}

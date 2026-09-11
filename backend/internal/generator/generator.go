@@ -257,7 +257,96 @@ func (c *content) templateFuncs() template.FuncMap {
 		"listPagination": func(row Row) ListPagination {
 			return c.listPagination(row)
 		},
+		"morepic": func(val any) []PhotoItem {
+			if val == nil {
+				return nil
+			}
+			return parseMorepic(fmt.Sprint(val))
+		},
+		"multiValue": func(val any) []string {
+			if val == nil {
+				return nil
+			}
+			return parseMultiValue(fmt.Sprint(val))
+		},
 	}
+}
+
+type PhotoItem struct {
+	URL   string `json:"url"`
+	Title string `json:"title"`
+	Order int    `json:"order,omitempty"`
+}
+
+func parseMorepic(raw string) []PhotoItem {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
+		var items []PhotoItem
+		if err := json.Unmarshal([]byte(raw), &items); err == nil && len(items) > 0 {
+			for i := range items {
+				if items[i].Order == 0 {
+					items[i].Order = i + 1
+				}
+			}
+			return items
+		}
+		var stringUrls []string
+		if err := json.Unmarshal([]byte(raw), &stringUrls); err == nil && len(stringUrls) > 0 {
+			res := make([]PhotoItem, 0, len(stringUrls))
+			for i, u := range stringUrls {
+				res = append(res, PhotoItem{URL: strings.TrimSpace(u), Order: i + 1})
+			}
+			return res
+		}
+	}
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	items := make([]PhotoItem, 0, len(lines))
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "::::::")
+		item := PhotoItem{Order: i + 1}
+		if len(parts) >= 3 {
+			item.URL = strings.TrimSpace(parts[0])
+			item.Title = strings.TrimSpace(parts[2])
+		} else if len(parts) == 2 {
+			item.URL = strings.TrimSpace(parts[0])
+			item.Title = strings.TrimSpace(parts[1])
+		} else {
+			item.URL = strings.TrimSpace(parts[0])
+		}
+		if item.URL != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func parseMultiValue(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
+		var arr []string
+		if err := json.Unmarshal([]byte(raw), &arr); err == nil {
+			return arr
+		}
+	}
+	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
+	var res []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			res = append(res, line)
+		}
+	}
+	return res
 }
 
 func esc(value string) string { return html.EscapeString(value) }
@@ -1066,7 +1155,7 @@ func (c *content) contentView(row Row) Row {
 	category := c.cat(row.n("category_id"))
 	root := c.listRoot(category)
 	image := strings.TrimSpace(row["cover_image"])
-	return Row{
+	res := Row{
 		"id":                 esc(row["id"]),
 		"route_key":          esc(row["route_key"]),
 		"title":              esc(row["title"]),
@@ -1089,7 +1178,24 @@ func (c *content) contentView(row Row) Row {
 		"category_root_url":  c.categoryListURL(root, 1),
 		"content_url":        c.contentURL(row),
 		"category_children":  "",
+		"model_id":           esc(row["model_id"]),
 	}
+	if extra := strings.TrimSpace(row["extra_data"]); extra != "" && extra != "{}" {
+		var extraMap map[string]any
+		if err := json.Unmarshal([]byte(extra), &extraMap); err == nil {
+			for k, v := range extraMap {
+				if _, exists := res[k]; !exists {
+					res[k] = fmt.Sprint(v)
+				}
+			}
+		}
+	}
+	for k, v := range row {
+		if _, exists := res[k]; !exists {
+			res[k] = v
+		}
+	}
+	return res
 }
 
 func (c *content) categoryView(category Row, items []Row, page, pageSize int) Row {

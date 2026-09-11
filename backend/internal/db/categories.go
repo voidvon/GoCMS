@@ -30,12 +30,14 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 			"detail_template" TEXT NOT NULL DEFAULT 'content_detail.html',
 			"keywords" TEXT NOT NULL DEFAULT '',
 			"description" TEXT NOT NULL DEFAULT '',
-			"cover_content" TEXT NOT NULL DEFAULT ''
+			"cover_content" TEXT NOT NULL DEFAULT '',
+			"model_id" INTEGER NOT NULL DEFAULT 1
 		)`); err != nil {
 		return fmt.Errorf("create category table: %w", err)
 	}
 	for _, statement := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_gocms_category_parent ON "gocms_category" ("parent_id", "order_id", "id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_category_model ON "gocms_category" ("model_id", "id")`,
 	} {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create category index: %w", err)
@@ -48,6 +50,7 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		"keywords":       "TEXT NOT NULL DEFAULT ''",
 		"description":    "TEXT NOT NULL DEFAULT ''",
 		"cover_content":  "TEXT NOT NULL DEFAULT ''",
+		"model_id":       "INTEGER NOT NULL DEFAULT 1",
 	} {
 		if err := ensureCategoryColumn(ctx, database, name, definition); err != nil {
 			return err

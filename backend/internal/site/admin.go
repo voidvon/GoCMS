@@ -65,6 +65,7 @@ type CategoryItem struct {
 	DetailPath        string `json:"detail_path"`
 	DetailFilePattern string `json:"detail_file_pattern"`
 	DetailTemplate    string `json:"detail_template"`
+	ModelID           int64  `json:"model_id"`
 }
 
 type categoryPayload struct {
@@ -80,6 +81,7 @@ type categoryPayload struct {
 	DetailPath        string `json:"detail_path"`
 	DetailFilePattern string `json:"detail_file_pattern"`
 	DetailTemplate    string `json:"detail_template"`
+	ModelID           int64  `json:"model_id"`
 }
 
 func (s *Server) adminLogin(response http.ResponseWriter, request *http.Request) {
@@ -269,7 +271,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		SELECT c."id", c."name", c."parent_id", c."order_id", c."list_page_size", c."page_type", c."route_id",
 		       (SELECT COUNT(*) FROM "gocms_content" content WHERE content."category_id" = c."id"),
 		       c."list_path", c."list_file_pattern", c."list_template", c."cover_template", c."detail_path",
-		       c."detail_file_pattern", c."detail_template"
+		       c."detail_file_pattern", c."detail_template", COALESCE(c."model_id", 1)
 		FROM "gocms_category" c
 		ORDER BY c."parent_id", c."order_id", c."id"`)
 	if err != nil {
@@ -282,7 +284,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		var item CategoryItem
 		if err := rows.Scan(&item.ID, &item.Name, &item.ParentID, &item.OrderID, &item.ListPageSize, &item.PageType, &item.RouteID,
 			&item.ContentCount, &item.ListPath, &item.ListFilePattern, &item.ListTemplate,
-			&item.CoverTemplate, &item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate); err != nil {
+			&item.CoverTemplate, &item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate, &item.ModelID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -332,6 +334,9 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 	if payload.OrderID < 0 {
 		payload.OrderID = 0
 	}
+	if payload.ModelID < 1 {
+		payload.ModelID = 1
+	}
 	if err := s.normalizeCategoryRoutes(request.Context(), id, &payload); err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
@@ -347,9 +352,9 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		}
 		result, err := s.database.ExecContext(request.Context(), `
 			INSERT INTO "gocms_category"
-			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template")
-			VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
-			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate)
+			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", "model_id")
+			VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.ModelID)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -366,8 +371,8 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 	} else {
 		result, err := s.database.ExecContext(request.Context(), `
 			UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "list_page_size" = ?, "page_type" = ?,
-			"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ? WHERE "id" = ?`,
-			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, id)
+			"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "model_id" = ? WHERE "id" = ?`,
+			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.ModelID, id)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -389,14 +394,19 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	var current categoryPayload
 	if id > 0 {
 		err := s.database.QueryRowContext(ctx, `
-			SELECT "list_page_size", "page_type", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template"
+			SELECT "list_page_size", "page_type", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", COALESCE("model_id", 1)
 			FROM "gocms_category" WHERE "id" = ?`, id).
-			Scan(&current.ListPageSize, &current.PageType, &current.ListPath, &current.ListFilePattern, &current.ListTemplate, &current.CoverTemplate, &current.DetailPath, &current.DetailFilePattern, &current.DetailTemplate)
+			Scan(&current.ListPageSize, &current.PageType, &current.ListPath, &current.ListFilePattern, &current.ListTemplate, &current.CoverTemplate, &current.DetailPath, &current.DetailFilePattern, &current.DetailTemplate, &current.ModelID)
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("分类不存在")
 		}
 		if err != nil {
 			return fmt.Errorf("读取分类路由失败: %w", err)
+		}
+		if id > 0 && current.ModelID > 0 {
+			payload.ModelID = current.ModelID
+		} else if payload.ModelID < 1 {
+			payload.ModelID = current.ModelID
 		}
 		if payload.ListPath == "" {
 			payload.ListPath = current.ListPath

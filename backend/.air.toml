@@ -1,0 +1,37 @@
+# Air configuration for Go backend live reloading
+# See https://github.com/air-verse/air
+
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Build command
+  cmd = "go build -o ./tmp/site ./cmd/site"
+  # Entrypoint with run arguments
+  entrypoint = ["./tmp/site", "-addr", "127.0.0.1:18080"]
+  # File extensions to watch
+  include_ext = ["go", "html", "tmpl", "tpl"]
+  # Directories to ignore
+  exclude_dir = ["tmp", "internal/embedded/assets"]
+  # Regex for files to ignore (e.g. test files)
+  exclude_regex = ["_test\\.go"]
+  # Debounce delay in milliseconds
+  delay = 500
+  # Stop running old binary if build fails
+  stop_on_error = true
+  # Send SIGINT signal before killing process for graceful shutdown
+  send_interrupt = true
+  kill_delay = "500ms"
+
+[log]
+  time = false
+
+[color]
+  main = "magenta"
+  watcher = "cyan"
+  build = "yellow"
+  runner = "green"
+
+[misc]
+  # Delete tmp directory on exit
+  clean_on_exit = true

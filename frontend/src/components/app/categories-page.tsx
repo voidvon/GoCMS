@@ -12,11 +12,13 @@ import {
   createCategory,
   deleteCategory,
   getCategories,
+  getSystemModels,
   getThemeFiles,
   updateCategory,
   type CategoryInput,
   type CategoryItem,
   type SaveResponse,
+  type SystemModel,
   type ThemeFile,
   type ThemeTemplateGroup,
 } from "@/lib/api"
@@ -43,6 +45,34 @@ const emptyCategory: CategoryInput = {
   detail_path: "content",
   detail_file_pattern: "{id}.html",
   detail_template: "content_detail.html",
+  model_id: 1,
+}
+
+function getCoverTemplates(templateGroups: ThemeTemplateGroup[], templateFiles: ThemeFile[]) {
+  const group = templateGroups.find((g) => g.key === "cover")
+  if (group?.files && group.files.length > 0) {
+    return group.files
+  }
+  const matching = templateFiles.filter((f) => f.path.toLowerCase().includes("cover"))
+  if (matching.length > 0) {
+    return matching
+  }
+  return [{ path: "category_cover.html", size: 0, modified_at: "" }]
+}
+
+function getListTemplates(templateGroups: ThemeTemplateGroup[], templateFiles: ThemeFile[]) {
+  const group = templateGroups.find((g) => g.key === "list")
+  if (group?.files && group.files.length > 0) {
+    return group.files
+  }
+  const matching = templateFiles.filter((f) => {
+    const p = f.path.toLowerCase()
+    return p.includes("list") || p.includes("sort")
+  })
+  if (matching.length > 0) {
+    return matching
+  }
+  return [{ path: "category_list.html", size: 0, modified_at: "" }]
 }
 
 function defaultListPath(_parentID: number, parent?: CategoryItem) {
@@ -50,9 +80,16 @@ function defaultListPath(_parentID: number, parent?: CategoryItem) {
   return "category"
 }
 
-function defaultListTemplate(_parentID: number, _listPath: string, parent?: CategoryItem) {
+function defaultListTemplate(parent?: CategoryItem, templateGroups: ThemeTemplateGroup[] = [], templateFiles: ThemeFile[] = []) {
   if (parent?.list_template) return parent.list_template
-  return "category_list.html"
+  const lists = getListTemplates(templateGroups, templateFiles)
+  return lists[0]?.path || "category_list.html"
+}
+
+function defaultCoverTemplate(parent?: CategoryItem, templateGroups: ThemeTemplateGroup[] = [], templateFiles: ThemeFile[] = []) {
+  if (parent?.cover_template) return parent.cover_template
+  const covers = getCoverTemplates(templateGroups, templateFiles)
+  return covers[0]?.path || "category_cover.html"
 }
 
 function defaultDetailPath(_listPath: string, parent?: CategoryItem) {
@@ -70,20 +107,33 @@ function publicationMessage(result: SaveResponse, action: string) {
     : `${action}已保存并加入发布队列，将在当前任务完成后自动生成。`
 }
 
-function categoryInput(category: CategoryItem): CategoryInput {
+function categoryInput(category: CategoryItem, templateGroups: ThemeTemplateGroup[] = [], templateFiles: ThemeFile[] = []): CategoryInput {
+  const coverTemplates = getCoverTemplates(templateGroups, templateFiles)
+  const isCoverValid = coverTemplates.some((f) => f.path === category.cover_template)
+  const coverTemplate = isCoverValid && category.cover_template
+    ? category.cover_template
+    : (coverTemplates[0]?.path || "category_cover.html")
+
+  const listTemplates = getListTemplates(templateGroups, templateFiles)
+  const isListValid = listTemplates.some((f) => f.path === category.list_template)
+  const listTemplate = isListValid && category.list_template
+    ? category.list_template
+    : (listTemplates[0]?.path || "category_list.html")
+
   return {
     name: category.name,
     parent_id: category.parent_id,
     order_id: category.order_id,
     list_page_size: category.list_page_size,
-    page_type: category.page_type,
+    page_type: category.page_type || "list",
     list_path: category.list_path,
     list_file_pattern: category.list_file_pattern,
-    list_template: category.list_template,
-    cover_template: category.cover_template,
+    list_template: listTemplate,
+    cover_template: coverTemplate,
     detail_path: category.detail_path,
     detail_file_pattern: category.detail_file_pattern,
     detail_template: category.detail_template,
+    model_id: category.model_id || 1,
   }
 }
 
@@ -159,6 +209,7 @@ function CategoryRow({
 
 export function CategoriesPage() {
   const [categories, setCategories] = useState<CategoryItem[]>([])
+  const [models, setModels] = useState<SystemModel[]>([])
   const [templateFiles, setTemplateFiles] = useState<ThemeFile[]>([])
   const [templateGroups, setTemplateGroups] = useState<ThemeTemplateGroup[]>([])
   const [loading, setLoading] = useState(true)
@@ -188,10 +239,11 @@ export function CategoriesPage() {
 
   useEffect(() => {
     let active = true
-    Promise.all([getCategories(), getThemeFiles()])
-      .then(([nextCategories, theme]) => {
+    Promise.all([getCategories(), getThemeFiles(), getSystemModels()])
+      .then(([nextCategories, theme, nextModels]) => {
         if (!active) return
         setCategories(nextCategories)
+        setModels(nextModels)
         setTemplateFiles(theme.template_files)
         setTemplateGroups(theme.template_groups)
         setExpanded(new Set())
@@ -217,18 +269,40 @@ export function CategoriesPage() {
 
   function updatePageType(value: string) {
     const pageType = value === "cover" ? "cover" : "list"
-    setForm((current) => ({
-      ...current,
-      page_type: pageType,
-      list_path: pageType === "list" && !current.list_path ? "category" : current.list_path,
-      list_file_pattern: pageType === "list" && !current.list_file_pattern.includes("{id}") ? "{id}.html" : current.list_file_pattern,
-      cover_template: current.cover_template || current.list_template || templateFiles[0]?.path || "category_list.html",
-    }))
+    setForm((current) => {
+      const coverTemplates = getCoverTemplates(templateGroups, templateFiles)
+      const isCurrentCoverValid = coverTemplates.some((f) => f.path === current.cover_template)
+      const nextCoverTemplate = isCurrentCoverValid && current.cover_template
+        ? current.cover_template
+        : (coverTemplates[0]?.path || "category_cover.html")
+
+      const listTemplates = getListTemplates(templateGroups, templateFiles)
+      const isCurrentListValid = listTemplates.some((f) => f.path === current.list_template)
+      const nextListTemplate = isCurrentListValid && current.list_template
+        ? current.list_template
+        : (listTemplates[0]?.path || "category_list.html")
+
+      return {
+        ...current,
+        page_type: pageType,
+        cover_template: nextCoverTemplate,
+        list_template: nextListTemplate,
+        list_path: pageType === "cover" ? current.list_path : (!current.list_path ? "category" : current.list_path),
+        list_file_pattern: pageType === "list" && !current.list_file_pattern.includes("{id}") ? "{id}.html" : current.list_file_pattern,
+      }
+    })
   }
 
   function templateOptions(current: string, dimension: string) {
-    const files = templateGroups.find((group) => group.key === dimension)?.files ?? templateFiles
-    const relevant = files
+    let relevant: ThemeFile[]
+    if (dimension === "cover") {
+      relevant = getCoverTemplates(templateGroups, templateFiles)
+    } else if (dimension === "list") {
+      relevant = getListTemplates(templateGroups, templateFiles)
+    } else {
+      const files = templateGroups.find((group) => group.key === dimension)?.files
+      relevant = files && files.length > 0 ? files : templateFiles
+    }
     if (relevant.some((file) => file.path === current)) return relevant
     return current
       ? [{ path: current, size: 0, modified_at: "" }, ...relevant]
@@ -243,7 +317,8 @@ export function CategoriesPage() {
       ...emptyCategory,
       parent_id: parentID,
       list_path: listPath,
-      list_template: defaultListTemplate(parentID, listPath, parent),
+      list_template: defaultListTemplate(parent, templateGroups, templateFiles),
+      cover_template: defaultCoverTemplate(parent, templateGroups, templateFiles),
       detail_path: defaultDetailPath(listPath, parent),
       detail_template: defaultDetailTemplate(listPath, parent),
     })
@@ -252,7 +327,7 @@ export function CategoriesPage() {
 
   function openEdit(category: CategoryItem) {
     setEditing(category)
-    setForm(categoryInput(category))
+    setForm(categoryInput(category, templateGroups, templateFiles))
     setEditorActive(true)
   }
 
@@ -278,7 +353,7 @@ export function CategoriesPage() {
         const updated = nextCategories.find((category) => category.id === editing.id)
         if (updated) {
           setEditing(updated)
-          setForm(categoryInput(updated))
+          setForm(categoryInput(updated, templateGroups, templateFiles))
           setEditorActive(true)
         } else {
           closeEditor()
@@ -413,12 +488,46 @@ export function CategoriesPage() {
                 <div className="space-y-2">
                   <Label>栏目类型</Label>
                   <Select value={form.page_type} onValueChange={(value) => updatePageType(value ?? "list")}>
-                    <SelectTrigger className="w-full"><SelectValue placeholder="选择栏目类型" /></SelectTrigger>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="选择栏目类型">
+                        {(value) => (value === "cover" ? "封面式" : "列表式")}
+                      </SelectValue>
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="list">列表式</SelectItem>
                       <SelectItem value="cover">封面式</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>所属系统模型</Label>
+                  <Select
+                    value={String(form.model_id ?? 1)}
+                    onValueChange={(value) => update("model_id", Number(value ?? 1))}
+                    disabled={Boolean(editing)}
+                  >
+                    <SelectTrigger className="w-full" disabled={Boolean(editing)}>
+                      <SelectValue>
+                        {(value) => {
+                          const selectedID = Number(value ?? 0)
+                          const m = models.find((model) => model.id === selectedID)
+                          return m ? `${m.name} (${m.table_name || `表ID ${m.table_id}`})` : "选择系统模型"
+                        }}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {models.map((model) => (
+                        <SelectItem key={model.id} value={String(model.id)}>
+                          {model.name} ({model.table_name || `表ID ${model.table_id}`})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {editing
+                      ? "已创建栏目的系统模型已锁定不可变更，以保障内容数据表一致性。"
+                      : "新建栏目时选择对应数据模型，创建后不可更改。"}
+                  </p>
                 </div>
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="category-order">排序值</Label>
@@ -431,34 +540,86 @@ export function CategoriesPage() {
                   <p className="text-xs text-muted-foreground">栏目列表页按这个数量生成分页。</p>
                 </div> : null}
                 <div className="space-y-2">
-                  <Label htmlFor="category-list-path">栏目 URL 目录</Label>
-                  <Input id="category-list-path" value={form.list_path} onChange={(event) => update("list_path", event.target.value)} placeholder={form.page_type === "cover" ? "可留空，表示站点根目录" : "category"} required={form.page_type === "list"} />
-                  <p className="text-xs text-muted-foreground">封面式栏目允许留空，页面会直接生成在站点根目录。</p>
+                  <Label htmlFor="category-list-path">
+                    {form.page_type === "cover" ? "封面 URL 目录" : "栏目 URL 目录"}
+                  </Label>
+                  <Input
+                    id="category-list-path"
+                    value={form.list_path}
+                    onChange={(event) => update("list_path", event.target.value)}
+                    placeholder={form.page_type === "cover" ? "可留空，表示站点根目录" : "category"}
+                    required={form.page_type === "list"}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {form.page_type === "cover" ? "封面式栏目允许留空，页面会直接生成在站点根目录。" : "列表页存放的目录路径，如 category。"}
+                  </p>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="category-list-file-pattern">栏目文件名规则</Label>
-                  <Input id="category-list-file-pattern" value={form.list_file_pattern} onChange={(event) => update("list_file_pattern", event.target.value)} placeholder="{id}.html" required />
-                  <p className="text-xs text-muted-foreground">列表式必须包含 {"{id}"}；封面式也可以填写固定文件名。</p>
+                  <Label htmlFor="category-list-file-pattern">
+                    {form.page_type === "cover" ? "封面文件名规则" : "列表文件名规则"}
+                  </Label>
+                  <Input
+                    id="category-list-file-pattern"
+                    value={form.list_file_pattern}
+                    onChange={(event) => update("list_file_pattern", event.target.value)}
+                    placeholder={form.page_type === "cover" ? "index.html 或 {id}.html" : "{id}.html"}
+                    required
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    {form.page_type === "cover"
+                      ? "封面式可填写固定文件名（如 index.html）或包含 {id}。"
+                      : "列表式必须包含 {id}，分页会自动追加页码。"}
+                  </p>
                 </div>
-                {form.page_type === "list" ? <div className="space-y-2">
-                  <Label>列表模板</Label>
-                  <Select value={form.list_template} onValueChange={(value) => update("list_template", value ?? "")} disabled={templatesLoading}>
-                    <SelectTrigger className="w-full"><SelectValue placeholder="选择列表模板" /></SelectTrigger>
-                    <SelectContent>
-                      {templateOptions(form.list_template, "list").map((file) => <SelectItem key={file.path} value={file.path}>{file.path}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">此栏目生成列表页时使用的 HTML 模板。</p>
-                </div> : <div className="space-y-2">
-                  <Label>封面模板</Label>
-                  <Select value={form.cover_template} onValueChange={(value) => update("cover_template", value ?? "")} disabled={templatesLoading}>
-                    <SelectTrigger className="w-full"><SelectValue placeholder="选择封面模板" /></SelectTrigger>
-                    <SelectContent>
-                      {templateOptions(form.cover_template, "cover").map((file) => <SelectItem key={file.path} value={file.path}>{file.path}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">此栏目生成封面页时使用的 HTML 模板。</p>
-                </div>}
+                {form.page_type === "list" ? (
+                  <div key="field-list-template" className="space-y-2">
+                    <Label>列表模板</Label>
+                    <Select
+                      key="select-list-template"
+                      value={form.list_template}
+                      onValueChange={(value) => update("list_template", value ?? "")}
+                      disabled={templatesLoading}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择列表模板">
+                          {(val) => val || "选择列表模板"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {templateOptions(form.list_template, "list").map((file) => (
+                          <SelectItem key={file.path} value={file.path}>
+                            {file.path}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">此栏目生成列表页时使用的 HTML 模板。</p>
+                  </div>
+                ) : (
+                  <div key="field-cover-template" className="space-y-2">
+                    <Label>封面模板</Label>
+                    <Select
+                      key="select-cover-template"
+                      value={form.cover_template}
+                      onValueChange={(value) => update("cover_template", value ?? "")}
+                      disabled={templatesLoading}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="选择封面模板">
+                          {(val) => val || "选择封面模板"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {templateOptions(form.cover_template, "cover").map((file) => (
+                          <SelectItem key={file.path} value={file.path}>
+                            {file.path}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">此栏目生成封面页时使用的 HTML 模板。</p>
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label htmlFor="category-detail-path">内容详情目录</Label>
                   <Input id="category-detail-path" value={form.detail_path} onChange={(event) => update("detail_path", event.target.value)} placeholder="content" required />
@@ -472,7 +633,11 @@ export function CategoriesPage() {
                 <div className="space-y-2">
                   <Label>详情模板</Label>
                   <Select value={form.detail_template} onValueChange={(value) => update("detail_template", value ?? "")} disabled={templatesLoading}>
-                    <SelectTrigger className="w-full"><SelectValue placeholder="选择详情模板" /></SelectTrigger>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="选择详情模板">
+                        {(val) => val || "选择详情模板"}
+                      </SelectValue>
+                    </SelectTrigger>
                     <SelectContent>
                       {templateOptions(form.detail_template, "content").map((file) => <SelectItem key={file.path} value={file.path}>{file.path}</SelectItem>)}
                     </SelectContent>

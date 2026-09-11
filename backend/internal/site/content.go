@@ -3,6 +3,7 @@ package site
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"path"
 	"strconv"
@@ -28,8 +29,10 @@ type Content struct {
 	Description string `json:"description"`
 	OrderID     int64  `json:"order_id"`
 	Featured    int64  `json:"featured"`
-	Visible     int64  `json:"visible"`
-	URL         string `json:"url,omitempty"`
+	Visible     int64          `json:"visible"`
+	ModelID     int64          `json:"model_id"`
+	ExtraData   map[string]any `json:"extra_data,omitempty"`
+	URL         string         `json:"url,omitempty"`
 }
 
 type ContentPage struct {
@@ -41,19 +44,21 @@ type ContentPage struct {
 }
 
 type contentPayload struct {
-	Title       string `json:"title"`
-	Code        string `json:"code"`
-	Category    int64  `json:"category_id"`
-	Summary     string `json:"summary"`
-	Content     string `json:"content"`
-	CoverImage  string `json:"cover_image"`
-	PublishedAt string `json:"published_at"`
-	Source      string `json:"source"`
-	Keywords    string `json:"keywords"`
-	Description string `json:"description"`
-	OrderID     int64  `json:"order_id"`
-	Featured    int64  `json:"featured"`
-	Visible     int64  `json:"visible"`
+	Title       string         `json:"title"`
+	Code        string         `json:"code"`
+	Category    int64          `json:"category_id"`
+	Summary     string         `json:"summary"`
+	Content     string         `json:"content"`
+	CoverImage  string         `json:"cover_image"`
+	PublishedAt string         `json:"published_at"`
+	Source      string         `json:"source"`
+	Keywords    string         `json:"keywords"`
+	Description string         `json:"description"`
+	OrderID     int64          `json:"order_id"`
+	Featured    int64          `json:"featured"`
+	Visible     int64          `json:"visible"`
+	ModelID     int64          `json:"model_id"`
+	ExtraData   map[string]any `json:"extra_data"`
 }
 
 func (s *Server) adminContent(response http.ResponseWriter, request *http.Request) {
@@ -168,6 +173,19 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		return
 	}
 
+	modelID := payload.ModelID
+	if modelID == 0 {
+		_ = s.database.QueryRowContext(request.Context(), `SELECT COALESCE("model_id", 1) FROM "gocms_category" WHERE "id" = ?`, payload.Category).Scan(&modelID)
+		if modelID == 0 {
+			modelID = 1
+		}
+	}
+	if payload.ExtraData == nil {
+		payload.ExtraData = make(map[string]any)
+	}
+	extraBytes, _ := json.Marshal(payload.ExtraData)
+	extraDataStr := string(extraBytes)
+
 	if id == 0 {
 		transaction, err := s.database.BeginTx(request.Context(), nil)
 		if err != nil {
@@ -177,10 +195,11 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		defer transaction.Rollback()
 		result, err := transaction.ExecContext(request.Context(), `
 			INSERT INTO "gocms_content"
-			("category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "keywords", "description", "sort_order", "featured", "visible")
-			VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			("category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "keywords", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
+			VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
-			payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible)
+			payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
+			modelID, extraDataStr)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -212,9 +231,10 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		result, err := transaction.ExecContext(request.Context(), `
 			UPDATE "gocms_content" SET "category_id" = ?, "title" = ?, "code" = ?, "summary" = ?, "body" = ?,
 			"cover_image" = ?, "published_at" = ?, "source" = ?, "keywords" = ?, "description" = ?,
-			"sort_order" = ?, "featured" = ?, "visible" = ? WHERE "id" = ?`,
+			"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
 			payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
-			payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible, id)
+			payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
+			modelID, extraDataStr, id)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -256,8 +276,8 @@ func normalizeContentDate(value string) string {
 }
 
 func (s *Server) queryContent(ctx context.Context, query string, categoryID int64, page, pageSize int, visibleOnly bool) (ContentPage, error) {
-	where := "1 = 1"
-	args := make([]any, 0, 4)
+	where := "1=1"
+	var args []any
 	if visibleOnly {
 		where += ` AND "visible" = 1`
 	}
@@ -266,7 +286,7 @@ func (s *Server) queryContent(ctx context.Context, query string, categoryID int6
 		args = append(args, categoryID)
 	}
 	if query != "" {
-		where += ` AND ("title" LIKE ? OR "code" LIKE ? OR "keywords" LIKE ? OR "summary" LIKE ?)`
+		where += ` AND ("title" LIKE ? OR "summary" LIKE ? OR "body" LIKE ? OR "code" LIKE ?)`
 		pattern := "%" + query + "%"
 		args = append(args, pattern, pattern, pattern, pattern)
 	}
@@ -279,7 +299,8 @@ func (s *Server) queryContent(ctx context.Context, query string, categoryID int6
 		SELECT "id", COALESCE("route_key", ''), COALESCE("category_id", 0), COALESCE("title", ''),
 		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
 		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("keywords", ''), COALESCE("description", ''),
-		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0)
+		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0),
+		       COALESCE("model_id", 1), COALESCE("extra_data", '{}')
 		FROM "gocms_content" WHERE `+where+` ORDER BY "sort_order" ASC, "id" DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return ContentPage{}, err
@@ -305,11 +326,19 @@ type contentScanner interface {
 
 func scanContent(scanner contentScanner) (Content, error) {
 	var item Content
+	var extraJSON string
 	err := scanner.Scan(
 		&item.ID, &item.RouteKey, &item.Category, &item.Title, &item.Code, &item.Summary,
 		&item.Content, &item.CoverImage, &item.PublishedAt, &item.Source, &item.Keywords,
 		&item.Description, &item.OrderID, &item.Featured, &item.Visible,
+		&item.ModelID, &extraJSON,
 	)
+	if err == nil {
+		item.ExtraData = make(map[string]any)
+		if strings.TrimSpace(extraJSON) != "" {
+			_ = json.Unmarshal([]byte(extraJSON), &item.ExtraData)
+		}
+	}
 	return item, err
 }
 
@@ -322,7 +351,8 @@ func (s *Server) readContent(ctx context.Context, id int64, visibleOnly bool) (C
 		SELECT "id", COALESCE("route_key", ''), COALESCE("category_id", 0), COALESCE("title", ''),
 		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
 		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("keywords", ''), COALESCE("description", ''),
-		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0)
+		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0),
+		       COALESCE("model_id", 1), COALESCE("extra_data", '{}')
 		FROM "gocms_content" WHERE `+where, id)
 	return scanContent(row)
 }
