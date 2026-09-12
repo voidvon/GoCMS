@@ -75,6 +75,9 @@ func TestTemplateLabelValidation(t *testing.T) {
 	if err := templatelabel.ValidateContent("valid", `{{range listItems .}}{{label "card" .}}{{end}}`); err != nil {
 		t.Fatalf("valid template was rejected: %v", err)
 	}
+	if err := templatelabel.ValidateContent("content-items", `{{range contentItems 0 10 true false "newest"}}{{.Index}} {{.Title}}{{end}}`); err != nil {
+		t.Fatalf("contentItems template was rejected: %v", err)
+	}
 	if err := templatelabel.ValidateContent("invalid", `{{unknown .}}`); err == nil {
 		t.Fatal("unknown template function was accepted")
 	}
@@ -133,4 +136,3 @@ func indexOfString(s, substr string) int {
 	}
 	return -1
 }
-

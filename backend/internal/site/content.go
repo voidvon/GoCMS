@@ -142,6 +142,16 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 		return
 	}
 	if request.Method == http.MethodDelete {
+		var category int64
+		if err := s.database.QueryRowContext(request.Context(), `SELECT category_id FROM gocms_content WHERE id = ?`, id).Scan(&category); err != nil {
+			http.NotFound(response, request)
+			return
+		}
+		user, _, _ := s.authenticateRequest(request)
+		if user == nil || !user.canManageCategory(category) {
+			writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有该栏目的内容权限"})
+			return
+		}
 		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "gocms_content" WHERE "id" = ?`, id)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
@@ -189,6 +199,46 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	}
 	payload.Featured = normalizeFlag(payload.Featured)
 	payload.Visible = normalizeFlag(payload.Visible)
+	user, authenticated, _ := s.authenticateRequest(request)
+	if !authenticated {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+		return
+	}
+	if !user.canManageCategory(payload.Category) {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有目标栏目的内容权限"})
+		return
+	}
+	if id != 0 {
+		var category int64
+		if err := s.database.QueryRowContext(request.Context(), `SELECT category_id FROM gocms_content WHERE id = ?`, id).Scan(&category); err != nil {
+			http.NotFound(response, request)
+			return
+		}
+		if !user.canManageCategory(category) {
+			writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有原栏目的内容权限"})
+			return
+		}
+	}
+	if !user.hasPermission("content.review") {
+		// Editing already-public material also changes the published version.
+		// Require a reviewer instead of silently unpublishing existing content.
+		var previousVisible int64
+		if id != 0 {
+			err := s.database.QueryRowContext(request.Context(), `SELECT visible FROM gocms_content WHERE id = ?`, id).Scan(&previousVisible)
+			if err == sql.ErrNoRows {
+				http.NotFound(response, request)
+				return
+			}
+			if err != nil {
+				http.Error(response, "database error", http.StatusInternalServerError)
+				return
+			}
+		}
+		if payload.Visible == 1 || previousVisible == 1 {
+			writeJSON(response, http.StatusForbidden, map[string]string{"error": "公开内容及修改已公开内容需要审核权限，请交由有审核权限的管理员处理"})
+			return
+		}
+	}
 	payload.PublishedAt = normalizeContentDate(payload.PublishedAt)
 	if err := s.validateContentCategory(request.Context(), payload.Category); err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
@@ -381,7 +431,7 @@ func (s *Server) queryContent(ctx context.Context, query string, categoryID int6
 		lang = defaultLang
 	}
 
-	where := "1=1"
+	where := "1=1" + contentScopeSQL(ctx)
 	var args []any
 	if visibleOnly {
 		where += ` AND "visible" = 1`
@@ -534,7 +584,7 @@ func (s *Server) readContent(ctx context.Context, id int64, lang string, visible
 	if lang == "" {
 		lang = defaultLang
 	}
-	where := `"id" = ?`
+	where := `"id" = ?` + contentScopeSQL(ctx)
 	if visibleOnly {
 		where += ` AND "visible" = 1`
 	}

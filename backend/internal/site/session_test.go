@@ -19,6 +19,7 @@ func TestSessionSurvivesServerRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedTestAdmin(t, first)
 	token, err := first.createSession("gocms")
 	if err != nil {
 		t.Fatal(err)

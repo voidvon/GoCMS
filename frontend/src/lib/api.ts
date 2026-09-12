@@ -1,8 +1,35 @@
 export type AdminUser = {
+  category_ids: number[] | null
   id: number
   username: string
   flags: string
+  is_super: boolean
+  group_id: number
+  permissions: string[]
 }
+
+export type OperationLog = { id: number; username: string; method: string; path: string; status: number; ip: string; created_at: string }
+export const getOperationLogs = (page: number, username: string) => request<{ items: OperationLog[]; total: number; page_size: number }>(`/api/admin/logs?page=${page}&username=${encodeURIComponent(username)}`)
+export type LoginLog = { id: number; username: string; success: boolean; ip: string; created_at: string }
+export const getLoginLogs = () => request<{ items: LoginLog[] }>("/api/admin/logins")
+export const clearLogs = (before: string) => request<{ ok: boolean }>("/api/admin/logs/clear", { method: "POST", body: JSON.stringify({ before }) })
+
+export type AdminAccount = {
+  category_ids?: number[] | null
+  id: number
+  username: string
+  group_id: number
+  is_super: boolean
+  disabled: boolean
+  password?: string
+}
+export type AdminGroup = { id: number; name: string; permissions: string[] }
+export const getAdminAccounts = () => request<AdminAccount[]>("/api/admin/users")
+export const getAdminGroups = () => request<{ items: AdminGroup[]; permissions: { key: string; label: string }[] }>("/api/admin/groups")
+export const saveAdminAccount = (input: AdminAccount) => request("/api/admin/users", { method: input.id ? "PUT" : "POST", body: JSON.stringify(input) })
+export const deleteAdminAccount = (id: number) => request("/api/admin/users", { method: "DELETE", body: JSON.stringify({ id }) })
+export const saveAdminGroup = (input: AdminGroup) => request("/api/admin/groups", { method: input.id ? "PUT" : "POST", body: JSON.stringify(input) })
+export const deleteAdminGroup = (id: number) => request("/api/admin/groups", { method: "DELETE", body: JSON.stringify({ id }) })
 
 export type AdminStats = {
   contents: number

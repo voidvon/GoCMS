@@ -35,6 +35,7 @@ func TestAdminSitemapGeneration(t *testing.T) {
 	}
 	data := t.TempDir()
 	server.ConfigurePublishing("", data, "", "", "")
+	seedTestAdmin(t, server)
 	token, err := server.createSession("gocms")
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +82,7 @@ func TestAdminLLMSGeneration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(server.siteRoot, "index.html"), []byte("<title>Public site</title>"), 0644); err != nil {
 		t.Fatal(err)
 	}
+	seedTestAdmin(t, server)
 	token, err := server.createSession("gocms")
 	if err != nil {
 		t.Fatal(err)

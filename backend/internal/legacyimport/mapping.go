@@ -606,8 +606,8 @@ func importAdmins(ctx context.Context, transaction *sql.Tx, rows []sourceRow) er
 			continue
 		}
 		if _, err := transaction.ExecContext(ctx, `
-			INSERT INTO "gocms_admin_user" ("id", "username", "password_hash", "flags", "last_login", "last_login_ip")
-			VALUES (?, ?, '', ?, NULLIF(?, ''), NULLIF(?, ''))`,
+			INSERT INTO "gocms_admin_user" ("id", "username", "password_hash", "flags", "last_login", "last_login_ip", "is_super")
+			VALUES (?, ?, '', ?, NULLIF(?, ''), NULLIF(?, ''), 1)`,
 			row.number("Id"), username, row.text("Flag"), row.text("LastLogin"), row.text("LastLoginIp")); err != nil {
 			return fmt.Errorf("import administrator %s: %w", username, err)
 		}

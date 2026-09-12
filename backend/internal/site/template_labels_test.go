@@ -26,6 +26,7 @@ func TestAdminTemplateLabelManagement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedTestAdmin(t, server)
 	token, err := server.createSession("gocms")
 	if err != nil {
 		t.Fatal(err)

@@ -28,6 +28,7 @@ func newCategoryTestServer(t *testing.T) (*Server, *sql.DB, string) {
 		database.Close()
 		t.Fatal(err)
 	}
+	seedTestAdmin(t, server)
 	token, err := server.createSession("gocms")
 	if err != nil {
 		database.Close()

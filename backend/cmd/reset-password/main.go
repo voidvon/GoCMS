@@ -43,8 +43,8 @@ func main() {
 	}
 	if _, err := transaction.ExecContext(ctx, `
 		INSERT INTO "gocms_admin_user"
-		("username", "password_hash", "flags", "last_login", "last_login_ip")
-		VALUES (?, ?, '', NULL, NULL)
+		("username", "password_hash", "flags", "last_login", "last_login_ip", "is_super")
+		VALUES (?, ?, '', NULL, NULL, 1)
 		ON CONFLICT ("username") DO UPDATE SET
 			"password_hash" = excluded."password_hash",
 			"last_login" = NULL,

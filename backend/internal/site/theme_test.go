@@ -51,6 +51,7 @@ func TestAdminThemeFiles(t *testing.T) {
 	}
 	server.themeRoot = themeRoot
 	server.templateRoot = templateRoot
+	seedTestAdmin(t, server)
 	token, err := server.createSession("gocms")
 	if err != nil {
 		t.Fatal(err)
@@ -155,6 +156,7 @@ func TestAdminTemplateCustomFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	server.themeRoot = t.TempDir()
+	seedTestAdmin(t, server)
 	token, err := server.createSession("gocms")
 	if err != nil {
 		t.Fatal(err)
@@ -276,6 +278,7 @@ func TestAdminThemeCatalogActions(t *testing.T) {
 	second := writeTestTheme(t, themesRoot, "second", "Second")
 	dataRoot := filepath.Join(t.TempDir(), "data")
 	server.ConfigureThemeCatalog(themesRoot, dataRoot, first)
+	seedTestAdmin(t, server)
 	token, err := server.createSession("gocms")
 	if err != nil {
 		t.Fatal(err)

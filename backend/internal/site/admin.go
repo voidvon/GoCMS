@@ -25,9 +25,13 @@ type adminCredentials struct {
 }
 
 type AdminUser struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
-	Flags    string `json:"flags"`
+	CategoryIDs []int64  `json:"category_ids"`
+	ID          int64    `json:"id"`
+	Username    string   `json:"username"`
+	Flags       string   `json:"flags"`
+	IsSuper     bool     `json:"is_super"`
+	GroupID     int64    `json:"group_id"`
+	Permissions []string `json:"permissions"`
 }
 
 type AdminStats struct {
@@ -52,50 +56,50 @@ type MessageItem struct {
 }
 
 type CategoryItem struct {
-	ID                int64                            `json:"id"`
-	Name              string                           `json:"name"`
-	ParentID          int64                            `json:"parent_id"`
-	OrderID           int64                            `json:"order_id"`
-	ListPageSize      int64                            `json:"list_page_size"`
-	PageType          string                           `json:"page_type"`
-	RouteID           int64                            `json:"route_id"`
-	ContentCount      int64                            `json:"content_count"`
-	ListPath          string                           `json:"list_path"`
-	ListFilePattern   string                           `json:"list_file_pattern"`
-	ListTemplate      string                           `json:"list_template"`
-	CoverTemplate     string                           `json:"cover_template"`
-	DetailPath        string                           `json:"detail_path"`
-	DetailFilePattern string                           `json:"detail_file_pattern"`
-	DetailTemplate    string                           `json:"detail_template"`
-	Keywords          string                           `json:"keywords,omitempty"`
-	Description       string                           `json:"description,omitempty"`
-	CoverContent      string                           `json:"cover_content,omitempty"`
-	ModelID           int64                            `json:"model_id"`
-	Lang              string                           `json:"lang,omitempty"`
-	IsFallback        bool                             `json:"is_fallback,omitempty"`
-	FallbackLang      string                           `json:"fallback_lang,omitempty"`
+	ID                int64                              `json:"id"`
+	Name              string                             `json:"name"`
+	ParentID          int64                              `json:"parent_id"`
+	OrderID           int64                              `json:"order_id"`
+	ListPageSize      int64                              `json:"list_page_size"`
+	PageType          string                             `json:"page_type"`
+	RouteID           int64                              `json:"route_id"`
+	ContentCount      int64                              `json:"content_count"`
+	ListPath          string                             `json:"list_path"`
+	ListFilePattern   string                             `json:"list_file_pattern"`
+	ListTemplate      string                             `json:"list_template"`
+	CoverTemplate     string                             `json:"cover_template"`
+	DetailPath        string                             `json:"detail_path"`
+	DetailFilePattern string                             `json:"detail_file_pattern"`
+	DetailTemplate    string                             `json:"detail_template"`
+	Keywords          string                             `json:"keywords,omitempty"`
+	Description       string                             `json:"description,omitempty"`
+	CoverContent      string                             `json:"cover_content,omitempty"`
+	ModelID           int64                              `json:"model_id"`
+	Lang              string                             `json:"lang,omitempty"`
+	IsFallback        bool                               `json:"is_fallback,omitempty"`
+	FallbackLang      string                             `json:"fallback_lang,omitempty"`
 	Translations      map[string]CategoryTranslationItem `json:"translations,omitempty"`
 }
 
 type categoryPayload struct {
-	Lang              string                            `json:"lang,omitempty"`
+	Lang              string                             `json:"lang,omitempty"`
 	Translations      map[string]CategoryTranslationItem `json:"translations,omitempty"`
-	Name              string                            `json:"name"`
-	ParentID          int64                             `json:"parent_id"`
-	OrderID           int64                             `json:"order_id"`
-	ListPageSize      int64                             `json:"list_page_size"`
-	PageType          string                            `json:"page_type"`
-	ListPath          string                            `json:"list_path"`
-	ListFilePattern   string                            `json:"list_file_pattern"`
-	ListTemplate      string                            `json:"list_template"`
-	CoverTemplate     string                            `json:"cover_template"`
-	DetailPath        string                            `json:"detail_path"`
-	DetailFilePattern string                            `json:"detail_file_pattern"`
-	DetailTemplate    string                            `json:"detail_template"`
-	Keywords          string                            `json:"keywords"`
-	Description       string                            `json:"description"`
-	CoverContent      string                            `json:"cover_content"`
-	ModelID           int64                             `json:"model_id"`
+	Name              string                             `json:"name"`
+	ParentID          int64                              `json:"parent_id"`
+	OrderID           int64                              `json:"order_id"`
+	ListPageSize      int64                              `json:"list_page_size"`
+	PageType          string                             `json:"page_type"`
+	ListPath          string                             `json:"list_path"`
+	ListFilePattern   string                             `json:"list_file_pattern"`
+	ListTemplate      string                             `json:"list_template"`
+	CoverTemplate     string                             `json:"cover_template"`
+	DetailPath        string                             `json:"detail_path"`
+	DetailFilePattern string                             `json:"detail_file_pattern"`
+	DetailTemplate    string                             `json:"detail_template"`
+	Keywords          string                             `json:"keywords"`
+	Description       string                             `json:"description"`
+	CoverContent      string                             `json:"cover_content"`
+	ModelID           int64                              `json:"model_id"`
 }
 
 func (s *Server) adminLogin(response http.ResponseWriter, request *http.Request) {
@@ -109,21 +113,40 @@ func (s *Server) adminLogin(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	credentials.Username = strings.TrimSpace(credentials.Username)
+	var recentFailures int
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM gocms_admin_login WHERE success = 0 AND created_at >= datetime('now','-15 minutes') AND (username = ? OR ip = ?)`, credentials.Username, clientIP(request)).Scan(&recentFailures); err != nil {
+		http.Error(response, "login temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if recentFailures >= 5 {
+		response.Header().Set("Retry-After", "900")
+		writeJSON(response, http.StatusTooManyRequests, map[string]string{"error": "登录失败次数过多，请 15 分钟后重试"})
+		return
+	}
 	var user AdminUser
 	var storedPassword string
 	if err := s.database.QueryRowContext(request.Context(), `
 		SELECT "id", COALESCE("username", ''), COALESCE("flags", ''), COALESCE("password_hash", '')
 		FROM "gocms_admin_user" WHERE "username" = ?`, credentials.Username).
 		Scan(&user.ID, &user.Username, &user.Flags, &storedPassword); err != nil || !auth.ComparePassword(credentials.Password, storedPassword) {
+		_, _ = s.database.ExecContext(request.Context(), `INSERT INTO gocms_admin_login (username, success, ip) VALUES (?, 0, ?)`, credentials.Username, clientIP(request))
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "用户名或密码不正确"})
 		return
 	}
+	loaded, err := s.loadAdmin(request.Context(), user.Username)
+	if err != nil {
+		_, _ = s.database.ExecContext(request.Context(), `INSERT INTO gocms_admin_login (username, success, ip) VALUES (?, 0, ?)`, user.Username, clientIP(request))
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "用户名或密码不正确，或账号已停用"})
+		return
+	}
+	user = *loaded
 	token, err := s.createSession(user.Username)
 	if err != nil {
 		http.Error(response, "session error", http.StatusInternalServerError)
 		return
 	}
 	http.SetCookie(response, sessionCookie(token, 86400))
+	_, _ = s.database.ExecContext(request.Context(), `INSERT INTO gocms_admin_login (username, success, ip) VALUES (?, 1, ?)`, user.Username, clientIP(request))
 	writeJSON(response, http.StatusOK, map[string]any{"user": user})
 }
 
@@ -759,20 +782,8 @@ func (s *Server) adminSessionUser(request *http.Request) (*AdminUser, bool) {
 	if err != nil || username == "" {
 		return nil, false
 	}
-	var user AdminUser
-	err = s.database.QueryRowContext(request.Context(), `
-		SELECT "id", COALESCE("username", ''), COALESCE("flags", '')
-		FROM "gocms_admin_user"
-		WHERE "username" = ?`, username).
-		Scan(&user.ID, &user.Username, &user.Flags)
-	if err != nil {
-		user = AdminUser{
-			ID:       1,
-			Username: username,
-			Flags:    "all",
-		}
-	}
-	return &user, true
+	user, err := s.loadAdmin(request.Context(), username)
+	return user, err == nil
 }
 
 func (s *Server) authenticateRequest(request *http.Request) (*AdminUser, bool, bool) {
@@ -783,11 +794,8 @@ func (s *Server) authenticateRequest(request *http.Request) (*AdminUser, bool, b
 		ident, err := apikey.Authenticate(request.Context(), s.database, token)
 		if err == nil && ident != nil {
 			go apikey.TouchUsage(context.Background(), s.database, ident.ApiKeyID, clientIP(request))
-			return &AdminUser{
-				ID:       ident.AdminID,
-				Username: ident.Username,
-				Flags:    ident.Flags,
-			}, true, false
+			user, err := s.loadAdmin(request.Context(), ident.Username)
+			return user, err == nil, false
 		}
 		return nil, false, false
 	}

@@ -34,8 +34,8 @@ func setupTestServer(t *testing.T) (*Server, string, int64) {
 	}
 
 	res, err := database.ExecContext(ctx, `
-		INSERT INTO "gocms_admin_user" ("username", "password_hash", "flags")
-		VALUES ('testadmin', 'pass', 'all')`)
+		INSERT INTO "gocms_admin_user" ("username", "password_hash", "flags", "is_super")
+		VALUES ('testadmin', 'pass', 'all', 1)`)
 	if err != nil {
 		database.Close()
 		t.Fatal(err)

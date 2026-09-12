@@ -80,6 +80,12 @@ type content struct {
 // ListItem, ListCategory, ListPagination, and NavigationItem are the data
 // contract exposed to themes. They intentionally contain no markup.
 type ListItem struct {
+	ID          int
+	CategoryID  int
+	Index       int
+	First       bool
+	Last        bool
+	Fields      map[string]string
 	URL         string
 	Title       string
 	Summary     string
@@ -178,10 +184,32 @@ func TemplateTags() []TemplateTag {
 			},
 		},
 		{
+			Name: "contentItems", Category: "内容列表", Signature: `{{range contentItems 0 10 true false "newest"}}...{{end}}`,
+			Description: "从发布快照调用公开内容：栏目 ID（0 为全站）、条数（1–500）、包含子栏目、仅推荐、排序（sort/newest/oldest）。返回 Index、First、Last 和已转义的 Fields 自定义字段。",
+			Context:     "所有模板", Example: `{{range contentItems 0 10 true false "newest"}}{{.Index}} <a href="{{.URL}}">{{.Title}}</a>{{else}}暂无内容{{end}}`,
+			Fields: []TemplateField{
+				{Name: ".ID / .CategoryID", Type: "int", Description: "内容 ID 和所属栏目 ID"},
+				{Name: ".Index / .First / .Last", Type: "int / bool", Description: "从 1 开始的序号及首末项标记"},
+				{Name: ".Fields", Type: "map[string]string", Description: "模型扩展字段，值已 HTML 转义"},
+			},
+		},
+		{
+			Name: "contentItemsWithImage", Category: "内容列表", Signature: `{{range contentItemsWithImage 0 10 true false true "newest"}}...{{end}}`,
+			Description: "contentItems 的图片筛选版本，只返回有封面图片的公开内容。参数依次为栏目 ID、条数、包含子栏目、仅推荐、只显示有图片、排序。",
+			Context:     "所有模板", Example: `{{range contentItemsWithImage 0 10 true false true "newest"}}<img src="{{.Image}}" alt="{{.Title}}">{{end}}`,
+			Fields: []TemplateField{
+				{Name: ".ID / .CategoryID / .Index", Type: "int", Description: "内容 ID、栏目 ID 和从 1 开始的序号"},
+				{Name: ".URL / .Title / .Image", Type: "string", Description: "详情链接、标题和封面图片地址"},
+				{Name: ".Fields", Type: "map[string]string", Description: "模型扩展字段，值已 HTML 转义"},
+			},
+		},
+		{
 			Name: "listItems", Category: "内容列表", Signature: `{{range listItems .}}...{{end}}`,
 			Description: "返回当前栏目当前分页中的可见内容。列表模板和标签模板通常使用它输出内容卡片。",
 			Context:     "列表模板", Example: `{{range listItems .}}<a href="{{.URL}}">{{.Title}}</a>{{end}}`,
 			Fields: []TemplateField{
+				{Name: ".ID / .CategoryID", Type: "int", Description: "内容 ID 和所属栏目 ID"},
+				{Name: ".Index / .First / .Last", Type: "int / bool", Description: "从 1 开始的序号及首末项标记"},
 				{Name: ".URL", Type: "string", Description: "内容详情链接"},
 				{Name: ".Title", Type: "string", Description: "内容标题"},
 				{Name: ".Summary", Type: "string", Description: "完整摘要"},
@@ -190,6 +218,7 @@ func TemplateTags() []TemplateTag {
 				{Name: ".Date", Type: "string", Description: "发布日期前 10 位"},
 				{Name: ".Image", Type: "string", Description: "封面图片地址"},
 				{Name: ".Category", Type: "string", Description: "所属栏目名称"},
+				{Name: ".Fields", Type: "map[string]string", Description: "模型扩展字段，值已 HTML 转义"},
 				{Name: ".RowStart / .RowEnd", Type: "bool", Description: "按两列分组的首尾标记"},
 			},
 		},
@@ -258,16 +287,18 @@ func TemplateTags() []TemplateTag {
 
 func (c *content) templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"setting":           func(key string) string { return esc(c.settings[strings.TrimSpace(key)]) },
-		"settingHTML":       func(key string) string { return c.settings[strings.TrimSpace(key)] },
-		"include":           func(path string, row Row) (string, error) { return c.include(path, row) },
-		"label":             func(key string, data any) (string, error) { return c.renderLabel(key, data) },
-		"listItems":         func(row Row) []ListItem { return c.listItems(row) },
-		"listCategories":    func(row Row) []ListCategory { return c.listCategories(row) },
-		"listChildren":      func(row Row) []ListCategory { return c.listChildren(row) },
-		"catalogCategories": func(_ Row) []ListCategory { return c.catalogCategories() },
-		"navigation":        func(_ Row) []NavigationItem { return c.navigation() },
-		"featuredItems":     func(limit int) []ListItem { return c.featuredItems(limit) },
+		"contentItems":          c.contentItems,
+		"contentItemsWithImage": c.contentItemsWithImage,
+		"setting":               func(key string) string { return esc(c.settings[strings.TrimSpace(key)]) },
+		"settingHTML":           func(key string) string { return c.settings[strings.TrimSpace(key)] },
+		"include":               func(path string, row Row) (string, error) { return c.include(path, row) },
+		"label":                 func(key string, data any) (string, error) { return c.renderLabel(key, data) },
+		"listItems":             func(row Row) []ListItem { return c.listItems(row) },
+		"listCategories":        func(row Row) []ListCategory { return c.listCategories(row) },
+		"listChildren":          func(row Row) []ListCategory { return c.listChildren(row) },
+		"catalogCategories":     func(_ Row) []ListCategory { return c.catalogCategories() },
+		"navigation":            func(_ Row) []NavigationItem { return c.navigation() },
+		"featuredItems":         func(limit int) []ListItem { return c.featuredItems(limit) },
 		"featuredItemsIn": func(collection string, limit int) []ListItem {
 			return c.featuredItemsIn(collection, limit)
 		},
@@ -727,7 +758,11 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	}
 
 	for _, label := range labels {
-		parsed, parseErr := template.New("label:" + label.Key).Funcs(c.templateFuncs()).Parse(label.Content)
+		content, expandErr := expandLegacyLoopSyntax(label.Content)
+		if expandErr != nil {
+			return report, fmt.Errorf("解析标签模板 %s: %w", label.Key, expandErr)
+		}
+		parsed, parseErr := template.New("label:" + label.Key).Funcs(c.templateFuncs()).Parse(content)
 		if parseErr != nil {
 			return report, fmt.Errorf("解析标签模板 %s: %w", label.Key, parseErr)
 		}
@@ -761,7 +796,11 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		if !utf8.Valid(data) {
 			return fmt.Errorf("模板非 UTF-8: %s", templatePath)
 		}
-		parsed, err := template.New(templatePath).Funcs(c.templateFuncs()).Parse(string(data))
+		content, expandErr := expandLegacyLoopSyntax(string(data))
+		if expandErr != nil {
+			return fmt.Errorf("解析模板 %s: %w", templatePath, expandErr)
+		}
+		parsed, err := template.New(templatePath).Funcs(c.templateFuncs()).Parse(content)
 		if err != nil {
 			return fmt.Errorf("解析模板 %s: %w", templatePath, err)
 		}
@@ -1269,10 +1308,19 @@ func (c *content) listItems(view Row) []ListItem {
 }
 
 func (c *content) listItem(row, category Row, index, total int) ListItem {
+	fields := map[string]string{}
+	var extra map[string]any
+	if json.Unmarshal([]byte(row["extra_data"]), &extra) == nil {
+		for key, value := range extra {
+			fields[key] = esc(fmt.Sprint(value))
+		}
+	}
 	publishedAt := strings.TrimSpace(row["published_at"])
 	summary := strings.TrimSpace(row["summary"])
 	image := strings.TrimSpace(row["cover_image"])
 	return ListItem{
+		ID: row.n("id"), CategoryID: row.n("category_id"), Index: index + 1,
+		First: index == 0, Last: index+1 == total, Fields: fields,
 		URL:         esc(c.contentURL(row)),
 		Title:       esc(row["title"]),
 		Summary:     esc(summary),

@@ -51,6 +51,8 @@ import { ThemePage } from "@/components/app/theme-page"
 import { ApiKeysPage } from "@/components/app/api-keys-page"
 
 import { MediaPage } from "@/components/app/media-page"
+import { UsersPage } from "@/components/app/users-page"
+import { LogsPage } from "@/components/app/logs-page"
 
 import { PublishPage } from "@/components/app/publish-page"
 import { SettingsDialog } from "@/components/app/settings-dialog"
@@ -62,6 +64,7 @@ type AdminShellProps = {
 }
 
 type NavigationProps = {
+  user: AdminUser
   activeView: AdminView
   onNavigate: (view: AdminView) => void
   onClose?: () => void
@@ -85,12 +88,19 @@ const navigationItems: NavigationItem[] = [
   { id: "theme", label: "模板管理", icon: Palette },
   { id: "models", label: "系统模型", icon: Boxes },
   { id: "api-keys", label: "API Key", icon: KeyRound },
+  { id: "users", label: "用户与权限", icon: KeyRound },
+  { id: "logs", label: "操作日志", icon: FileText },
 ]
 
-function Navigation({ activeView, onNavigate, onClose, collapsed = false }: NavigationProps) {
+function canView(user: AdminUser, view: AdminView) {
+  if (view === "logs") return user.is_super || user.permissions.includes("logs") || user.permissions.includes("login_logs")
+  return user.is_super || view === "overview" || user.permissions.includes(view)
+}
+
+function Navigation({ activeView, onNavigate, onClose, collapsed = false, user }: NavigationProps) {
   return (
     <nav aria-label="主导航" className="space-y-1">
-      {navigationItems.map((item) => {
+      {navigationItems.filter((item) => canView(user, item.id)).map((item) => {
         const Icon = item.icon
         const active = activeView === item.id
         const button = (
@@ -182,7 +192,7 @@ function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarP
           </div>}
         </div>
         <ScrollArea className="mt-6 min-h-0 flex-1" contentClassName="pb-4">
-          <Navigation activeView={activeView} onNavigate={onNavigate} collapsed={collapsed} />
+          <Navigation user={user} activeView={activeView} onNavigate={onNavigate} collapsed={collapsed} />
         </ScrollArea>
         <div className="shrink-0 border-t pt-4">
           <div className={cn("flex items-center gap-1", collapsed && "flex-col")}>
@@ -198,6 +208,10 @@ function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarP
 
 function viewMeta(view: AdminView) {
   switch (view) {
+    case "logs":
+      return { title: "操作日志", description: "查看后台操作记录" }
+    case "users":
+      return { title: "用户与权限", description: "管理后台账号、用户组和模块权限" }
     case "media":
       return { title: "附件管理", description: "管理全站上传图片及内容引用" }
     case "publish":
@@ -221,8 +235,13 @@ function viewMeta(view: AdminView) {
   }
 }
 
-function ViewContent({ view }: { view: AdminView }) {
+function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
+  if (!canView(user, view)) return <p className="text-sm text-muted-foreground">当前用户组没有此模块的管理权限。</p>
   switch (view) {
+    case "logs":
+      return <LogsPage user={user} />
+    case "users":
+      return <UsersPage currentUserID={user.id} />
     case "media":
       return <MediaPage />
     case "publish":
@@ -230,7 +249,7 @@ function ViewContent({ view }: { view: AdminView }) {
     case "theme":
       return <ThemePage />
     case "content":
-      return <ContentPage />
+      return <ContentPage user={user} />
     case "categories":
       return <CategoriesPage />
     case "models":
@@ -294,6 +313,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
 
   const mobileNavigation = (
     <Navigation
+      user={user}
       activeView={activeView}
       onNavigate={navigate}
       onClose={() => setMobileOpen(false)}
@@ -356,7 +376,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
         </header>
         <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6 lg:overflow-hidden">
           <div className="mx-auto h-full w-full max-w-screen-2xl min-h-0">
-            <ViewContent view={activeView} />
+            <ViewContent view={activeView} user={user} />
           </div>
         </main>
       </div>

@@ -11,6 +11,7 @@ import {
   getSystemModels,
   uploadMedia,
   type CategoryItem,
+  type AdminUser,
   type Content,
   type ContentInput,
   type ContentTranslationItem,
@@ -665,6 +666,7 @@ function SingleImageField({
 }
 
 function ContentEditor({
+  canReview,
   content,
   categories,
   models,
@@ -673,6 +675,7 @@ function ContentEditor({
   onCancel,
   saving,
 }: {
+  canReview: boolean
   content: ContentInput
   categories: CategoryItem[]
   models: SystemModel[]
@@ -690,7 +693,7 @@ function ContentEditor({
   }, [languages, defaultLang])
 
   const [activeTab, setActiveTab] = useState("base")
-  const [form, setForm] = useState(content)
+  const [form, setForm] = useState({ ...content, visible: canReview ? content.visible : 0 })
   const [translations, setTranslations] = useState<Record<string, ContentTranslationItem>>(() => {
     return buildInitialContentTranslations(content, defaultLang, enabledLanguages)
   })
@@ -1234,10 +1237,11 @@ function ContentEditor({
                 <div className="flex items-center justify-between rounded-md border p-2.5">
                   <div>
                     <p className="text-sm font-medium">公开展示</p>
-                    <p className="text-xs text-muted-foreground">生成页面及链接</p>
+                    <p className="text-xs text-muted-foreground">{canReview ? "审核确认后公开，生成页面及链接" : "保存为隐藏内容，由审核人员确认后公开"}</p>
                   </div>
                   <Switch
                     checked={form.visible === 1}
+                    disabled={!canReview}
                     onCheckedChange={(checked) => update("visible", checked ? 1 : 0)}
                     aria-label="公开展示"
                   />
@@ -1315,7 +1319,9 @@ function ContentEditor({
   )
 }
 
-export function ContentPage() {
+export function ContentPage({ user }: { user: AdminUser }) {
+  const allowed = (permission: string) => user.is_super || user.permissions.includes(permission)
+  const canReview = allowed("content.review")
   const [items, setItems] = useState<Content[]>([])
   const [categories, setCategories] = useState<CategoryItem[]>([])
   const [models, setModels] = useState<SystemModel[]>([])
@@ -1569,7 +1575,7 @@ export function ContentPage() {
             </Select>
           )}
         </div>
-        <Button onClick={openNew}><Plus />新增内容</Button>
+        <Button disabled={!allowed("content.add")} onClick={openNew}><Plus />新增内容</Button>
       </div>
       {notice && <p role="status" className="text-sm text-muted-foreground">{notice}</p>}
       {error ? <InlineAlert>{error}</InlineAlert> : null}
@@ -1613,8 +1619,8 @@ export function ContentPage() {
                   </TableCell>
                   <TableCell className="pr-4 text-right">
                     <div className="flex justify-end gap-1">
-                      <IconButton variant="ghost" size="icon-sm" onClick={() => openEdit(item)} label={`编辑${item.title}`}><Pencil /></IconButton>
-                      <IconButton variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(item)} label={`删除${item.title}`}><Trash2 /></IconButton>
+                      <IconButton disabled={!allowed("content.edit") || (!!item.visible && !canReview)} variant="ghost" size="icon-sm" onClick={() => openEdit(item)} label={`编辑${item.title}`}><Pencil /></IconButton>
+                      <IconButton disabled={!allowed("content.delete")} variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(item)} label={`删除${item.title}`}><Trash2 /></IconButton>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -1630,7 +1636,7 @@ export function ContentPage() {
           <ScrollArea className="max-h-[calc(100dvh-4rem)]" contentClassName="space-y-4 pr-2">
             {editorLoading ? (
               <><DialogHeader><DialogTitle>编辑内容</DialogTitle><DialogDescription>正在加载内容。</DialogDescription></DialogHeader><div className="flex h-32 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div></>
-            ) : <ContentEditor key={`${editing?.id ?? "new"}-${activeLang}`} content={formContent} categories={categories} models={models} modelFields={modelFields} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
+            ) : <ContentEditor canReview={canReview} key={`${editing?.id ?? "new"}-${activeLang}`} content={formContent} categories={categories} models={models} modelFields={modelFields} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
           </ScrollArea>
         </DialogContent>
       </Dialog>

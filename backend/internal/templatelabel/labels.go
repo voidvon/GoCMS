@@ -602,19 +602,21 @@ func DeleteCategory(ctx context.Context, database *sql.DB, id int64) error {
 
 func ValidateContent(name, content string) error {
 	_, err := template.New(name).Funcs(template.FuncMap{
-		"setting":           func(...any) string { return "" },
-		"settingHTML":       func(...any) string { return "" },
-		"include":           func(...any) (string, error) { return "", nil },
-		"label":             func(...any) (string, error) { return "", nil },
-		"listItems":         func(...any) []any { return nil },
-		"listCategories":    func(...any) []any { return nil },
-		"listChildren":      func(...any) []any { return nil },
-		"catalogCategories": func(...any) []any { return nil },
-		"navigation":        func(...any) []any { return nil },
-		"featuredItems":     func(...any) []any { return nil },
-		"featuredItemsIn":   func(...any) []any { return nil },
-		"relatedItems":      func(...any) []any { return nil },
-		"listPagination":    func(...any) any { return nil },
+		"setting":               func(...any) string { return "" },
+		"settingHTML":           func(...any) string { return "" },
+		"include":               func(...any) (string, error) { return "", nil },
+		"label":                 func(...any) (string, error) { return "", nil },
+		"contentItems":          func(...any) []any { return nil },
+		"contentItemsWithImage": func(...any) []any { return nil },
+		"listItems":             func(...any) []any { return nil },
+		"listCategories":        func(...any) []any { return nil },
+		"listChildren":          func(...any) []any { return nil },
+		"catalogCategories":     func(...any) []any { return nil },
+		"navigation":            func(...any) []any { return nil },
+		"featuredItems":         func(...any) []any { return nil },
+		"featuredItemsIn":       func(...any) []any { return nil },
+		"relatedItems":          func(...any) []any { return nil },
+		"listPagination":        func(...any) any { return nil },
 	}).Parse(content)
 	if err != nil {
 		return fmt.Errorf("标签模板语法错误: %w", err)

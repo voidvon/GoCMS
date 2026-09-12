@@ -53,6 +53,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		if err := db.EnsureAdminUsers(context.Background(), database); err != nil {
 			return nil, err
 		}
+		if err := db.EnsureAuditLog(context.Background(), database); err != nil {
+			return nil, err
+		}
 		if err := db.EnsureApiKeys(context.Background(), database); err != nil {
 			return nil, err
 		}
@@ -83,7 +86,31 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.serveAdminApp(response, request)
 		return
 	}
-	switch strings.ToLower(cleanPath) {
+	lowerAdminPath := strings.ToLower(cleanPath)
+	if strings.HasPrefix(lowerAdminPath, "/api/admin/") && lowerAdminPath != "/api/admin/login" && lowerAdminPath != "/api/admin/logout" {
+		if !s.authorizeAdminRoute(response, request, lowerAdminPath) {
+			return
+		}
+		if request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodPatch || request.Method == http.MethodDelete {
+			user, _ := request.Context().Value(contentScopeKey{}).(*AdminUser)
+			if user != nil {
+				capture := &operationResponse{ResponseWriter: response}
+				response = capture
+				defer s.recordOperation(user.Username, request, capture)
+			}
+		}
+	}
+	switch lowerAdminPath {
+	case "/api/admin/logs":
+		s.adminOperationLogs(response, request)
+	case "/api/admin/logins":
+		s.adminLoginLogs(response, request)
+	case "/api/admin/logs/clear":
+		s.adminClearLogs(response, request)
+	case "/api/admin/users":
+		s.adminUsers(response, request)
+	case "/api/admin/groups":
+		s.adminGroups(response, request)
 	case "/api/admin/update/check":
 		s.adminUpdateCheck(response, request)
 	case "/api/admin/update":
