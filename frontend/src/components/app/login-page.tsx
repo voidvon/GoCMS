@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from "react"
-import { ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react"
+import { useEffect, useState, type FormEvent } from "react"
+import { ArrowRight, LoaderCircle, ShieldCheck, UserPlus } from "lucide-react"
 
-import { login, type AdminUser } from "@/lib/api"
+import { getSetupStatus, login, type AdminUser } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -23,6 +23,19 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
   const [password, setPassword] = useState("")
   const [error, setError] = useState("")
   const [submitting, setSubmitting] = useState(false)
+  const [needsSetup, setNeedsSetup] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    getSetupStatus()
+      .then((res) => {
+        if (active) setNeedsSetup(res.needs_setup)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [])
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -61,8 +74,14 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
 
         <Card className="rounded-none border-0 shadow-none ring-0">
           <CardHeader className="px-8 pt-10 sm:px-10">
-            <CardTitle className="text-xl">登录后台</CardTitle>
-            <CardDescription>使用现有管理员账号继续</CardDescription>
+            <CardTitle className="text-xl">
+              {needsSetup ? "初始化超级管理员" : "登录后台"}
+            </CardTitle>
+            <CardDescription>
+              {needsSetup
+                ? "系统尚未配置管理员账号，首次输入的账号密码将自动创建为最高权限超级管理员。"
+                : "使用现有管理员账号继续"}
+            </CardDescription>
           </CardHeader>
           <CardContent className="px-8 pb-10 sm:px-10">
             <form className="space-y-5" onSubmit={handleSubmit}>
@@ -85,7 +104,7 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
                   autoComplete="current-password"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  placeholder="输入密码"
+                  placeholder={needsSetup ? "输入密码（至少 8 位）" : "输入密码"}
                   required
                 />
               </div>
@@ -95,10 +114,12 @@ export function LoginPage({ onSuccess }: LoginPageProps) {
               <Button className="w-full" type="submit" disabled={submitting}>
                 {submitting ? (
                   <LoaderCircle className="animate-spin" />
+                ) : needsSetup ? (
+                  <UserPlus />
                 ) : (
                   <ArrowRight />
                 )}
-                进入后台
+                {needsSetup ? "创建并进入后台" : "进入后台"}
               </Button>
             </form>
           </CardContent>

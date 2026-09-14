@@ -87,7 +87,7 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		return
 	}
 	lowerAdminPath := strings.ToLower(cleanPath)
-	if strings.HasPrefix(lowerAdminPath, "/api/admin/") && lowerAdminPath != "/api/admin/login" && lowerAdminPath != "/api/admin/logout" {
+	if strings.HasPrefix(lowerAdminPath, "/api/admin/") && lowerAdminPath != "/api/admin/login" && lowerAdminPath != "/api/admin/logout" && lowerAdminPath != "/api/admin/setup-status" {
 		if !s.authorizeAdminRoute(response, request, lowerAdminPath) {
 			return
 		}
@@ -101,6 +101,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		}
 	}
 	switch lowerAdminPath {
+	case "/api/admin/setup-status":
+		s.adminSetupStatus(response, request)
 	case "/api/admin/logs":
 		s.adminOperationLogs(response, request)
 	case "/api/admin/logins":

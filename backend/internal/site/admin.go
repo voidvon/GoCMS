@@ -102,6 +102,19 @@ type categoryPayload struct {
 	ModelID           int64                              `json:"model_id"`
 }
 
+func (s *Server) adminSetupStatus(response http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet {
+		methodNotAllowed(response)
+		return
+	}
+	var count int
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_admin_user"`).Scan(&count); err != nil {
+		http.Error(response, "database error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"needs_setup": count == 0})
+}
+
 func (s *Server) adminLogin(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodPost {
 		methodNotAllowed(response)
@@ -113,6 +126,66 @@ func (s *Server) adminLogin(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	credentials.Username = strings.TrimSpace(credentials.Username)
+
+	var adminCount int
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_admin_user"`).Scan(&adminCount); err != nil {
+		http.Error(response, "database error", http.StatusInternalServerError)
+		return
+	}
+	if adminCount == 0 {
+		if credentials.Username == "" {
+			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "用户名不能为空"})
+			return
+		}
+		if len(credentials.Password) < 8 || len(credentials.Password) > 256 {
+			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "管理员密码长度需在 8 到 256 位之间"})
+			return
+		}
+		hash, err := auth.HashPassword(credentials.Password)
+		if err != nil {
+			http.Error(response, "password hashing error", http.StatusInternalServerError)
+			return
+		}
+		tx, err := s.database.BeginTx(request.Context(), nil)
+		if err != nil {
+			http.Error(response, "transaction error", http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback()
+
+		var doubleCheck int
+		if err := tx.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_admin_user"`).Scan(&doubleCheck); err != nil {
+			http.Error(response, "database error", http.StatusInternalServerError)
+			return
+		}
+		if doubleCheck == 0 {
+			if _, err := tx.ExecContext(request.Context(), `
+				INSERT INTO "gocms_admin_user" ("username", "password_hash", "is_super", "disabled", "category_ids")
+				VALUES (?, ?, 1, 0, 'null')`, credentials.Username, hash); err != nil {
+				writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "初始化超级管理员失败"})
+				return
+			}
+			if err := tx.Commit(); err != nil {
+				http.Error(response, "commit error", http.StatusInternalServerError)
+				return
+			}
+			user, err := s.loadAdmin(request.Context(), credentials.Username)
+			if err != nil {
+				http.Error(response, "load user error", http.StatusInternalServerError)
+				return
+			}
+			token, err := s.createSession(credentials.Username)
+			if err != nil {
+				http.Error(response, "session error", http.StatusInternalServerError)
+				return
+			}
+			http.SetCookie(response, sessionCookie(token, 86400))
+			_, _ = s.database.ExecContext(request.Context(), `INSERT INTO gocms_admin_login (username, success, ip) VALUES (?, 1, ?)`, credentials.Username, clientIP(request))
+			writeJSON(response, http.StatusOK, map[string]any{"user": *user})
+			return
+		}
+	}
+
 	var recentFailures int
 	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM gocms_admin_login WHERE success = 0 AND created_at >= datetime('now','-15 minutes') AND (username = ? OR ip = ?)`, credentials.Username, clientIP(request)).Scan(&recentFailures); err != nil {
 		http.Error(response, "login temporarily unavailable", http.StatusServiceUnavailable)

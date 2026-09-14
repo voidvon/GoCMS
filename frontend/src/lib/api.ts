@@ -426,6 +426,10 @@ export function getSession() {
   return request<SessionResponse>("/api/admin/session")
 }
 
+export function getSetupStatus() {
+  return request<{ needs_setup: boolean }>("/api/admin/setup-status")
+}
+
 export function login(username: string, password: string) {
   return request<SessionResponse>("/api/admin/login", {
     method: "POST",
