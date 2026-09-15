@@ -73,7 +73,7 @@ type content struct {
 	categoryCache    map[int][]Row
 	categoryByID     map[int]Row
 	childrenCache    map[int][]Row
-	navigationCache  []NavigationItem
+	navigationCache  map[string][]NavigationItem
 	catalogCache     []ListCategory
 }
 
@@ -110,6 +110,7 @@ type ListCategory struct {
 type NavigationItem struct {
 	URL      string
 	Name     string
+	Position string
 	Children []NavigationItem
 }
 
@@ -174,9 +175,9 @@ func TemplateTags() []TemplateTag {
 			Context:     "所有模板", Example: `{{range listItems .}}{{label "content-card" .}}{{end}}`,
 		},
 		{
-			Name: "navigation", Category: "栏目导航", Signature: `{{range navigation .}}...{{end}}`,
-			Description: "返回从根栏目开始的完整导航树。传入参数用于保持模板调用形式，当前上下文不会改变导航范围。",
-			Context:     "所有模板", Example: `{{range navigation .}}<a href="{{.URL}}">{{.Name}}</a>{{end}}`,
+			Name: "navigation", Category: "栏目导航", Signature: `{{range navigation .}}...{{end}} 或 {{range navigation "top" .}}...{{end}}`,
+			Description: "返回指定位置的导航树（支持 'main' 主导航、'top' 顶部副导航、'footer' 底部页脚导航，默认为 'main'）。",
+			Context:     "所有模板", Example: `{{range navigation "top" .}}<a href="{{.URL}}">{{.Name}}</a>{{end}}`,
 			Fields: []TemplateField{
 				{Name: ".URL", Type: "string", Description: "栏目链接"},
 				{Name: ".Name", Type: "string", Description: "栏目名称"},
@@ -297,7 +298,7 @@ func (c *content) templateFuncs() template.FuncMap {
 		"listCategories":        func(row Row) []ListCategory { return c.listCategories(row) },
 		"listChildren":          func(row Row) []ListCategory { return c.listChildren(row) },
 		"catalogCategories":     func(_ Row) []ListCategory { return c.catalogCategories() },
-		"navigation":            func(_ Row) []NavigationItem { return c.navigation() },
+		"navigation":            func(args ...any) []NavigationItem { return c.navigation(args...) },
 		"featuredItems":         func(limit int) []ListItem { return c.featuredItems(limit) },
 		"featuredItemsIn": func(collection string, limit int) []ListItem {
 			return c.featuredItemsIn(collection, limit)
@@ -1418,15 +1419,35 @@ func (c *content) children(parentID int) []Row {
 	return c.childrenCache[parentID]
 }
 
-func (c *content) navigation() []NavigationItem {
-	if c.navigationCache != nil {
-		return c.navigationCache
+func (c *content) navigation(args ...any) []NavigationItem {
+	position := "main"
+	for _, arg := range args {
+		if s, ok := arg.(string); ok {
+			s = strings.ToLower(strings.TrimSpace(s))
+			if s != "" {
+				position = s
+				break
+			}
+		}
+	}
+	if c.navigationCache == nil {
+		c.navigationCache = make(map[string][]NavigationItem)
+	}
+	if cached, ok := c.navigationCache[position]; ok {
+		return cached
 	}
 	items := make([]NavigationItem, 0)
 	for _, category := range c.children(0) {
+		catPos := strings.ToLower(strings.TrimSpace(category["nav_position"]))
+		if catPos == "" {
+			catPos = "main"
+		}
+		if catPos != position {
+			continue
+		}
 		items = append(items, c.navigationItem(category))
 	}
-	c.navigationCache = items
+	c.navigationCache[position] = items
 	return items
 }
 
@@ -1434,9 +1455,22 @@ func (c *content) navigationItem(category Row) NavigationItem {
 	children := c.children(category.n("id"))
 	items := make([]NavigationItem, 0, len(children))
 	for _, child := range children {
+		catPos := strings.ToLower(strings.TrimSpace(child["nav_position"]))
+		if catPos == "none" {
+			continue
+		}
 		items = append(items, c.navigationItem(child))
 	}
-	return NavigationItem{URL: esc(c.categoryListURL(category, 1)), Name: esc(category["name"]), Children: items}
+	pos := strings.ToLower(strings.TrimSpace(category["nav_position"]))
+	if pos == "" {
+		pos = "main"
+	}
+	return NavigationItem{
+		URL:      esc(c.categoryListURL(category, 1)),
+		Name:     esc(category["name"]),
+		Position: pos,
+		Children: items,
+	}
 }
 
 func (c *content) featuredItems(limit int) []ListItem {

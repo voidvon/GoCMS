@@ -249,3 +249,71 @@ func TestLinkCategoryManagement(t *testing.T) {
 		t.Fatalf("unexpected error message: %s", contentResp.Body.String())
 	}
 }
+
+func TestCategoryNavPosition(t *testing.T) {
+	server, database, token := newCategoryTestServer(t)
+
+	// 1. Create with nav_position = "top"
+	topPayload := `{"name":"联系我们","parent_id":0,"order_id":1,"nav_position":"top"}`
+	res := categoryRequest(t, server, token, http.MethodPost, "/api/admin/categories", topPayload)
+	if res.Code != http.StatusOK {
+		t.Fatalf("create top category failed: %d %s", res.Code, res.Body.String())
+	}
+
+	// 2. Create without nav_position, should default to "main"
+	defaultPayload := `{"name":"产品中心","parent_id":0,"order_id":2}`
+	res = categoryRequest(t, server, token, http.MethodPost, "/api/admin/categories", defaultPayload)
+	if res.Code != http.StatusOK {
+		t.Fatalf("create default category failed: %d %s", res.Code, res.Body.String())
+	}
+
+	// 3. Create with invalid nav_position, should normalize to "main"
+	invalidPayload := `{"name":"新闻中心","parent_id":0,"order_id":3,"nav_position":"invalid_pos"}`
+	res = categoryRequest(t, server, token, http.MethodPost, "/api/admin/categories", invalidPayload)
+	if res.Code != http.StatusOK {
+		t.Fatalf("create invalid nav_position category failed: %d %s", res.Code, res.Body.String())
+	}
+
+	// Verify all created categories via GET
+	getRes := categoryRequest(t, server, token, http.MethodGet, "/api/admin/categories", "")
+	if getRes.Code != http.StatusOK {
+		t.Fatalf("get categories failed: %d %s", getRes.Code, getRes.Body.String())
+	}
+	var cats []CategoryItem
+	if err := json.Unmarshal(getRes.Body.Bytes(), &cats); err != nil {
+		t.Fatal(err)
+	}
+	if len(cats) != 3 {
+		t.Fatalf("expected 3 categories, got %d", len(cats))
+	}
+	catMap := make(map[string]CategoryItem)
+	for _, c := range cats {
+		catMap[c.Name] = c
+	}
+	if catMap["联系我们"].NavPosition != "top" {
+		t.Fatalf("expected top nav_position, got %q", catMap["联系我们"].NavPosition)
+	}
+	if catMap["产品中心"].NavPosition != "main" {
+		t.Fatalf("expected main nav_position for default, got %q", catMap["产品中心"].NavPosition)
+	}
+	if catMap["新闻中心"].NavPosition != "main" {
+		t.Fatalf("expected normalized main nav_position, got %q", catMap["新闻中心"].NavPosition)
+	}
+
+	// 4. Update nav_position to "footer"
+	contactID := catMap["联系我们"].ID
+	updatePayload := `{"name":"联系我们","parent_id":0,"order_id":1,"nav_position":"footer"}`
+	updateRes := categoryRequest(t, server, token, http.MethodPut, "/api/admin/categories/"+strconv.FormatInt(contactID, 10), updatePayload)
+	if updateRes.Code != http.StatusOK {
+		t.Fatalf("update nav_position failed: %d %s", updateRes.Code, updateRes.Body.String())
+	}
+
+	var updatedPos string
+	if err := database.QueryRow(`SELECT "nav_position" FROM "gocms_category" WHERE "id" = ?`, contactID).Scan(&updatedPos); err != nil {
+		t.Fatal(err)
+	}
+	if updatedPos != "footer" {
+		t.Fatalf("expected updated nav_position to be footer, got %q", updatedPos)
+	}
+}
+

@@ -93,6 +93,7 @@ const emptyCategory: CategoryInput = {
   order_id: 0,
   list_page_size: 14,
   page_type: "list",
+  nav_position: "main",
   list_path: "category",
   list_file_pattern: "{id}.html",
   list_template: "category_list.html",
@@ -191,6 +192,7 @@ function categoryInput(category: CategoryItem, templateGroups: ThemeTemplateGrou
     detail_template: category.detail_template,
     model_id: category.model_id || 1,
     link_url: category.link_url || "",
+    nav_position: category.nav_position || "main",
     keywords: category.keywords || "",
     description: category.description || "",
     cover_content: category.cover_content || "",
@@ -255,6 +257,15 @@ function CategoryRow({
             ) : null}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
+            {node.nav_position && node.nav_position !== "main" ? (
+              <span className="mr-1.5 rounded border border-blue-500/30 bg-blue-500/10 px-1 py-0.2 text-[10px] text-blue-600">
+                {node.nav_position === "top"
+                  ? "顶部副导航"
+                  : node.nav_position === "footer"
+                    ? "底部页脚导航"
+                    : "隐藏导航"}
+              </span>
+            ) : null}
             {node.page_type === "link"
               ? `链接跳转 · ${node.link_url || "#"} · 排序 ${node.order_id} · #${node.route_id}`
               : `${node.content_count} 条直接内容 · ${node.page_type === "cover" ? "封面式" : "列表式"} · 排序 ${node.order_id} · #${node.route_id}`}
@@ -698,9 +709,37 @@ export function CategoriesPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
+                      <Label>导航显示位置</Label>
+                      <Select
+                        value={form.nav_position || "main"}
+                        onValueChange={(value) => update("nav_position", (value ?? "main") as "main" | "top" | "footer" | "none")}
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="选择导航位置">
+                            {(value) =>
+                              value === "top"
+                                ? "顶部副导航 (top)"
+                                : value === "footer"
+                                  ? "底部页脚导航 (footer)"
+                                  : value === "none"
+                                    ? "不显示在导航 (none)"
+                                    : "主导航 (main)"
+                            }
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="main">主导航 (main)</SelectItem>
+                          <SelectItem value="top">顶部副导航 (top)</SelectItem>
+                          <SelectItem value="footer">底部页脚导航 (footer)</SelectItem>
+                          <SelectItem value="none">不显示在导航 (none)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">控制该栏目在模板 navigation 标签中的输出归属。</p>
+                    </div>
+                    <div className="space-y-2">
                       <Label htmlFor="category-order">排序值</Label>
                       <Input id="category-order" type="number" min="0" value={form.order_id} onChange={(event) => update("order_id", Number(event.target.value))} />
-                      <p className="text-xs text-muted-foreground">同一父分类下数值越小越靠前。</p>
+                      <p className="text-xs text-muted-foreground">数值越小越靠前。</p>
                     </div>
                     {form.page_type === "link" ? (
                       <div className="space-y-2 sm:col-span-2">

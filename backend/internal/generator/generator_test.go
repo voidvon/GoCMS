@@ -499,3 +499,80 @@ func TestLinkCategoryGeneration(t *testing.T) {
 		}
 	}
 }
+
+func TestPublisher_NavigationPositions(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err = db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert categories across positions: top, main, footer, none
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO "gocms_category"
+			("id", "name", "parent_id", "order_id", "route_id", "page_type", "link_url", "nav_position")
+		VALUES
+			(1, '联系我们', 0, 1, 1, 'link', '/contact.html', 'top'),
+			(2, '招贤纳士', 0, 2, 2, 'link', '/careers.html', 'top'),
+			(3, '产品', 0, 1, 3, 'list', '', 'main'),
+			(4, '解决方案', 0, 2, 4, 'list', '', 'main'),
+			(5, '球阀', 3, 1, 5, 'list', '', 'main'),
+			(6, '内部型号', 3, 2, 6, 'list', '', 'none'),
+			(7, '隐私政策', 0, 1, 7, 'link', '/privacy.html', 'footer'),
+			(8, '服务条款', 0, 2, 8, 'link', '/terms.html', 'footer'),
+			(9, '隐藏分类', 0, 99, 9, 'list', '', 'none')`); err != nil {
+		t.Fatal(err)
+	}
+
+	templates := filepath.Join(t.TempDir(), "templates")
+	writeTemplate(t, templates, "index.html", `top=[{{range navigation "top" .}}{{.Name}}={{.URL}};{{end}}] main=[{{range navigation "main" .}}{{.Name}}={{.URL}}({{range .Children}}{{.Name}};{{end}});{{end}}] def=[{{range navigation .}}{{.Name}}={{.URL}};{{end}}] footer=[{{range navigation "footer" .}}{{.Name}}={{.URL}};{{end}}] none=[{{range navigation "none" .}}{{.Name}}={{.URL}};{{end}}]`)
+	writeTemplate(t, templates, "category_cover.html", `cover={{.category_name}}`)
+	writeTemplate(t, templates, "category_list.html", `list={{.category_name}}`)
+	writeTemplate(t, templates, "content_detail.html", `detail={{.title}}`)
+	writeTemplate(t, templates, "msg.html", `msg`)
+	writeTemplate(t, templates, "search.html", `search`)
+
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	publisher := Publisher{DB: database, Web: web, Templates: templates, Data: filepath.Join(root, "data")}
+	if _, err := publisher.Generate(ctx); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	indexContent := readGenerated(t, web, "index.html")
+
+	// 1. Top nav should have 联系我们 and 招贤纳士
+	wantTop := "top=[联系我们=/contact.html;招贤纳士=/careers.html;]"
+	if !strings.Contains(indexContent, wantTop) {
+		t.Fatalf("top nav mismatch in index: got %q, want %q", indexContent, wantTop)
+	}
+
+	// 2. Main nav should have 产品 (with child 球阀, but NOT 内部型号) and 解决方案
+	wantMain := "main=[产品=/category/3.html(球阀;);解决方案=/category/4.html();]"
+	if !strings.Contains(indexContent, wantMain) {
+		t.Fatalf("main nav mismatch in index: got %q, want %q", indexContent, wantMain)
+	}
+
+	// 3. Default navigation (no position passed) should match main
+	wantDef := "def=[产品=/category/3.html;解决方案=/category/4.html;]"
+	if !strings.Contains(indexContent, wantDef) {
+		t.Fatalf("default nav mismatch in index: got %q, want %q", indexContent, wantDef)
+	}
+
+	// 4. Footer nav should have 隐私政策 and 服务条款
+	wantFooter := "footer=[隐私政策=/privacy.html;服务条款=/terms.html;]"
+	if !strings.Contains(indexContent, wantFooter) {
+		t.Fatalf("footer nav mismatch in index: got %q, want %q", indexContent, wantFooter)
+	}
+
+	// 5. None nav query can find 隐藏分类 if explicitly queried as "none"
+	wantNone := "none=[隐藏分类=/category/9.html;]"
+	if !strings.Contains(indexContent, wantNone) {
+		t.Fatalf("none nav mismatch in index: got %q, want %q", indexContent, wantNone)
+	}
+}
+

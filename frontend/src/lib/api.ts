@@ -233,6 +233,7 @@ export type CategoryItem = {
   cover_content?: string
   model_id?: number
   link_url?: string
+  nav_position?: "main" | "top" | "footer" | "none"
   is_fallback?: boolean
   fallback_lang?: string
   translations?: Record<string, CategoryTranslationItem>

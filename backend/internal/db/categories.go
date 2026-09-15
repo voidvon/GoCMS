@@ -36,7 +36,8 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 			"description" TEXT NOT NULL DEFAULT '',
 			"cover_content" TEXT NOT NULL DEFAULT '',
 			"model_id" INTEGER NOT NULL DEFAULT 1,
-			"link_url" TEXT NOT NULL DEFAULT ''
+			"link_url" TEXT NOT NULL DEFAULT '',
+			"nav_position" TEXT NOT NULL DEFAULT 'main'
 		)`); err != nil {
 		return fmt.Errorf("create category table: %w", err)
 	}
@@ -57,6 +58,7 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		"cover_content":  "TEXT NOT NULL DEFAULT ''",
 		"model_id":       "INTEGER NOT NULL DEFAULT 1",
 		"link_url":       "TEXT NOT NULL DEFAULT ''",
+		"nav_position":   "TEXT NOT NULL DEFAULT 'main'",
 	} {
 		if err := ensureTableColumn(ctx, database, unifiedCategoryTable, name, definition); err != nil {
 			return err
@@ -67,6 +69,12 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		SET "page_type" = 'list'
 		WHERE TRIM(COALESCE("page_type", '')) = ''`); err != nil {
 		return fmt.Errorf("initialize category page types: %w", err)
+	}
+	if _, err := database.ExecContext(ctx, `
+		UPDATE "gocms_category"
+		SET "nav_position" = 'main'
+		WHERE TRIM(COALESCE("nav_position", '')) = ''`); err != nil {
+		return fmt.Errorf("initialize category nav positions: %w", err)
 	}
 
 	if _, err := database.ExecContext(ctx, `
