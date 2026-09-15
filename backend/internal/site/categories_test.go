@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"gocms/internal/db"
@@ -176,5 +177,75 @@ func TestCoverCategoryManagement(t *testing.T) {
 	response = categoryRequest(t, server, token, http.MethodPut, "/api/admin/categories/"+strconv.FormatInt(category.ID, 10), invalid)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("invalid list route for cover category returned %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestLinkCategoryManagement(t *testing.T) {
+	server, database, token := newCategoryTestServer(t)
+
+	// Enable English language as well
+	_, _ = database.Exec(`INSERT INTO "gocms_language" ("code", "name", "is_default", "is_enabled", "is_fallback", "sort_order", "path_prefix") VALUES ('en', 'English', 0, 1, 0, 2, 'en')`)
+
+	payload := `{
+		"name": "首页",
+		"parent_id": 0,
+		"order_id": 1,
+		"page_type": "link",
+		"link_url": "/",
+		"translations": {
+			"zh-CN": {"name": "首页", "link_url": "/"},
+			"en": {"name": "Home", "link_url": "/en/"}
+		}
+	}`
+	response := categoryRequest(t, server, token, http.MethodPost, "/api/admin/categories", payload)
+	if response.Code != http.StatusOK {
+		t.Fatalf("create link category returned %d: %s", response.Code, response.Body.String())
+	}
+
+	catID := categoryID(t, database, "首页")
+
+	// Verify database row
+	var pageType, linkURL string
+	if err := database.QueryRow(`SELECT "page_type", "link_url" FROM "gocms_category" WHERE "id" = ?`, catID).Scan(&pageType, &linkURL); err != nil {
+		t.Fatal(err)
+	}
+	if pageType != "link" || linkURL != "/" {
+		t.Fatalf("database link category: page_type=%q, link_url=%q", pageType, linkURL)
+	}
+
+	// Verify translation query zh-CN
+	resZh := categoryRequest(t, server, token, http.MethodGet, "/api/admin/categories?lang=zh-CN", "")
+	if resZh.Code != http.StatusOK {
+		t.Fatalf("get zh returned %d: %s", resZh.Code, resZh.Body.String())
+	}
+	var catsZh []CategoryItem
+	if err := json.Unmarshal(resZh.Body.Bytes(), &catsZh); err != nil {
+		t.Fatal(err)
+	}
+	if len(catsZh) != 1 || catsZh[0].Name != "首页" || catsZh[0].LinkURL != "/" || catsZh[0].PageType != "link" {
+		t.Fatalf("unexpected catsZh: %+v", catsZh)
+	}
+
+	// Verify translation query en
+	resEn := categoryRequest(t, server, token, http.MethodGet, "/api/admin/categories?lang=en", "")
+	if resEn.Code != http.StatusOK {
+		t.Fatalf("get en returned %d: %s", resEn.Code, resEn.Body.String())
+	}
+	var catsEn []CategoryItem
+	if err := json.Unmarshal(resEn.Body.Bytes(), &catsEn); err != nil {
+		t.Fatal(err)
+	}
+	if len(catsEn) != 1 || catsEn[0].Name != "Home" || catsEn[0].LinkURL != "/en/" || catsEn[0].PageType != "link" {
+		t.Fatalf("unexpected catsEn: %+v", catsEn)
+	}
+
+	// Verify that creating content in a link category is rejected
+	contentPayload := `{"category_id":` + strconv.FormatInt(catID, 10) + `,"title":"测试文章","body":"<p>测试</p>"}`
+	contentResp := categoryRequest(t, server, token, http.MethodPost, "/api/admin/content", contentPayload)
+	if contentResp.Code != http.StatusBadRequest {
+		t.Fatalf("content creation in link category should fail with 400, got %d: %s", contentResp.Code, contentResp.Body.String())
+	}
+	if !strings.Contains(contentResp.Body.String(), "链接类型栏目不能发布内容") {
+		t.Fatalf("unexpected error message: %s", contentResp.Body.String())
 	}
 }

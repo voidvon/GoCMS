@@ -698,7 +698,7 @@ function ContentEditor({
     return buildInitialContentTranslations(content, defaultLang, enabledLanguages)
   })
   const [customError, setCustomError] = useState("")
-  const categoryOptions = flattenCategoryTree(categories)
+  const categoryOptions = useMemo(() => flattenCategoryTree(categories).filter((c) => c.page_type !== "link"), [categories])
   const [bodyUploading, setBodyUploading] = useState(false)
 
   useEffect(() => {
@@ -1344,7 +1344,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
 
   const { activeLang, setActiveLang, languages, currentLanguage, refreshLanguages } = useLanguage()
 
-  const categoryOptions = useMemo(() => flattenCategoryTree(categories), [categories])
+  const categoryOptions = useMemo(() => flattenCategoryTree(categories).filter((c) => c.page_type !== "link"), [categories])
 
   useEffect(() => {
     getCategories(activeLang).then(setCategories).catch(() => setCategories([]))

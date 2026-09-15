@@ -522,6 +522,12 @@ func prepareTranslatedCategories(baseRows, transRows []Row, targetLang, fallback
 			row["cover_content"] = v
 		}
 
+		if v := strings.TrimSpace(targetTrans["link_url"]); v != "" {
+			row["link_url"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["link_url"]); v != "" {
+			row["link_url"] = v
+		}
+
 		result[i] = row
 	}
 	return result
@@ -1103,6 +1109,13 @@ func (c *content) categoryListURL(row Row, page int) string {
 	if row["id"] == "" {
 		return ""
 	}
+	if c.categoryPageType(row) == routing.PageTypeLink {
+		link := strings.TrimSpace(row["link_url"])
+		if link == "" {
+			return "#"
+		}
+		return link
+	}
 	routeID := row.n("route_id")
 	if routeID == 0 {
 		routeID = row.n("id")
@@ -1198,6 +1211,9 @@ func (c *content) rootCategory() Row {
 	var root Row
 	for _, category := range c.tables["gocms_category"] {
 		if category.n("parent_id") != 0 {
+			continue
+		}
+		if c.categoryPageType(category) == routing.PageTypeLink {
 			continue
 		}
 		if root["id"] == "" || category.n("order_id") < root.n("order_id") ||
@@ -1685,6 +1701,9 @@ func (c *content) buildForLang() error {
 	}
 
 	for _, category := range c.tables["gocms_category"] {
+		if c.categoryPageType(category) == routing.PageTypeLink {
+			continue
+		}
 		items := c.contentsForCategory(category)
 		pageSize := c.categoryPageSize(category)
 		if c.categoryPageType(category) == routing.PageTypeCover {

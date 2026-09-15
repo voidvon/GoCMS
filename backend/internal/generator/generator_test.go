@@ -394,3 +394,108 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 		t.Fatalf("unexpected sitemap: %s", sitemap)
 	}
 }
+
+func TestLinkCategoryGeneration(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_site_setting" ("key", "value") VALUES
+			('site_name', '链接测试站点'), ('site_url', 'https://example.test/'),
+			('site_copyright', 'Copyright')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert secondary language en
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_language" ("code", "name", "is_default", "is_enabled", "is_fallback", "sort_order", "path_prefix")
+		VALUES ('en', 'English', 0, 1, 0, 2, 'en')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Category 1: "首页" link -> "/"
+	// Category 2: "关于我们" cover -> "/about/"
+	// Category 3: "外链" link -> "https://example.com"
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_category"
+			("id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id",
+			 "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path",
+			 "detail_file_pattern", "detail_template", "link_url")
+		VALUES
+			(1, '首页', 0, 1, 14, 'link', 1, 'category', '{id}.html', 'category_list.html', '', 'content', '{id}.html', 'content_detail.html', '/'),
+			(2, '关于我们', 0, 2, 14, 'cover', 2, 'about', 'index.html', 'category_list.html', 'category_cover.html', 'content', '{id}.html', 'content_detail.html', ''),
+			(3, '外链', 0, 3, 14, 'link', 3, 'category', '{id}.html', 'category_list.html', '', 'content', '{id}.html', 'content_detail.html', 'https://example.com')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Multi-language translations for categories
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_category_translation"
+			("category_id", "lang", "name", "keywords", "description", "cover_content", "link_url")
+		VALUES
+			(1, 'en', 'Home', '', '', '', '/en/'),
+			(2, 'en', 'About Us', '', '', '', ''),
+			(3, 'en', 'External', '', '', '', 'https://example.com/en')`); err != nil {
+		t.Fatal(err)
+	}
+
+	templates := filepath.Join(t.TempDir(), "templates")
+	writeTemplate(t, templates, "index.html", `nav={{range navigation .}}{{.Name}}={{.URL}};{{end}}`)
+	writeTemplate(t, templates, "category_cover.html", `cover={{.category_name}}`)
+	writeTemplate(t, templates, "category_list.html", `list={{.category_name}}`)
+	writeTemplate(t, templates, "content_detail.html", `detail={{.title}}`)
+	writeTemplate(t, templates, "msg.html", `msg`)
+	writeTemplate(t, templates, "search.html", `search`)
+
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	publisher := Publisher{DB: database, Web: web, Templates: templates, Data: filepath.Join(root, "data")}
+	if _, err := publisher.Generate(ctx); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// 1. Verify zh-CN home navigation contains link categories with their link_url
+	zhHome := readGenerated(t, web, "index.html")
+	wantZhNav := "nav=首页=/;关于我们=/about/;外链=https://example.com;"
+	if !strings.Contains(zhHome, wantZhNav) {
+		t.Fatalf("zh navigation mismatch: got %q, want %q", zhHome, wantZhNav)
+	}
+
+	// 2. Verify en home navigation contains translated names and translated link_urls
+	enHome := readGenerated(t, web, "en/index.html")
+	wantEnNav := "nav=Home=/en/;About Us=/en/about/;External=https://example.com/en;"
+	if !strings.Contains(enHome, wantEnNav) {
+		t.Fatalf("en navigation mismatch: got %q, want %q", enHome, wantEnNav)
+	}
+
+	// 3. Verify cover category generates HTML page
+	if _, err := os.Stat(filepath.Join(web, "about/index.html")); err != nil {
+		t.Fatalf("about/index.html should exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(web, "en/about/index.html")); err != nil {
+		t.Fatalf("en/about/index.html should exist: %v", err)
+	}
+
+	// 4. Verify link category does NOT generate any HTML pages
+	for _, unwanted := range []string{
+		"category/1.html",
+		"category/3.html",
+		"1.html",
+		"3.html",
+		"en/category/1.html",
+		"en/category/3.html",
+		"en/1.html",
+		"en/3.html",
+	} {
+		if _, err := os.Stat(filepath.Join(web, filepath.FromSlash(unwanted))); !os.IsNotExist(err) {
+			t.Fatalf("link category generated static page: %s", unwanted)
+		}
+	}
+}

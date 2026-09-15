@@ -209,6 +209,7 @@ export type CategoryTranslationItem = {
   keywords?: string
   description?: string
   cover_content?: string
+  link_url?: string
 }
 
 export type CategoryItem = {
@@ -217,7 +218,7 @@ export type CategoryItem = {
   parent_id: number
   order_id: number
   list_page_size: number
-  page_type: "list" | "cover"
+  page_type: "list" | "cover" | "link"
   route_id: number
   content_count: number
   list_path: string
@@ -231,6 +232,7 @@ export type CategoryItem = {
   description?: string
   cover_content?: string
   model_id?: number
+  link_url?: string
   is_fallback?: boolean
   fallback_lang?: string
   translations?: Record<string, CategoryTranslationItem>

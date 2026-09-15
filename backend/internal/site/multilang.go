@@ -24,6 +24,7 @@ type CategoryTranslationItem struct {
 	Keywords     string `json:"keywords"`
 	Description  string `json:"description"`
 	CoverContent string `json:"cover_content"`
+	LinkURL      string `json:"link_url,omitempty"`
 }
 
 type dbQueryer interface {
@@ -70,7 +71,7 @@ func (s *Server) getTranslatableFieldNames(ctx context.Context, queryer dbQuerye
 
 func (s *Server) loadCategoryTranslations(ctx context.Context, categoryID int64) (map[string]CategoryTranslationItem, error) {
 	rows, err := s.database.QueryContext(ctx, `
-		SELECT "lang", "name", "keywords", "description", "cover_content"
+		SELECT "lang", "name", "keywords", "description", "cover_content", COALESCE("link_url", '')
 		FROM "`+db.CategoryTranslationTable+`"
 		WHERE "category_id" = ?`, categoryID)
 	if err != nil {
@@ -80,13 +81,14 @@ func (s *Server) loadCategoryTranslations(ctx context.Context, categoryID int64)
 
 	translations := make(map[string]CategoryTranslationItem)
 	for rows.Next() {
-		var lang, name, keywords, desc, cover string
-		if err := rows.Scan(&lang, &name, &keywords, &desc, &cover); err == nil {
+		var lang, name, keywords, desc, cover, linkURL string
+		if err := rows.Scan(&lang, &name, &keywords, &desc, &cover, &linkURL); err == nil {
 			translations[lang] = CategoryTranslationItem{
 				Name:         name,
 				Keywords:     keywords,
 				Description:  desc,
 				CoverContent: cover,
+				LinkURL:      linkURL,
 			}
 		}
 	}
@@ -95,7 +97,7 @@ func (s *Server) loadCategoryTranslations(ctx context.Context, categoryID int64)
 
 func (s *Server) loadAllCategoryTranslations(ctx context.Context) (map[int64]map[string]CategoryTranslationItem, error) {
 	rows, err := s.database.QueryContext(ctx, `
-		SELECT "category_id", "lang", "name", "keywords", "description", "cover_content"
+		SELECT "category_id", "lang", "name", "keywords", "description", "cover_content", COALESCE("link_url", '')
 		FROM "`+db.CategoryTranslationTable+`"`)
 	if err != nil {
 		return nil, err
@@ -105,8 +107,8 @@ func (s *Server) loadAllCategoryTranslations(ctx context.Context) (map[int64]map
 	result := make(map[int64]map[string]CategoryTranslationItem)
 	for rows.Next() {
 		var catID int64
-		var lang, name, keywords, desc, cover string
-		if err := rows.Scan(&catID, &lang, &name, &keywords, &desc, &cover); err == nil {
+		var lang, name, keywords, desc, cover, linkURL string
+		if err := rows.Scan(&catID, &lang, &name, &keywords, &desc, &cover, &linkURL); err == nil {
 			if result[catID] == nil {
 				result[catID] = make(map[string]CategoryTranslationItem)
 			}
@@ -115,6 +117,7 @@ func (s *Server) loadAllCategoryTranslations(ctx context.Context) (map[int64]map
 				Keywords:     keywords,
 				Description:  desc,
 				CoverContent: cover,
+				LinkURL:      linkURL,
 			}
 		}
 	}
@@ -214,14 +217,15 @@ func (s *Server) saveCategoryTranslations(ctx context.Context, execer dbExecer, 
 		}
 		_, err := execer.ExecContext(ctx, `
 			INSERT INTO "`+db.CategoryTranslationTable+`"
-			("category_id", "lang", "name", "keywords", "description", "cover_content")
-			VALUES (?, ?, ?, ?, ?, ?)
+			("category_id", "lang", "name", "keywords", "description", "cover_content", "link_url")
+			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT("category_id", "lang") DO UPDATE SET
 			"name" = excluded."name",
 			"keywords" = excluded."keywords",
 			"description" = excluded."description",
-			"cover_content" = excluded."cover_content"`,
-			categoryID, lang, trans.Name, trans.Keywords, trans.Description, trans.CoverContent)
+			"cover_content" = excluded."cover_content",
+			"link_url" = excluded."link_url"`,
+			categoryID, lang, trans.Name, trans.Keywords, trans.Description, trans.CoverContent, trans.LinkURL)
 		if err != nil {
 			return err
 		}

@@ -208,6 +208,13 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有目标栏目的内容权限"})
 		return
 	}
+	var catPageType string
+	if err := s.database.QueryRowContext(request.Context(), `SELECT page_type FROM gocms_category WHERE id = ?`, payload.Category).Scan(&catPageType); err == nil {
+		if catPageType == routing.PageTypeLink {
+			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "链接类型栏目不能发布内容"})
+			return
+		}
+	}
 	if id != 0 {
 		var category int64
 		if err := s.database.QueryRowContext(request.Context(), `SELECT category_id FROM gocms_content WHERE id = ?`, id).Scan(&category); err != nil {

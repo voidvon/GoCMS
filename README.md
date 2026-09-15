@@ -34,7 +34,7 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 
 后台“模板管理”以模板组为统一入口，按首页、封面、列表、内容、标签和其他模板分类管理，并提供“自定义文件”区维护模板引用的 CSS、JS 和图片。模板组支持切换、导入和导出；模板包为 ZIP，根目录包含 `theme.json`、`templates/` 和 `assets/`，资源按需放在 `assets/css/`、`assets/js/`、`assets/skin/`、`assets/images/`。`theme.json` 可用 `template_groups` 显式绑定 HTML 文件用途，没有该字段时兼容按文件名识别。切换前会检查全局页面绑定的模板，以及每个分类当前类型对应的 `list_template`、`cover_template` 或 `detail_template`，模板组需提供这些路径对应的模板。导入后模板组保存在 `assets/theme/<id>/`，切换会记录到 `data/theme.json` 并自动重新生成网站。模板包不包含数据库、业务图片或 `web/`。
 
-模板数据调用和受限帝国 `[e:loop]` 迁移语法见 [模板数据调用说明](docs/template-data-calls.md)。
+模板数据调用和受限帝国 `[e:loop]` 迁移语法见 [模板数据调用说明](docs/template-data-calls.md)；AI 自动化接入与 API Key 规范见 [AI Agent 操作指南](docs/ai-agent-guide.md)。
 
 版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub，且已安装 `zip` 命令。Release 每个平台上传一个 `gocms-<tag>-<os>-<arch>.zip` 压缩包，包内包含对应平台的单文件可执行文件。更新器使用 Go 标准库解压 ZIP，不依赖 Linux 安装第三方工具。可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
 

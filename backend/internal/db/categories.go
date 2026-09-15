@@ -35,7 +35,8 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 			"keywords" TEXT NOT NULL DEFAULT '',
 			"description" TEXT NOT NULL DEFAULT '',
 			"cover_content" TEXT NOT NULL DEFAULT '',
-			"model_id" INTEGER NOT NULL DEFAULT 1
+			"model_id" INTEGER NOT NULL DEFAULT 1,
+			"link_url" TEXT NOT NULL DEFAULT ''
 		)`); err != nil {
 		return fmt.Errorf("create category table: %w", err)
 	}
@@ -55,8 +56,9 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		"description":    "TEXT NOT NULL DEFAULT ''",
 		"cover_content":  "TEXT NOT NULL DEFAULT ''",
 		"model_id":       "INTEGER NOT NULL DEFAULT 1",
+		"link_url":       "TEXT NOT NULL DEFAULT ''",
 	} {
-		if err := ensureCategoryColumn(ctx, database, name, definition); err != nil {
+		if err := ensureTableColumn(ctx, database, unifiedCategoryTable, name, definition); err != nil {
 			return err
 		}
 	}
@@ -76,6 +78,7 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 			"keywords" TEXT NOT NULL DEFAULT '',
 			"description" TEXT NOT NULL DEFAULT '',
 			"cover_content" TEXT NOT NULL DEFAULT '',
+			"link_url" TEXT NOT NULL DEFAULT '',
 			UNIQUE("category_id", "lang")
 		)`); err != nil {
 		return fmt.Errorf("create category translation table: %w", err)
@@ -84,23 +87,31 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("create category translation index: %w", err)
 	}
 
+	for name, definition := range map[string]string{
+		"link_url": "TEXT NOT NULL DEFAULT ''",
+	} {
+		if err := ensureTableColumn(ctx, database, CategoryTranslationTable, name, definition); err != nil {
+			return err
+		}
+	}
+
 	_, _ = database.ExecContext(ctx, `
-		INSERT OR IGNORE INTO "`+CategoryTranslationTable+`" ("category_id", "lang", "name", "keywords", "description", "cover_content")
-		SELECT "id", 'zh-CN', "name", "keywords", "description", "cover_content"
+		INSERT OR IGNORE INTO "`+CategoryTranslationTable+`" ("category_id", "lang", "name", "keywords", "description", "cover_content", "link_url")
+		SELECT "id", 'zh-CN', "name", "keywords", "description", "cover_content", "link_url"
 		FROM "`+unifiedCategoryTable+`"
 	`)
 
 	return nil
 }
 
-func ensureCategoryColumn(ctx context.Context, database *sql.DB, name, definition string) error {
+func ensureTableColumn(ctx context.Context, database *sql.DB, tableName, name, definition string) error {
 	var exists int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('gocms_category') WHERE name = ?`, name).Scan(&exists); err != nil {
-		return fmt.Errorf("inspect category %s column: %w", name, err)
+	if err := database.QueryRowContext(ctx, fmt.Sprintf(`SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?`, tableName), name).Scan(&exists); err != nil {
+		return fmt.Errorf("inspect %s %s column: %w", tableName, name, err)
 	}
 	if exists == 0 {
-		if _, err := database.ExecContext(ctx, `ALTER TABLE "gocms_category" ADD COLUMN "`+name+`" `+definition); err != nil {
-			return fmt.Errorf("add category %s column: %w", name, err)
+		if _, err := database.ExecContext(ctx, fmt.Sprintf(`ALTER TABLE "%s" ADD COLUMN "%s" %s`, tableName, name, definition)); err != nil {
+			return fmt.Errorf("add %s %s column: %w", tableName, name, err)
 		}
 	}
 	return nil

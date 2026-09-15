@@ -20,6 +20,7 @@ const (
 
 	PageTypeList  = "list"
 	PageTypeCover = "cover"
+	PageTypeLink  = "link"
 )
 
 func NormalizePageType(value string) (string, error) {
@@ -28,7 +29,7 @@ func NormalizePageType(value string) (string, error) {
 		return PageTypeList, nil
 	}
 	switch value {
-	case PageTypeList, PageTypeCover:
+	case PageTypeList, PageTypeCover, PageTypeLink:
 		return value, nil
 	default:
 		return "", fmt.Errorf("栏目类型无效")

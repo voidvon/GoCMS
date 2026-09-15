@@ -75,6 +75,7 @@ type CategoryItem struct {
 	Description       string                             `json:"description,omitempty"`
 	CoverContent      string                             `json:"cover_content,omitempty"`
 	ModelID           int64                              `json:"model_id"`
+	LinkURL           string                             `json:"link_url,omitempty"`
 	Lang              string                             `json:"lang,omitempty"`
 	IsFallback        bool                               `json:"is_fallback,omitempty"`
 	FallbackLang      string                             `json:"fallback_lang,omitempty"`
@@ -100,6 +101,7 @@ type categoryPayload struct {
 	Description       string                             `json:"description"`
 	CoverContent      string                             `json:"cover_content"`
 	ModelID           int64                              `json:"model_id"`
+	LinkURL           string                             `json:"link_url,omitempty"`
 }
 
 func (s *Server) adminSetupStatus(response http.ResponseWriter, request *http.Request) {
@@ -380,7 +382,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		       (SELECT COUNT(*) FROM "gocms_content" content WHERE content."category_id" = c."id"),
 		       c."list_path", c."list_file_pattern", c."list_template", c."cover_template", c."detail_path",
 		       c."detail_file_pattern", c."detail_template", COALESCE(c."keywords", ''), COALESCE(c."description", ''),
-		       COALESCE(c."cover_content", ''), COALESCE(c."model_id", 1)
+		       COALESCE(c."cover_content", ''), COALESCE(c."model_id", 1), COALESCE(c."link_url", '')
 		FROM "gocms_category" c
 		ORDER BY c."parent_id", c."order_id", c."id"`)
 	if err != nil {
@@ -394,7 +396,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		if err := rows.Scan(&item.ID, &item.Name, &item.ParentID, &item.OrderID, &item.ListPageSize, &item.PageType, &item.RouteID,
 			&item.ContentCount, &item.ListPath, &item.ListFilePattern, &item.ListTemplate,
 			&item.CoverTemplate, &item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate,
-			&item.Keywords, &item.Description, &item.CoverContent, &item.ModelID); err != nil {
+			&item.Keywords, &item.Description, &item.CoverContent, &item.ModelID, &item.LinkURL); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -414,6 +416,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 				Keywords:     items[i].Keywords,
 				Description:  items[i].Description,
 				CoverContent: items[i].CoverContent,
+				LinkURL:      items[i].LinkURL,
 			}
 		}
 
@@ -422,6 +425,9 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 			items[i].Keywords = trans.Keywords
 			items[i].Description = trans.Description
 			items[i].CoverContent = trans.CoverContent
+			if trans.LinkURL != "" {
+				items[i].LinkURL = trans.LinkURL
+			}
 		} else {
 			// FALLBACK to fallback language
 			fallbackTrans := translations[fallbackLang]
@@ -430,6 +436,9 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 				items[i].Keywords = fallbackTrans.Keywords
 				items[i].Description = fallbackTrans.Description
 				items[i].CoverContent = fallbackTrans.CoverContent
+				if fallbackTrans.LinkURL != "" {
+					items[i].LinkURL = fallbackTrans.LinkURL
+				}
 				if requestedLang != fallbackLang {
 					items[i].IsFallback = true
 					items[i].FallbackLang = fallbackLang
@@ -473,6 +482,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		return
 	}
 	payload.Name = strings.TrimSpace(payload.Name)
+	payload.LinkURL = strings.TrimSpace(payload.LinkURL)
 	if payload.Name == "" && payload.Translations != nil {
 		defaultLang, _ := s.getDefaultAndFallbackLang(request.Context())
 		if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Name) != "" {
@@ -480,6 +490,9 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			payload.Keywords = def.Keywords
 			payload.Description = def.Description
 			payload.CoverContent = def.CoverContent
+			if def.LinkURL != "" {
+				payload.LinkURL = strings.TrimSpace(def.LinkURL)
+			}
 		}
 	}
 	if payload.Name == "" {
@@ -519,9 +532,9 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		}
 		result, err := s.database.ExecContext(request.Context(), `
 			INSERT INTO "gocms_category"
-			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", "keywords", "description", "cover_content", "model_id")
-			VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID)
+			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", "keywords", "description", "cover_content", "model_id", "link_url")
+			VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -539,7 +552,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			_ = s.saveCategoryTranslations(request.Context(), s.database, newID, payload.Translations)
 		} else {
 			_ = s.saveCategoryTranslations(request.Context(), s.database, newID, map[string]CategoryTranslationItem{
-				requestedLang: {Name: payload.Name, Keywords: payload.Keywords, Description: payload.Description, CoverContent: payload.CoverContent},
+				requestedLang: {Name: payload.Name, Keywords: payload.Keywords, Description: payload.Description, CoverContent: payload.CoverContent, LinkURL: payload.LinkURL},
 			})
 		}
 	} else {
@@ -550,18 +563,21 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 				payload.Keywords = def.Keywords
 				payload.Description = def.Description
 				payload.CoverContent = def.CoverContent
+				if def.LinkURL != "" {
+					payload.LinkURL = strings.TrimSpace(def.LinkURL)
+				}
 			}
 		} else {
 			_ = s.saveCategoryTranslations(request.Context(), s.database, id, map[string]CategoryTranslationItem{
-				requestedLang: {Name: payload.Name, Keywords: payload.Keywords, Description: payload.Description, CoverContent: payload.CoverContent},
+				requestedLang: {Name: payload.Name, Keywords: payload.Keywords, Description: payload.Description, CoverContent: payload.CoverContent, LinkURL: payload.LinkURL},
 			})
 		}
 
 		if requestedLang == defaultLang || payload.Translations != nil {
 			result, err := s.database.ExecContext(request.Context(), `
 				UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "list_page_size" = ?, "page_type" = ?,
-				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "keywords" = ?, "description" = ?, "cover_content" = ?, "model_id" = ? WHERE "id" = ?`,
-				payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID, id)
+				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "keywords" = ?, "description" = ?, "cover_content" = ?, "model_id" = ?, "link_url" = ? WHERE "id" = ?`,
+				payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL, id)
 			if err != nil {
 				http.Error(response, "database error", http.StatusInternalServerError)
 				return
@@ -574,8 +590,8 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		} else {
 			result, err := s.database.ExecContext(request.Context(), `
 				UPDATE "gocms_category" SET "parent_id" = ?, "order_id" = ?, "list_page_size" = ?, "page_type" = ?,
-				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "model_id" = ? WHERE "id" = ?`,
-				payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.ModelID, id)
+				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "model_id" = ?, "link_url" = ? WHERE "id" = ?`,
+				payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.ModelID, payload.LinkURL, id)
 			if err != nil {
 				http.Error(response, "database error", http.StatusInternalServerError)
 				return
@@ -594,9 +610,9 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	var current categoryPayload
 	if id > 0 {
 		err := s.database.QueryRowContext(ctx, `
-			SELECT "list_page_size", "page_type", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", COALESCE("model_id", 1)
+			SELECT "list_page_size", "page_type", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", COALESCE("model_id", 1), COALESCE("link_url", '')
 			FROM "gocms_category" WHERE "id" = ?`, id).
-			Scan(&current.ListPageSize, &current.PageType, &current.ListPath, &current.ListFilePattern, &current.ListTemplate, &current.CoverTemplate, &current.DetailPath, &current.DetailFilePattern, &current.DetailTemplate, &current.ModelID)
+			Scan(&current.ListPageSize, &current.PageType, &current.ListPath, &current.ListFilePattern, &current.ListTemplate, &current.CoverTemplate, &current.DetailPath, &current.DetailFilePattern, &current.DetailTemplate, &current.ModelID, &current.LinkURL)
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("分类不存在")
 		}
@@ -635,6 +651,9 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 		if payload.DetailTemplate == "" {
 			payload.DetailTemplate = current.DetailTemplate
 		}
+		if payload.LinkURL == "" {
+			payload.LinkURL = current.LinkURL
+		}
 	}
 	if payload.ListPageSize <= 0 {
 		payload.ListPageSize = 14
@@ -645,6 +664,27 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	var err error
 	if payload.PageType, err = routing.NormalizePageType(payload.PageType); err != nil {
 		return err
+	}
+	if payload.PageType == routing.PageTypeLink {
+		if payload.ListPath == "" {
+			payload.ListPath = routing.DefaultListPath()
+		}
+		if payload.ListFilePattern == "" {
+			payload.ListFilePattern = routing.DefaultListPattern
+		}
+		if payload.ListTemplate == "" {
+			payload.ListTemplate = templateconfig.DefaultListTemplate
+		}
+		if payload.DetailPath == "" {
+			payload.DetailPath = routing.DefaultDetailPath
+		}
+		if payload.DetailFilePattern == "" {
+			payload.DetailFilePattern = routing.DefaultDetailPattern
+		}
+		if payload.DetailTemplate == "" {
+			payload.DetailTemplate = templateconfig.DefaultDetailTemplate
+		}
+		return nil
 	}
 	if payload.ListPath == "" && payload.PageType != routing.PageTypeCover {
 		payload.ListPath = routing.DefaultListPath()

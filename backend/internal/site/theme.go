@@ -298,6 +298,9 @@ func (s *Server) validateThemeTemplates(definition themepkg.Definition) error {
 				if err := rows.Scan(&pageType, &listTemplate, &coverTemplate, &detailTemplate); err != nil {
 					return fmt.Errorf("读取分类模板失败: %w", err)
 				}
+				if strings.EqualFold(strings.TrimSpace(pageType), routing.PageTypeLink) {
+					continue
+				}
 				if strings.EqualFold(strings.TrimSpace(pageType), routing.PageTypeCover) {
 					if strings.TrimSpace(coverTemplate) != "" {
 						paths[coverTemplate] = struct{}{}
