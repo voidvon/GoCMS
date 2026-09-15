@@ -581,8 +581,8 @@ export function CategoriesPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+    <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:space-y-0 lg:gap-4">
+      <div className="flex shrink-0 flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-sm text-muted-foreground">{categories.length.toLocaleString("zh-CN")} 个栏目，所有内容共用一棵树。</p>
           {languages.length > 1 && (
@@ -615,16 +615,16 @@ export function CategoriesPage() {
         <Button onClick={() => openNew()}><Plus />新增顶级栏目</Button>
       </div>
 
-      {notice && <p role="status" className="text-sm text-muted-foreground">{notice}</p>}
-      {error ? <InlineAlert>{error}</InlineAlert> : null}
+      {notice && <p role="status" className="shrink-0 text-sm text-muted-foreground">{notice}</p>}
+      {error ? <InlineAlert className="shrink-0">{error}</InlineAlert> : null}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.6fr)] lg:items-start">
-        <Card className="min-w-0 lg:sticky lg:top-4">
-          <CardHeader className="border-b">
+      <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.6fr)]">
+        <Card className="min-w-0 flex flex-col lg:h-full lg:min-h-0">
+          <CardHeader className="shrink-0 border-b">
             <CardTitle>栏目树</CardTitle>
             <CardDescription>选择栏目后在右侧编辑，子栏目默认收起。</CardDescription>
           </CardHeader>
-          <CardContent className="p-0">
+          <CardContent className="min-h-0 flex-1 p-0">
             {loading ? (
               <div className="flex h-36 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
             ) : tree.length === 0 ? (
@@ -633,17 +633,17 @@ export function CategoriesPage() {
                 <span>还没有栏目</span>
               </div>
             ) : (
-              <ScrollArea className="max-h-[calc(100dvh-16rem)]" orientation="both">
+              <ScrollArea className="h-full" orientation="both">
                 {renderNodes(tree)}
               </ScrollArea>
             )}
           </CardContent>
         </Card>
 
-        <Card className="min-w-0">
+        <Card className="min-w-0 flex flex-col lg:h-full lg:min-h-0">
           {editorActive ? (
             <>
-              <CardHeader className="border-b">
+              <CardHeader className="shrink-0 border-b">
                 <div className="flex items-center justify-between gap-2">
                   <div>
                     <CardTitle>{editing ? `编辑：${editing.name}` : "新增栏目"}</CardTitle>
@@ -652,8 +652,8 @@ export function CategoriesPage() {
                 </div>
               </CardHeader>
 
-              <Tabs value={categoryActiveTab} onValueChange={setCategoryActiveTab} className="w-full">
-                <div className="border-b px-6 py-2 bg-muted/30">
+              <Tabs value={categoryActiveTab} onValueChange={setCategoryActiveTab} className="flex min-h-0 flex-1 flex-col w-full gap-0">
+                <div className="shrink-0 border-b px-6 py-2 bg-muted/30">
                   <div className="w-full max-w-full overflow-x-auto overscroll-x-contain pb-1">
                     <TabsList className="w-max min-w-full justify-start h-9 p-1">
                       <TabsTrigger className="flex-none" value="base">基础数据</TabsTrigger>
@@ -668,8 +668,9 @@ export function CategoriesPage() {
                   </div>
                 </div>
 
-                <TabsContent value="base" className="mt-0">
-                  <CardContent className="grid gap-5 sm:grid-cols-2 pt-6">
+                <TabsContent value="base" className="flex min-h-0 flex-1 flex-col mt-0">
+                  <ScrollArea className="h-0 min-h-0 flex-1 w-full" orientation="vertical">
+                    <CardContent className="grid gap-5 sm:grid-cols-2 pt-6 pb-6">
                     <div className="space-y-2">
                       <Label>父分类</Label>
                       <Select value={String(form.parent_id)} onValueChange={(value) => update("parent_id", Number(value ?? 0))}>
@@ -904,7 +905,8 @@ export function CategoriesPage() {
                         </div>
                       </>
                     )}
-                  </CardContent>
+                    </CardContent>
+                  </ScrollArea>
                 </TabsContent>
 
                 {enabledLanguages.map((lang) => {
@@ -912,104 +914,106 @@ export function CategoriesPage() {
                   const fallbackLangName = enabledLanguages.find((l) => l.code === fallbackLang)?.name || fallbackLang
                   const trans = translations[lang.code] || { name: "", keywords: "", description: "", cover_content: "" }
                   return (
-                    <TabsContent key={lang.id} value={lang.code} className="mt-0">
-                      <CardContent className="space-y-4 pt-6">
-                        <div className={cn(
-                          "rounded-md px-4 py-2.5 text-xs flex items-center gap-2 border",
-                          isDefault
-                            ? "bg-blue-500/10 text-blue-900 dark:text-blue-200 border-blue-500/20"
-                            : "bg-amber-500/10 text-amber-900 dark:text-amber-200 border-amber-500/20"
-                        )}>
-                          <Languages className={cn("size-4 shrink-0", isDefault ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400")} />
-                          {isDefault ? (
-                            <span>这是默认主站语言（<strong>{lang.name}</strong>），栏目名称为必填项。</span>
-                          ) : (
-                            <span>当前正在编辑 <strong>{lang.name}</strong> 语言的栏目翻译。名称、关键词、描述等翻译字段留空时，将自动使用兜底语言（<strong>{fallbackLangName}</strong>）的内容。</span>
-                          )}
-                        </div>
+                    <TabsContent key={lang.id} value={lang.code} className="flex min-h-0 flex-1 flex-col mt-0">
+                      <ScrollArea className="h-0 min-h-0 flex-1 w-full" orientation="vertical">
+                        <CardContent className="space-y-4 pt-6 pb-6">
+                          <div className={cn(
+                            "rounded-md px-4 py-2.5 text-xs flex items-center gap-2 border",
+                            isDefault
+                              ? "bg-blue-500/10 text-blue-900 dark:text-blue-200 border-blue-500/20"
+                              : "bg-amber-500/10 text-amber-900 dark:text-amber-200 border-amber-500/20"
+                          )}>
+                            <Languages className={cn("size-4 shrink-0", isDefault ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400")} />
+                            {isDefault ? (
+                              <span>这是默认主站语言（<strong>{lang.name}</strong>），栏目名称为必填项。</span>
+                            ) : (
+                              <span>当前正在编辑 <strong>{lang.name}</strong> 语言的栏目翻译。名称、关键词、描述等翻译字段留空时，将自动使用兜底语言（<strong>{fallbackLangName}</strong>）的内容。</span>
+                            )}
+                          </div>
 
-                        <div className="space-y-2">
-                          <Label htmlFor={`category-name-${lang.code}`}>
-                            分类名称
-                            {isDefault && <span className="text-destructive"> *</span>}
-                          </Label>
-                          <Input
-                            id={`category-name-${lang.code}`}
-                            value={trans.name || ""}
-                            onChange={(event) => {
-                              updateTranslation(lang.code, { name: event.target.value })
-                              if (isDefault) {
-                                update("name", event.target.value)
-                              }
-                            }}
-                            placeholder={isDefault ? "请输入分类名称" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
-                            autoFocus={isDefault}
-                            required={isDefault}
-                          />
-                        </div>
-
-                        {form.page_type === "link" ? (
                           <div className="space-y-2">
-                            <Label htmlFor={`category-link-url-${lang.code}`}>跳转链接 (URL)</Label>
+                            <Label htmlFor={`category-name-${lang.code}`}>
+                              分类名称
+                              {isDefault && <span className="text-destructive"> *</span>}
+                            </Label>
                             <Input
-                              id={`category-link-url-${lang.code}`}
-                              value={trans.link_url || ""}
+                              id={`category-name-${lang.code}`}
+                              value={trans.name || ""}
                               onChange={(event) => {
-                                updateTranslation(lang.code, { link_url: event.target.value })
+                                updateTranslation(lang.code, { name: event.target.value })
                                 if (isDefault) {
-                                  update("link_url", event.target.value)
+                                  update("name", event.target.value)
                                 }
                               }}
-                              placeholder={isDefault ? "例如 / 或 https://... 或 #" : `留空将使用兜底语言（${fallbackLangName}）的链接`}
+                              placeholder={isDefault ? "请输入分类名称" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                              autoFocus={isDefault}
+                              required={isDefault}
                             />
-                            <p className="text-xs text-muted-foreground">
-                              {isDefault ? "当前语言的菜单跳转链接。" : `当前语言对应的跳转链接（如英语首页可设为 /en/），留空则使用兜底语言（${fallbackLangName}）。`}
-                            </p>
                           </div>
-                        ) : (
-                          <>
+
+                          {form.page_type === "link" ? (
                             <div className="space-y-2">
-                              <Label htmlFor={`category-keywords-${lang.code}`}>SEO 关键词</Label>
+                              <Label htmlFor={`category-link-url-${lang.code}`}>跳转链接 (URL)</Label>
                               <Input
-                                id={`category-keywords-${lang.code}`}
-                                value={trans.keywords || ""}
-                                onChange={(event) => updateTranslation(lang.code, { keywords: event.target.value })}
-                                placeholder={isDefault ? "用 | 或逗号分隔关键词" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                                id={`category-link-url-${lang.code}`}
+                                value={trans.link_url || ""}
+                                onChange={(event) => {
+                                  updateTranslation(lang.code, { link_url: event.target.value })
+                                  if (isDefault) {
+                                    update("link_url", event.target.value)
+                                  }
+                                }}
+                                placeholder={isDefault ? "例如 / 或 https://... 或 #" : `留空将使用兜底语言（${fallbackLangName}）的链接`}
                               />
+                              <p className="text-xs text-muted-foreground">
+                                {isDefault ? "当前语言的菜单跳转链接。" : `当前语言对应的跳转链接（如英语首页可设为 /en/），留空则使用兜底语言（${fallbackLangName}）。`}
+                              </p>
                             </div>
-
-                            <div className="space-y-2">
-                              <Label htmlFor={`category-description-${lang.code}`}>SEO 描述</Label>
-                              <Textarea
-                                id={`category-description-${lang.code}`}
-                                value={trans.description || ""}
-                                onChange={(event) => updateTranslation(lang.code, { description: event.target.value })}
-                                placeholder={isDefault ? "请输入栏目 SEO 描述" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
-                                className="min-h-20"
-                              />
-                            </div>
-
-                            {form.page_type === "cover" && (
+                          ) : (
+                            <>
                               <div className="space-y-2">
-                                <Label htmlFor={`category-cover-content-${lang.code}`}>封面内容 / 介绍</Label>
-                                <Textarea
-                                  id={`category-cover-content-${lang.code}`}
-                                  value={trans.cover_content || ""}
-                                  onChange={(event) => updateTranslation(lang.code, { cover_content: event.target.value })}
-                                  placeholder={isDefault ? "请输入封面介绍内容（支持 HTML 或文本）" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
-                                  className="min-h-28"
+                                <Label htmlFor={`category-keywords-${lang.code}`}>SEO 关键词</Label>
+                                <Input
+                                  id={`category-keywords-${lang.code}`}
+                                  value={trans.keywords || ""}
+                                  onChange={(event) => updateTranslation(lang.code, { keywords: event.target.value })}
+                                  placeholder={isDefault ? "用 | 或逗号分隔关键词" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
                                 />
                               </div>
-                            )}
-                          </>
-                        )}
-                      </CardContent>
+
+                              <div className="space-y-2">
+                                <Label htmlFor={`category-description-${lang.code}`}>SEO 描述</Label>
+                                <Textarea
+                                  id={`category-description-${lang.code}`}
+                                  value={trans.description || ""}
+                                  onChange={(event) => updateTranslation(lang.code, { description: event.target.value })}
+                                  placeholder={isDefault ? "请输入栏目 SEO 描述" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                                  className="min-h-20"
+                                />
+                              </div>
+
+                              {form.page_type === "cover" && (
+                                <div className="space-y-2">
+                                  <Label htmlFor={`category-cover-content-${lang.code}`}>封面内容 / 介绍</Label>
+                                  <Textarea
+                                    id={`category-cover-content-${lang.code}`}
+                                    value={trans.cover_content || ""}
+                                    onChange={(event) => updateTranslation(lang.code, { cover_content: event.target.value })}
+                                    placeholder={isDefault ? "请输入封面介绍内容（支持 HTML 或文本）" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                                    className="min-h-28"
+                                  />
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </CardContent>
+                      </ScrollArea>
                     </TabsContent>
                   )
                 })}
               </Tabs>
 
-              <CardFooter className="flex flex-wrap justify-end gap-2 border-t">
+              <CardFooter className="shrink-0 flex flex-wrap justify-end gap-2 border-t">
                 <Button variant="outline" onClick={closeEditor} disabled={saving}>取消</Button>
                 <Button onClick={() => save()} disabled={saving || !(translations[defaultLang]?.name?.trim() || form.name.trim())}>
                   {saving ? <LoaderCircle className="animate-spin" /> : null}
@@ -1019,7 +1023,7 @@ export function CategoriesPage() {
               </CardFooter>
             </>
           ) : (
-            <CardContent className="flex min-h-[32rem] flex-col items-center justify-center gap-4 text-center">
+            <CardContent className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
               <FolderTree className="size-8 text-muted-foreground" />
               <div className="space-y-1">
                 <p className="font-medium">选择一个栏目开始编辑</p>
