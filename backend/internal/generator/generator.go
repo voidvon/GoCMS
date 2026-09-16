@@ -1445,17 +1445,23 @@ func (c *content) navigation(args ...any) []NavigationItem {
 		if !strings.Contains(","+catPos+",", ","+position+",") {
 			continue
 		}
-		items = append(items, c.navigationItem(category))
+		items = append(items, c.navigationItem(category, position))
 	}
 	c.navigationCache[position] = items
 	return items
 }
 
-func (c *content) navigationItem(category Row) NavigationItem {
+func (c *content) navigationItem(category Row, position string) NavigationItem {
 	children := c.children(category.n("id"))
 	items := make([]NavigationItem, 0, len(children))
 	for _, child := range children {
-		items = append(items, c.navigationItem(child))
+		catPos := strings.ToLower(strings.TrimSpace(child["nav_position"]))
+		if catPos == "" {
+			catPos = "main"
+		}
+		if strings.Contains(","+catPos+",", ","+position+",") {
+			items = append(items, c.navigationItem(child, position))
+		}
 	}
 	pos := strings.ToLower(strings.TrimSpace(category["nav_position"]))
 	if pos == "" {
