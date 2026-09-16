@@ -1421,19 +1421,30 @@ func (c *content) children(parentID int) []Row {
 
 func (c *content) navigation(args ...any) []NavigationItem {
 	position := "main"
-	for _, arg := range args {
+	depth := -1 // -1 means all levels
+	for i, arg := range args {
 		if s, ok := arg.(string); ok {
 			s = strings.ToLower(strings.TrimSpace(s))
+			if i > 0 && (s == "none" || s == "children" || s == "all") {
+				if s == "none" {
+					depth = 0
+				} else if s == "children" {
+					depth = 1
+				} else {
+					depth = -1
+				}
+				continue
+			}
 			if s != "" {
 				position = s
-				break
 			}
 		}
 	}
 	if c.navigationCache == nil {
 		c.navigationCache = make(map[string][]NavigationItem)
 	}
-	if cached, ok := c.navigationCache[position]; ok {
+	cacheKey := fmt.Sprintf("%s:%d", position, depth)
+	if cached, ok := c.navigationCache[cacheKey]; ok {
 		return cached
 	}
 	items := make([]NavigationItem, 0)
@@ -1445,22 +1456,25 @@ func (c *content) navigation(args ...any) []NavigationItem {
 		if !strings.Contains(","+catPos+",", ","+position+",") {
 			continue
 		}
-		items = append(items, c.navigationItem(category, position))
+		items = append(items, c.navigationItem(category, position, depth))
 	}
-	c.navigationCache[position] = items
+	c.navigationCache[cacheKey] = items
 	return items
 }
 
-func (c *content) navigationItem(category Row, position string) NavigationItem {
+func (c *content) navigationItem(category Row, position string, depth int) NavigationItem {
 	children := c.children(category.n("id"))
 	items := make([]NavigationItem, 0, len(children))
+	if depth == 0 {
+		children = nil
+	}
 	for _, child := range children {
 		catPos := strings.ToLower(strings.TrimSpace(child["nav_position"]))
 		if catPos == "" {
 			catPos = "main"
 		}
 		if strings.Contains(","+catPos+",", ","+position+",") {
-			items = append(items, c.navigationItem(child, position))
+			items = append(items, c.navigationItem(child, position, depth-1))
 		}
 	}
 	pos := strings.ToLower(strings.TrimSpace(category["nav_position"]))
