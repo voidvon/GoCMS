@@ -5,6 +5,7 @@ import { getSession, type AdminUser } from "@/lib/api"
 import { AdminShell } from "@/components/app/admin-shell"
 import { LoginPage } from "@/components/app/login-page"
 import { ThemeProvider } from "@/components/app/theme-provider"
+import { AdminToaster } from "@/components/app/admin-toaster"
 import { TooltipProvider } from "@/components/ui/tooltip"
 
 function App() {
@@ -30,6 +31,7 @@ function App() {
         ) : (
           <LoginPage onSuccess={setUser} />
         )}
+        <AdminToaster />
       </TooltipProvider>
     </ThemeProvider>
   )

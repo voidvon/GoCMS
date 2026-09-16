@@ -19,6 +19,8 @@ import {
 } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -338,7 +340,10 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
   const [uploadPath, setUploadPath] = useState("")
   const [draft, setDraft] = useState("")
   const [fileState, setFileState] = useState<{ key: string; content: ThemeFileContent | null; error: string }>({ key: "", content: null, error: "" })
-  const [busy, setBusy] = useState<"upload" | "save" | "delete" | "">("")
+  const [busy, setBusy] = useState<"upload" | "create" | "save" | "delete" | "">("")
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createPath, setCreatePath] = useState("")
+  const [createError, setCreateError] = useState("")
   const [deleteTarget, setDeleteTarget] = useState<ThemeFile | null>(null)
 
   const customFiles = customFilesForKind(files, activeKind)
@@ -389,6 +394,35 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
       onNotice(`${title}已上传。`)
     } catch (uploadError) {
       onError(uploadError instanceof Error ? uploadError.message : `${title}上传失败`)
+    } finally {
+      setBusy("")
+    }
+  }
+
+  async function handleCreate() {
+    if (activeKind === "image" || busy !== "") return
+    const path = createPath.trim()
+    if (!path) {
+      setCreateError("请输入文件路径")
+      return
+    }
+    const extension = activeKind === "css" ? ".css" : ".js"
+    if (!path.toLowerCase().endsWith(extension)) {
+      setCreateError(`文件路径必须以 ${extension} 结尾`)
+      return
+    }
+    setBusy("create")
+    setCreateError("")
+    onError("")
+    try {
+      const result = await updateThemeFile(activeKind, path, "")
+      onFilesChange(updateCustomFileCollection(files, activeKind, result.file))
+      setSearch("")
+      setSelectedPath(result.file.path)
+      setCreateOpen(false)
+      onNotice(`${title}已创建。`)
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : `${title}创建失败`)
     } finally {
       setBusy("")
     }
@@ -452,6 +486,11 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
             {busy === "upload" ? <LoaderCircle className="animate-spin" /> : <Upload />}
             上传{activeKind === "image" ? "图片" : "文件"}
           </Button>
+          {activeKind !== "image" && <Button variant="outline" size="sm" onClick={() => {
+            setCreatePath(activeKind === "css" ? "style.css" : "script.js")
+            setCreateError("")
+            setCreateOpen(true)
+          }} disabled={busy !== ""}><FileCode />新建文件</Button>}
         </div>
       </div>
 
@@ -523,6 +562,37 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
           )}
         </section>
       </div>
+
+      <Dialog open={createOpen} onOpenChange={(open) => { if (busy !== "create") setCreateOpen(open) }}>
+        <DialogContent showCloseButton={busy !== "create"}>
+          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handleCreate() }}>
+            <DialogHeader>
+              <DialogTitle>新建{title}</DialogTitle>
+              <DialogDescription>输入文件路径，创建后即可编辑文件内容。</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="new-custom-file-path">文件路径</Label>
+              <Input
+                id="new-custom-file-path"
+                value={createPath}
+                onChange={(event) => { setCreatePath(event.target.value); setCreateError("") }}
+                placeholder={activeKind === "css" ? "style.css" : "script.js"}
+                disabled={busy === "create"}
+                aria-invalid={Boolean(createError)}
+                aria-describedby={createError ? "new-custom-file-error" : undefined}
+              />
+              {createError && <div id="new-custom-file-error"><InlineAlert>{createError}</InlineAlert></div>}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={busy === "create"}>取消</Button>
+              <Button type="submit" disabled={busy !== ""}>
+                {busy === "create" && <LoaderCircle className="animate-spin" />}
+                {busy === "create" ? "创建中" : "创建"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog
         open={deleteTarget !== null}

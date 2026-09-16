@@ -28,13 +28,13 @@ import {
 import { useLanguage } from "@/lib/language-context"
 import { buildCategoryTree, flattenCategoryTree, type CategoryNode } from "@/lib/category-tree"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog, IconButton, InlineAlert } from "@/components/app/app-ui"
+import { showSuccess } from "@/components/app/admin-notifications"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
@@ -298,7 +298,6 @@ export function CategoriesPage() {
   const [loading, setLoading] = useState(true)
   const [templatesLoading, setTemplatesLoading] = useState(true)
   const [error, setError] = useState("")
-  const [notice, setNotice] = useState("")
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
   const [editorActive, setEditorActive] = useState(false)
   const [editing, setEditing] = useState<CategoryItem | null>(null)
@@ -307,7 +306,7 @@ export function CategoriesPage() {
   const [deleting, setDeleting] = useState<CategoryItem | null>(null)
   const [deleteSaving, setDeleteSaving] = useState(false)
 
-  const { activeLang, setActiveLang, languages, defaultLang, fallbackLang, currentLanguage, refreshLanguages } = useLanguage()
+  const { languages, defaultLang, fallbackLang, refreshLanguages } = useLanguage()
 
   const enabledLanguages: Language[] = useMemo(() => {
     const list = languages.filter((l) => l.is_enabled === 1)
@@ -358,7 +357,7 @@ export function CategoriesPage() {
   const parentOptions = useMemo(() => flattenCategoryTree(categories, editing?.id), [categories, editing?.id])
 
   async function refreshCategories() {
-    const nextCategories = await getCategories(activeLang)
+    const nextCategories = await getCategories(defaultLang)
     setCategories(nextCategories)
     setExpanded((current) => {
       const availableIDs = new Set(nextCategories.map((category) => category.id))
@@ -369,7 +368,7 @@ export function CategoriesPage() {
 
   useEffect(() => {
     let active = true
-    Promise.all([getCategories(activeLang), getThemeFiles(), getSystemModels()])
+    Promise.all([getCategories(defaultLang), getThemeFiles(), getSystemModels()])
       .then(([nextCategories, theme, nextModels]) => {
         if (!active) return
         setCategories(nextCategories)
@@ -401,7 +400,7 @@ export function CategoriesPage() {
     return () => {
       active = false
     }
-  }, [activeLang, defaultLang, enabledLanguages])
+  }, [defaultLang, enabledLanguages])
 
   function update<K extends keyof CategoryInput>(key: K, value: CategoryInput[K]) {
     setForm((current) => ({ ...current, [key]: value }))
@@ -508,9 +507,9 @@ export function CategoriesPage() {
         translations,
       }
       const result = editing
-        ? await updateCategory(editing.id, payload, publish, activeLang)
-        : await createCategory(payload, publish, activeLang)
-      setNotice(publicationMessage(result, "栏目"))
+        ? await updateCategory(editing.id, payload, publish, defaultLang)
+        : await createCategory(payload, publish, defaultLang)
+      showSuccess(publicationMessage(result, "栏目"))
       const nextCategories = await refreshCategories()
       if (editing) {
         const updated = nextCategories.find((category) => category.id === editing.id)
@@ -538,7 +537,7 @@ export function CategoriesPage() {
     setError("")
     try {
       const result = await deleteCategory(deleting.id, true)
-      setNotice(result.publication
+      showSuccess(result.publication
         ? (result.publish_started ? "栏目已删除，正在生成网站。" : "栏目已删除并加入发布队列。")
         : "栏目已删除，发布后会更新公开网站。")
       setDeleting(null)
@@ -582,49 +581,17 @@ export function CategoriesPage() {
 
   return (
     <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:space-y-0 lg:gap-4">
-      <div className="flex shrink-0 flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="text-sm text-muted-foreground">{categories.length.toLocaleString("zh-CN")} 个栏目，所有内容共用一棵树。</p>
-          {languages.length > 1 && (
-            <Select
-              value={activeLang}
-              onValueChange={(val) => {
-                if (val) setActiveLang(val)
-              }}
-            >
-              <SelectTrigger className="w-36 h-8 text-xs" aria-label="选择语言">
-                <Languages className="size-3.5 mr-1 shrink-0 text-muted-foreground" />
-                <SelectValue>
-                  {currentLanguage?.name || activeLang}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {languages.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code} className="text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <span>{lang.name}</span>
-                      {lang.is_default === 1 && <span className="text-[10px] text-muted-foreground">(主站)</span>}
-                      {lang.is_fallback === 1 && <span className="text-[10px] text-muted-foreground">(兜底)</span>}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-        <Button onClick={() => openNew()}><Plus />新增顶级栏目</Button>
-      </div>
-
-      {notice && <p role="status" className="shrink-0 text-sm text-muted-foreground">{notice}</p>}
       {error ? <InlineAlert className="shrink-0">{error}</InlineAlert> : null}
 
       <div className="grid gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(280px,0.85fr)_minmax(0,1.6fr)]">
-        <Card className="min-w-0 flex flex-col lg:h-full lg:min-h-0">
-          <CardHeader className="shrink-0 border-b">
-            <CardTitle>栏目树</CardTitle>
-            <CardDescription>选择栏目后在右侧编辑，子栏目默认收起。</CardDescription>
-          </CardHeader>
-          <CardContent className="min-h-0 flex-1 p-0">
+        <section className="min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground lg:flex lg:h-full lg:min-h-0 lg:flex-col">
+          <div className="flex h-12 shrink-0 items-center border-b px-4">
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-medium leading-snug">栏目树</h2>
+              <Button size="sm" onClick={() => openNew()}><Plus />新增顶级栏目</Button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1">
             {loading ? (
               <div className="flex h-36 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
             ) : tree.length === 0 ? (
@@ -637,25 +604,16 @@ export function CategoriesPage() {
                 {renderNodes(tree)}
               </ScrollArea>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </section>
 
-        <Card className="min-w-0 flex flex-col lg:h-full lg:min-h-0">
+        <section className="min-w-0 overflow-hidden rounded-xl border bg-card text-card-foreground lg:flex lg:h-full lg:min-h-0 lg:flex-col">
           {editorActive ? (
             <>
-              <CardHeader className="shrink-0 border-b">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <CardTitle>{editing ? `编辑：${editing.name}` : "新增栏目"}</CardTitle>
-                    <CardDescription>默认显示非翻译的基础数据，切换到语言标签页可配置多语言翻译字段。</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-
               <Tabs value={categoryActiveTab} onValueChange={setCategoryActiveTab} className="flex min-h-0 flex-1 flex-col w-full gap-0">
-                <div className="shrink-0 border-b px-6 py-2 bg-muted/30">
-                  <div className="w-full max-w-full overflow-x-auto overscroll-x-contain pb-1">
-                    <TabsList className="w-max min-w-full justify-start h-9 p-1">
+                <div className="flex h-12 shrink-0 items-center border-b bg-muted/30 px-4">
+                  <div className="w-full max-w-full overflow-x-auto overscroll-x-contain">
+                    <TabsList className="h-8 w-max min-w-full justify-start p-1">
                       <TabsTrigger className="flex-none" value="base">基础数据</TabsTrigger>
                       {enabledLanguages.map((lang) => (
                         <TabsTrigger className="flex-none" key={lang.id} value={lang.code}>
@@ -670,7 +628,7 @@ export function CategoriesPage() {
 
                 <TabsContent value="base" className="flex min-h-0 flex-1 flex-col mt-0">
                   <ScrollArea className="h-0 min-h-0 flex-1 w-full" orientation="vertical">
-                    <CardContent className="grid gap-5 sm:grid-cols-2 pt-6 pb-6">
+                    <div className="grid gap-5 px-4 py-5 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>父分类</Label>
                       <Select value={String(form.parent_id)} onValueChange={(value) => update("parent_id", Number(value ?? 0))}>
@@ -882,7 +840,7 @@ export function CategoriesPage() {
                         </div>
                       </>
                     )}
-                    </CardContent>
+                    </div>
                   </ScrollArea>
                 </TabsContent>
 
@@ -893,7 +851,7 @@ export function CategoriesPage() {
                   return (
                     <TabsContent key={lang.id} value={lang.code} className="flex min-h-0 flex-1 flex-col mt-0">
                       <ScrollArea className="h-0 min-h-0 flex-1 w-full" orientation="vertical">
-                        <CardContent className="space-y-4 pt-6 pb-6">
+                        <div className="space-y-4 px-4 py-5">
                           <div className={cn(
                             "rounded-md px-4 py-2.5 text-xs flex items-center gap-2 border",
                             isDefault
@@ -983,33 +941,33 @@ export function CategoriesPage() {
                               )}
                             </>
                           )}
-                        </CardContent>
+                        </div>
                       </ScrollArea>
                     </TabsContent>
                   )
                 })}
               </Tabs>
 
-              <CardFooter className="shrink-0 flex flex-wrap justify-end gap-2 border-t">
+              <div className="flex h-12 shrink-0 flex-wrap items-center justify-end gap-2 border-t bg-muted/50 px-4">
                 <Button variant="outline" onClick={closeEditor} disabled={saving}>取消</Button>
                 <Button onClick={() => save()} disabled={saving || !(translations[defaultLang]?.name?.trim() || form.name.trim())}>
                   {saving ? <LoaderCircle className="animate-spin" /> : null}
                   仅保存
                 </Button>
                 <Button onClick={() => save(true)} disabled={saving || !(translations[defaultLang]?.name?.trim() || form.name.trim())}>保存并发布</Button>
-              </CardFooter>
+              </div>
             </>
           ) : (
-            <CardContent className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
               <FolderTree className="size-8 text-muted-foreground" />
               <div className="space-y-1">
                 <p className="font-medium">选择一个栏目开始编辑</p>
                 <p className="text-sm text-muted-foreground">也可以直接创建新的顶级栏目。</p>
               </div>
               <Button onClick={() => openNew()}><Plus />新增顶级栏目</Button>
-            </CardContent>
+            </div>
           )}
-        </Card>
+        </section>
       </div>
 
       <ConfirmDialog
