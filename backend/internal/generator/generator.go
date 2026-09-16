@@ -1442,7 +1442,7 @@ func (c *content) navigation(args ...any) []NavigationItem {
 		if catPos == "" {
 			catPos = "main"
 		}
-		if catPos != position {
+		if !strings.Contains(","+catPos+",", ","+position+",") {
 			continue
 		}
 		items = append(items, c.navigationItem(category))
@@ -1455,10 +1455,6 @@ func (c *content) navigationItem(category Row) NavigationItem {
 	children := c.children(category.n("id"))
 	items := make([]NavigationItem, 0, len(children))
 	for _, child := range children {
-		catPos := strings.ToLower(strings.TrimSpace(child["nav_position"]))
-		if catPos == "none" {
-			continue
-		}
 		items = append(items, c.navigationItem(child))
 	}
 	pos := strings.ToLower(strings.TrimSpace(category["nav_position"]))

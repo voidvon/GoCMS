@@ -711,30 +711,7 @@ export function CategoriesPage() {
                     </div>
                     <div className="space-y-2">
                       <Label>导航显示位置</Label>
-                      <Select
-                        value={form.nav_position || "main"}
-                        onValueChange={(value) => update("nav_position", (value ?? "main") as "main" | "top" | "footer" | "none")}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="选择导航位置">
-                            {(value) =>
-                              value === "top"
-                                ? "顶部副导航 (top)"
-                                : value === "footer"
-                                  ? "底部页脚导航 (footer)"
-                                  : value === "none"
-                                    ? "不显示在导航 (none)"
-                                    : "主导航 (main)"
-                            }
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="main">主导航 (main)</SelectItem>
-                          <SelectItem value="top">顶部副导航 (top)</SelectItem>
-                          <SelectItem value="footer">底部页脚导航 (footer)</SelectItem>
-                          <SelectItem value="none">不显示在导航 (none)</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <div className="flex flex-wrap gap-4">{[["main","主导航"],["top","顶部副导航"],["footer","底部页脚导航"]].map(([key,label]) => <label key={key} className="flex items-center gap-2"><input type="checkbox" checked={(form.nav_position || "main").split(",").includes(key)} onChange={(e) => { const s = new Set((form.nav_position || "main").split(",")); e.target.checked ? s.add(key) : s.delete(key); update("nav_position", Array.from(s).filter(Boolean).join(",") || "none") }} />{label}</label>)}</div>
                       <p className="text-xs text-muted-foreground">控制该栏目在模板 navigation 标签中的输出归属。</p>
                     </div>
                     <div className="space-y-2">

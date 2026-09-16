@@ -661,12 +661,12 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 			payload.NavPosition = current.NavPosition
 		}
 	}
-	switch strings.ToLower(strings.TrimSpace(payload.NavPosition)) {
-	case "top", "footer", "none":
-		payload.NavPosition = strings.ToLower(strings.TrimSpace(payload.NavPosition))
-	default:
-		payload.NavPosition = "main"
-	}
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(payload.NavPosition)), ",")
+	valid := map[string]bool{"main":true,"top":true,"footer":true,"none":true}
+	out := make([]string, 0, 3)
+	for _, p := range parts { p = strings.TrimSpace(p); if valid[p] && p != "none" { out = append(out, p) } }
+	if len(out) == 0 { out = []string{"main"} }
+	payload.NavPosition = strings.Join(out, ",")
 	if payload.ListPageSize <= 0 {
 		payload.ListPageSize = 14
 	}
