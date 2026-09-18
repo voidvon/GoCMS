@@ -799,7 +799,13 @@ export function ThemePage() {
             {templateGroupsCatalog.map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <Button variant="outline" size="sm" render={<a href={files?.active_theme ? themeExportURL(files.active_theme) : undefined} download={files?.active_theme ? `template-group-${files.active_theme}.zip` : undefined} />} disabled={!files?.active_theme || templateGroupActionID !== "" || importing}>
+        <Button
+          variant="outline"
+          size="sm"
+          nativeButton={false}
+          render={<a href={files?.active_theme ? themeExportURL(files.active_theme) : undefined} download={files?.active_theme ? `template-group-${files.active_theme}.zip` : undefined} />}
+          disabled={!files?.active_theme || templateGroupActionID !== "" || importing}
+        >
           <Download />
           <span className="hidden sm:inline">导出模板组</span>
         </Button>

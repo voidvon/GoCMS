@@ -43,7 +43,7 @@ function SitemapRow({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 sm:pl-4">
-        <Button size="sm" variant="outline" render={<a href={publicURL(path)} target="_blank" rel="noreferrer" />}>
+        <Button size="sm" variant="outline" nativeButton={false} render={<a href={publicURL(path)} target="_blank" rel="noreferrer" />}>
           <ExternalLink />
           查看
         </Button>
@@ -155,6 +155,7 @@ export function PublishPage() {
             <Button
               size="sm"
               variant="outline"
+              nativeButton={false}
               render={<a href={import.meta.env.DEV ? "http://127.0.0.1:18080/" : "/"} target="_blank" rel="noreferrer" />}
             >
               <Globe />
