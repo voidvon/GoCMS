@@ -8,7 +8,6 @@ import {
   Plus,
   RefreshCw,
   RotateCw,
-  ShieldAlert,
   Trash2,
 } from "lucide-react"
 
@@ -24,7 +23,6 @@ import {
 } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -264,49 +262,26 @@ export function ApiKeysPage() {
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground">
-                <KeyRound className="size-4" />
-              </div>
-              <div>
-                <CardTitle>API Key</CardTitle>
-                <CardDescription className="mt-1">
-                  API Key 与所属管理员拥有相同的后台权限，默认长期有效。
-                </CardDescription>
-              </div>
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void loadKeys()}
-                disabled={loading}
-              >
-                <RefreshCw className={loading ? "animate-spin" : ""} />
-                刷新
-              </Button>
-              <Button size="sm" onClick={() => setCreateOpen(true)}>
-                <Plus />
-                创建 Key
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3.5 text-sm text-amber-900 dark:text-amber-200">
-            <ShieldAlert className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <span>
-              长期 Key 等同于管理员 API 凭据。建议为接口单独创建权限最小化的管理员账号，不要在浏览器或静态页面中使用。
-            </span>
-          </div>
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={() => setCreateOpen(true)}>
+          <Plus />
+          创建 Key
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void loadKeys()}
+          disabled={loading}
+        >
+          <RefreshCw className={loading ? "animate-spin" : ""} />
+          刷新
+        </Button>
+      </div>
 
-          {error && <InlineAlert>{error}</InlineAlert>}
 
-          <div className="rounded-md border">
-            <Table>
+      {error && <InlineAlert>{error}</InlineAlert>}
+
+      <Table containerClassName="rounded-md border">
               <TableHeader>
                 <TableRow>
                   <TableHead>名称</TableHead>
@@ -401,9 +376,6 @@ export function ApiKeysPage() {
                 )}
               </TableBody>
             </Table>
-          </div>
-        </CardContent>
-      </Card>
 
       {/* Create API Key Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>

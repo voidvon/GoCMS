@@ -57,6 +57,7 @@ import { LogsPage } from "@/components/app/logs-page"
 import { PublishPage } from "@/components/app/publish-page"
 import { SettingsDialog } from "@/components/app/settings-dialog"
 import { ThemeToggle } from "@/components/app/theme-provider"
+import { HeaderActionsProvider, HeaderActionsSlot } from "@/components/app/header-actions"
 
 type AdminShellProps = {
   user: AdminUser
@@ -268,7 +269,9 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
 export function AdminShell({ user, onLogout }: AdminShellProps) {
   return (
     <LanguageProvider>
-      <AdminShellInner user={user} onLogout={onLogout} />
+      <HeaderActionsProvider>
+        <AdminShellInner user={user} onLogout={onLogout} />
+      </HeaderActionsProvider>
     </LanguageProvider>
   )
 }
@@ -373,6 +376,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
               <p className="hidden text-xs text-muted-foreground sm:block">{meta.description}</p>
             </div>
           </div>
+          <HeaderActionsSlot className="flex items-center gap-2" />
         </header>
         <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6 lg:overflow-hidden">
           <div className="mx-auto h-full w-full max-w-screen-2xl min-h-0">

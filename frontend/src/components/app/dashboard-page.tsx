@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react"
 import {
   Activity,
-  ArrowUpRight,
   Inbox,
   LoaderCircle,
   FileText,
@@ -88,40 +87,13 @@ export function DashboardPage() {
             </Card>
           )
         })}
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[1.4fr_1fr]">
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between border-b">
-            <div>
-              <CardTitle>迁移状态</CardTitle>
-              <CardDescription>当前 Go + SQLite 运行时信息</CardDescription>
-            </div>
-            <ArrowUpRight className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent className="grid gap-4 pt-5 sm:grid-cols-3">
-            <div>
-              <p className="text-xs text-muted-foreground">数据库</p>
-              <p className="mt-1 font-medium">SQLite</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">字符集</p>
-              <p className="mt-1 font-medium">UTF-8</p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">公开目录</p>
-              <p className="mt-1 font-medium">{formatNumber(stats.visible_contents)} 条内容</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
+        <Card size="sm">
           <CardHeader>
-            <CardTitle>待处理事项</CardTitle>
+            <CardTitle className="text-base">待处理事项</CardTitle>
             <CardDescription>按优先级查看后台工作</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between border-b pb-3 text-sm">
+          <CardContent className="space-y-2">
+            <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">未读留言</span>
               <span className="font-medium">{formatNumber(stats.pending_messages)}</span>
             </div>

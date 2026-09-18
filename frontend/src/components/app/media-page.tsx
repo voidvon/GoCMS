@@ -5,7 +5,8 @@ import { deleteMedia, getMedia, getMediaItem, uploadMedia, type MediaAsset, type
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { ConfirmDialog, InlineAlert, SearchField, TablePagination } from "@/components/app/app-ui"
+import { ConfirmDialog, InlineAlert, SearchField } from "@/components/app/app-ui"
+import { PaginatedTable } from "@/components/app/paginated-table"
 
 const pageSize = 20
 
@@ -186,10 +187,10 @@ export function MediaPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:space-y-0 lg:gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Button disabled={uploading} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}{uploading ? "上传中…" : "上传图片"}</Button>
-        <Button variant="outline" disabled={loading || uploading} onClick={() => setRevision((value) => value + 1)}><RefreshCw className={loading ? "animate-spin" : ""} />刷新</Button>
+        <Button size="sm" disabled={uploading} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}{uploading ? "上传中…" : "上传图片"}</Button>
+        <Button size="sm" variant="outline" disabled={loading || uploading} onClick={() => setRevision((value) => value + 1)}><RefreshCw className={loading ? "animate-spin" : ""} />刷新</Button>
         <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/gif" className="hidden" aria-label="选择上传图片" onChange={(event) => {
           const file = event.target.files?.[0]
           event.target.value = ""
@@ -197,19 +198,27 @@ export function MediaPage() {
         }} />
         <form className="flex max-w-full items-center gap-2" onSubmit={submitSearch}>
           <div className="w-56 min-w-0">
-            <SearchField aria-label="搜索附件文件名" placeholder="搜索文件名" value={search} onChange={(event) => setSearch(event.target.value)} />
+            <SearchField size="sm" aria-label="搜索附件文件名" placeholder="搜索文件名" value={search} onChange={(event) => setSearch(event.target.value)} />
           </div>
-          <Button variant="outline" type="submit">搜索</Button>
+          <Button size="sm" variant="outline" type="submit">搜索</Button>
         </form>
       </div>
       {error ? <InlineAlert>{error}<Button className="ml-2" variant="outline" size="sm" onClick={() => setRevision((value) => value + 1)}>重新加载</Button></InlineAlert> : null}
       {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
-      {loading ? (
-        <div role="status" className="flex h-48 items-center justify-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-5 animate-spin" />加载附件…</div>
-      ) : assets.length === 0 ? (
-        <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"><ImageIcon className="size-7" />{error ? "附件暂时无法显示" : appliedSearch ? "没有匹配的附件" : "暂无附件，上传图片后即可在这里管理"}</div>
-      ) : (
-        <div className="overflow-hidden rounded-lg border">
+      <PaginatedTable
+        className="lg:overflow-hidden"
+        page={page}
+        totalPages={Math.max(1, Math.ceil(total / pageSize))}
+        total={total}
+        pageSize={pageSize}
+        loading={loading}
+        onPageChange={setPage}
+      >
+        {loading ? (
+          <div role="status" className="flex h-48 items-center justify-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-5 animate-spin" />加载附件…</div>
+        ) : assets.length === 0 ? (
+          <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"><ImageIcon className="size-7" />{error ? "附件暂时无法显示" : appliedSearch ? "没有匹配的附件" : "暂无附件，上传图片后即可在这里管理"}</div>
+        ) : (
           <Table>
             <TableHeader>
               <TableRow>
@@ -245,9 +254,8 @@ export function MediaPage() {
               ))}
             </TableBody>
           </Table>
-        </div>
-      )}
-      <TablePagination className="border-t-0" page={page} totalPages={Math.max(1, Math.ceil(total / pageSize))} total={total} pageSize={pageSize} loading={loading} onPageChange={setPage} />
+        )}
+      </PaginatedTable>
       {selected ? <MediaDetails key={selected.id} asset={selected} onClose={() => setSelected(null)} onDeleted={() => {
         setSelected(null)
         setNotice("附件已删除")

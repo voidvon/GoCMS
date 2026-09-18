@@ -25,7 +25,6 @@ import {
 } from "@/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -240,42 +239,37 @@ export function ModelsPage() {
     <div className="space-y-4">
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">数据表与系统模型</h1>
-          <p className="text-sm text-muted-foreground">
-            对标帝国CMS核心架构：管理数据表结构、自定义字段及各系统模型录入项
-          </p>
-        </div>
-      </div>
-
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="models" className="gap-2">
-            <Layers className="size-4" />
-            系统模型管理
-          </TabsTrigger>
-          <TabsTrigger value="tables" className="gap-2">
-            <Database className="size-4" />
-            数据表管理
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Tab 1: System Models */}
-        <TabsContent value="models">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
-              <div>
-                <CardTitle>系统模型列表</CardTitle>
-                <CardDescription>各栏目绑定系统模型，决定前后台录入项与自定义展示规则</CardDescription>
-              </div>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+          <div>
+            {activeTab === "models" ? (
               <Button onClick={openCreateModel} className="gap-1.5" size="sm">
                 <Plus className="size-4" />
                 新建系统模型
               </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
+            ) : (
+              <Button onClick={openCreateTable} className="gap-1.5" size="sm">
+                <Plus className="size-4" />
+                新建数据表
+              </Button>
+            )}
+          </div>
+
+          <TabsList size="sm" className="ml-auto">
+            <TabsTrigger value="models" className="gap-2">
+              <Layers className="size-4" />
+              系统模型管理
+            </TabsTrigger>
+            <TabsTrigger value="tables" className="gap-2">
+              <Database className="size-4" />
+              数据表管理
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        {/* Tab 1: System Models */}
+        <TabsContent value="models">
+          <Table containerClassName="rounded-md border">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="pl-4">模型名称</TableHead>
@@ -345,25 +339,11 @@ export function ModelsPage() {
                   )}
                 </TableBody>
               </Table>
-            </CardContent>
-          </Card>
         </TabsContent>
 
         {/* Tab 2: Data Tables */}
         <TabsContent value="tables">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
-              <div>
-                <CardTitle>数据表管理</CardTitle>
-                <CardDescription>管理内容与模块底层数据表存储标识</CardDescription>
-              </div>
-              <Button onClick={openCreateTable} className="gap-1.5" size="sm">
-                <Plus className="size-4" />
-                新建数据表
-              </Button>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
+          <Table containerClassName="rounded-md border">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="pl-4">数据表名称</TableHead>
@@ -418,8 +398,6 @@ export function ModelsPage() {
                   ))}
                 </TableBody>
               </Table>
-            </CardContent>
-          </Card>
         </TabsContent>
       </Tabs>
 
@@ -683,10 +661,7 @@ export function ModelsPage() {
 
             {tableFieldSubView === "list" ? (
               <>
-                <div className="flex items-center justify-between py-1">
-                  <span className="text-sm text-muted-foreground">
-                    共 {fieldsForManagingTable.length} 个字段
-                  </span>
+                <div className="flex items-center gap-3 py-1">
                   <Button
                     size="sm"
                     className="gap-1.5"
@@ -706,6 +681,9 @@ export function ModelsPage() {
                     <Plus className="size-4" />
                     新建字段
                   </Button>
+                  <span className="text-sm text-muted-foreground">
+                    共 {fieldsForManagingTable.length} 个字段
+                  </span>
                 </div>
                 <ScrollArea className="max-h-[55vh] rounded-md border">
                   <Table>

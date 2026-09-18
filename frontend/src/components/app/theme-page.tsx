@@ -15,6 +15,7 @@ import {
   type ThemeFile,
   type ThemeFileContent,
   type ThemeFiles,
+  type ThemeInfo,
   type ThemeTemplateGroup,
 } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -28,6 +29,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog, InlineAlert } from "@/components/app/app-ui"
 import { TemplateLabelsPanel } from "@/components/app/template-labels-panel"
 import { TemplateVariablesPanel } from "@/components/app/template-variables-panel"
+import { HeaderActions } from "@/components/app/header-actions"
+import { showSuccess } from "@/components/app/admin-notifications"
 import { cn } from "@/lib/utils"
 
 type TemplateGroupKey = "home" | "cover" | "list" | "content" | "public"
@@ -154,9 +157,9 @@ function FileBrowser({ files, selectedPath, search, content, draft, loading, err
   }, [files, search])
 
   return (
-    <div className="grid min-h-[28rem] overflow-hidden rounded-lg border lg:h-[calc(100dvh-13rem)] lg:grid-cols-[minmax(15rem,21rem)_minmax(0,1fr)]">
+    <div className="grid h-full min-h-[20rem] flex-1 min-h-0 overflow-hidden rounded-lg border lg:grid-cols-[minmax(15rem,21rem)_minmax(0,1fr)]">
       <section className="flex min-h-0 flex-col border-b bg-muted/20 lg:border-r lg:border-b-0">
-        <div className="border-b p-3">
+        <div className="shrink-0 border-b p-3">
           <div className="relative">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder="筛选文件" aria-label="筛选文件" className="pl-8" />
@@ -189,10 +192,10 @@ function FileBrowser({ files, selectedPath, search, content, draft, loading, err
       </section>
 
       <section className="flex min-h-0 min-w-0 flex-col bg-background">
-        <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-          <div className="min-w-0">
-            <p className="truncate font-mono text-xs font-medium">{(content?.path ?? selectedPath) || "选择模板"}</p>
-            {content && <p className="mt-1 text-[11px] text-muted-foreground">{formatBytes(content.size)} · 更新于 {formatModifiedAt(content.modified_at)}</p>}
+        <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b px-4 py-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="truncate font-mono text-xs font-medium">{(content?.path ?? selectedPath) || "选择模板"}</span>
+            {content && <span className="text-[11px] text-muted-foreground">{formatBytes(content.size)} · 更新于 {formatModifiedAt(content.modified_at)}</span>}
           </div>
           <div className="flex items-center gap-1">
             <Button variant="outline" size="sm" onClick={onSave} disabled={!content || loading || saving}><Save />{saving ? "保存中" : "保存"}</Button>
@@ -202,13 +205,13 @@ function FileBrowser({ files, selectedPath, search, content, draft, loading, err
           </div>
         </div>
         {error ? (
-          <div className="p-4"><InlineAlert>{error}</InlineAlert></div>
+          <div className="p-4 overflow-y-auto"><InlineAlert>{error}</InlineAlert></div>
         ) : loading ? (
-          <div className="flex min-h-96 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
+          <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
         ) : content ? (
-          <Textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} className="min-h-96 flex-1 resize-none rounded-none border-0 bg-muted/20 p-4 font-mono text-xs leading-6 shadow-none focus-visible:ring-0" spellCheck={false} aria-label={`${content.path} 模板内容`} />
+          <Textarea value={draft} onChange={(event) => onDraftChange(event.target.value)} className="h-full min-h-0 flex-1 resize-none rounded-none border-0 bg-muted/20 p-4 font-mono text-[12px] md:text-[12px] leading-6 shadow-none focus-visible:ring-0 overflow-y-auto" style={{ fontSize: "12px" }} spellCheck={false} aria-label={`${content.path} 模板内容`} />
         ) : (
-          <div className="flex min-h-96 items-center justify-center text-sm text-muted-foreground">选择一个模板查看内容</div>
+          <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">选择一个模板查看内容</div>
         )}
       </section>
     </div>
@@ -241,17 +244,17 @@ function SingleTemplateEditor({
   onSave,
 }: SingleTemplateEditorProps) {
   return (
-    <div className="flex min-h-[28rem] flex-col overflow-hidden rounded-lg border bg-background lg:h-[calc(100dvh-13rem)]">
-      <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-        <div className="min-w-0">
+    <div className="flex h-full min-h-[20rem] flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b px-4 py-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
           <div className="flex items-center gap-2">
             <FileText className="size-4 shrink-0 text-muted-foreground" />
-            <p className="truncate font-mono text-xs font-medium">{(content?.path ?? filePath) || "index.html"}</p>
+            <span className="truncate font-mono text-xs font-medium">{(content?.path ?? filePath) || "index.html"}</span>
           </div>
           {content && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <span className="text-[11px] text-muted-foreground">
               {formatBytes(content.size)} · 更新于 {formatModifiedAt(content.modified_at)}
-            </p>
+            </span>
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -264,19 +267,20 @@ function SingleTemplateEditor({
         </div>
       </div>
       {error ? (
-        <div className="p-4"><InlineAlert>{error}</InlineAlert></div>
+        <div className="p-4 overflow-y-auto"><InlineAlert>{error}</InlineAlert></div>
       ) : loading ? (
-        <div className="flex min-h-96 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
+        <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
       ) : content ? (
         <Textarea
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
-          className="min-h-96 flex-1 resize-none rounded-none border-0 bg-muted/20 p-4 font-mono text-xs leading-6 shadow-none focus-visible:ring-0"
+          className="h-full min-h-0 flex-1 resize-none rounded-none border-0 bg-muted/20 p-4 font-mono text-[12px] md:text-[12px] leading-6 shadow-none focus-visible:ring-0 overflow-y-auto"
+          style={{ fontSize: "12px" }}
           spellCheck={false}
           aria-label={`${content.path} 模板内容`}
         />
       ) : (
-        <div className="flex min-h-96 items-center justify-center text-sm text-muted-foreground">
+        <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">
           当前模板组缺少首页模板文件（{filePath || "index.html"}）
         </div>
       )}
@@ -294,7 +298,7 @@ type TemplateAssignmentPanelProps = {
 function TemplateAssignmentPanel({ group, files, savingKey, onAssignmentChange }: TemplateAssignmentPanelProps) {
   if (group.assignments.length === 0) return null
   return (
-    <div className="mb-4 space-y-3 rounded-lg border p-3">
+    <div className="mb-4 shrink-0 space-y-3 rounded-lg border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-sm font-medium">模板绑定</p>
@@ -463,8 +467,8 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 flex-1 flex-col space-y-3">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium">自定义文件</p>
           <p className="text-xs text-muted-foreground">管理模板引用的 CSS、JS 和图片，文件会保存到当前模板组的公开资源目录。</p>
@@ -494,7 +498,7 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
         </div>
       </div>
 
-      <Tabs value={activeKind} onValueChange={(value) => selectKind(value as CustomFileKind)}>
+      <Tabs value={activeKind} onValueChange={(value) => selectKind(value as CustomFileKind)} className="shrink-0">
         <TabsList>
           <TabsTrigger value="css"><FileCode /> CSS ({customFilesForKind(files, "css").length})</TabsTrigger>
           <TabsTrigger value="js"><FileCode /> JS ({customFilesForKind(files, "js").length})</TabsTrigger>
@@ -502,9 +506,9 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
         </TabsList>
       </Tabs>
 
-      <div className="grid min-h-[28rem] overflow-hidden rounded-lg border lg:h-[calc(100dvh-16rem)] lg:grid-cols-[minmax(15rem,21rem)_minmax(0,1fr)]">
+      <div className="grid h-full min-h-[20rem] flex-1 min-h-0 overflow-hidden rounded-lg border lg:grid-cols-[minmax(15rem,21rem)_minmax(0,1fr)]">
         <section className="flex min-h-0 flex-col border-b bg-muted/20 lg:border-r lg:border-b-0">
-          <div className="border-b p-3">
+          <div className="shrink-0 border-b p-3">
             <div className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="筛选文件" aria-label="筛选自定义文件" className="pl-8" />
@@ -537,10 +541,10 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
         </section>
 
         <section className="flex min-h-0 min-w-0 flex-col bg-background">
-          <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-            <div className="min-w-0">
-              <p className="truncate font-mono text-xs font-medium">{activePath || "选择文件"}</p>
-              {activeFile && <p className="mt-1 text-[11px] text-muted-foreground">{formatBytes(activeFile.size)} · 更新于 {formatModifiedAt(activeFile.modified_at)}</p>}
+          <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b px-4 py-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="truncate font-mono text-xs font-medium">{activePath || "选择文件"}</span>
+              {activeFile && <span className="text-[11px] text-muted-foreground">{formatBytes(activeFile.size)} · 更新于 {formatModifiedAt(activeFile.modified_at)}</span>}
             </div>
             <div className="flex items-center gap-1">
               {activeKind !== "image" && <Button variant="outline" size="sm" onClick={() => void saveFile()} disabled={!content || busy !== "" || loading}><Save />{busy === "save" ? "保存中" : "保存"}</Button>}
@@ -548,17 +552,17 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
             </div>
           </div>
           {loading ? (
-            <div className="flex min-h-96 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
+            <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
           ) : fileState.error ? (
-            <div className="p-4"><InlineAlert>{fileState.error}</InlineAlert></div>
+            <div className="p-4 overflow-y-auto"><InlineAlert>{fileState.error}</InlineAlert></div>
           ) : activeKind === "image" && activeFile ? (
-            <ScrollArea className="min-h-96 flex-1 bg-muted/20" contentClassName="flex min-h-full items-center justify-center p-6">
+            <ScrollArea className="min-h-0 flex-1 bg-muted/20" contentClassName="flex min-h-full items-center justify-center p-6">
               <img src={assetURL(activeFile.path)} alt={activeFile.path} className="max-h-[min(52vh,32rem)] max-w-full object-contain" />
             </ScrollArea>
           ) : content ? (
-            <Textarea value={draft} onChange={(event) => setDraft(event.target.value)} className="min-h-96 flex-1 resize-none rounded-none border-0 bg-muted/20 p-4 font-mono text-xs leading-6 shadow-none focus-visible:ring-0" spellCheck={false} aria-label={`${activePath} 文件内容`} />
+            <Textarea value={draft} onChange={(event) => setDraft(event.target.value)} className="h-full min-h-0 flex-1 resize-none rounded-none border-0 bg-muted/20 p-4 font-mono text-[12px] md:text-[12px] leading-6 shadow-none focus-visible:ring-0 overflow-y-auto" style={{ fontSize: "12px" }} spellCheck={false} aria-label={`${activePath} 文件内容`} />
           ) : (
-            <div className="flex min-h-96 items-center justify-center text-sm text-muted-foreground">选择一个文件进行编辑</div>
+            <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">选择一个文件进行编辑</div>
           )}
         </section>
       </div>
@@ -621,6 +625,7 @@ export function ThemePage() {
   const [savingTemplate, setSavingTemplate] = useState(false)
   const [savingAssignmentKey, setSavingAssignmentKey] = useState("")
   const [templateGroupActionID, setTemplateGroupActionID] = useState("")
+  const [pendingTheme, setPendingTheme] = useState<ThemeInfo | null>(null)
   const [importing, setImporting] = useState(false)
   const templateGroupInputRef = useRef<HTMLInputElement>(null)
 
@@ -638,12 +643,15 @@ export function ThemePage() {
   }
 
   async function handleActivate(id: string) {
+    if (!id || id === files?.active_theme) {
+      return
+    }
     setTemplateGroupActionID(id)
     setError("")
     setNotice("")
     try {
       const result = await activateTheme(id)
-      setNotice(result.publish_started ? `已切换到模板组${result.theme.name}，网站正在重新生成。` : `已切换到模板组${result.theme.name}。`)
+      showSuccess(result.publish_started ? `已切换到模板组${result.theme.name}，网站正在重新生成。` : `已切换到模板组${result.theme.name}。`)
       await loadFiles()
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "模板组切换失败")
@@ -658,7 +666,7 @@ export function ThemePage() {
     setNotice("")
     try {
       const result = await importTheme(file)
-      setNotice(`已导入模板组${result.theme.name}。`)
+      showSuccess(`已导入模板组${result.theme.name}。`)
       await loadFiles()
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : "模板组导入失败")
@@ -772,49 +780,54 @@ export function ThemePage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold">模板组</h2>
-          <p className="mt-1 text-sm text-muted-foreground">对齐帝国 CMS 模板体系，按首页、封面、列表、内容、标签模板、公共模板变量和公共模板统一管理。</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Select value={files?.active_theme ?? ""} onValueChange={(value) => { if (value) void handleActivate(value) }} disabled={templateGroupActionID !== "" || importing || templateGroupsCatalog.length === 0}>
-            <SelectTrigger aria-label="当前模板组" className="w-full sm:w-48"><SelectValue placeholder="选择模板组" /></SelectTrigger>
-            <SelectContent>
-              {templateGroupsCatalog.map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Button variant="outline" size="sm" render={<a href={files?.active_theme ? themeExportURL(files.active_theme) : undefined} download={files?.active_theme ? `template-group-${files.active_theme}.zip` : undefined} />} disabled={!files?.active_theme || templateGroupActionID !== "" || importing}>
-            <Download />
-            导出模板组
-          </Button>
-          <input
-            ref={templateGroupInputRef}
-            type="file"
-            accept=".zip,application/zip,application/x-zip-compressed"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0]
-              if (file) void handleImport(file)
-              event.currentTarget.value = ""
-            }}
-          />
-          <Button variant="outline" size="sm" onClick={() => templateGroupInputRef.current?.click()} disabled={importing || templateGroupActionID !== ""}>
-            {importing ? <LoaderCircle className="animate-spin" /> : <Upload />}
-            导入模板组
-          </Button>
-        </div>
-      </div>
+    <div className="flex h-full min-h-0 flex-1 flex-col space-y-4">
+      <HeaderActions>
+        <Select
+          value={files?.active_theme ?? ""}
+          onValueChange={(value) => {
+            if (value && value !== files?.active_theme) {
+              const target = templateGroupsCatalog.find((group) => group.id === value)
+              if (target) {
+                setPendingTheme(target)
+              }
+            }
+          }}
+          disabled={templateGroupActionID !== "" || importing || templateGroupsCatalog.length === 0}
+        >
+          <SelectTrigger aria-label="当前模板组" className="w-36 sm:w-44"><SelectValue placeholder="选择模板组" /></SelectTrigger>
+          <SelectContent>
+            {templateGroupsCatalog.map((group) => <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" render={<a href={files?.active_theme ? themeExportURL(files.active_theme) : undefined} download={files?.active_theme ? `template-group-${files.active_theme}.zip` : undefined} />} disabled={!files?.active_theme || templateGroupActionID !== "" || importing}>
+          <Download />
+          <span className="hidden sm:inline">导出模板组</span>
+        </Button>
+        <input
+          ref={templateGroupInputRef}
+          type="file"
+          accept=".zip,application/zip,application/x-zip-compressed"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0]
+            if (file) void handleImport(file)
+            event.currentTarget.value = ""
+          }}
+        />
+        <Button variant="outline" size="sm" onClick={() => templateGroupInputRef.current?.click()} disabled={importing || templateGroupActionID !== ""}>
+          {importing ? <LoaderCircle className="animate-spin" /> : <Upload />}
+          <span className="hidden sm:inline">导入模板组</span>
+        </Button>
+      </HeaderActions>
 
-      {notice && <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">{notice}</div>}
-      {error && <InlineAlert>{error}</InlineAlert>}
+      {notice && <div className="shrink-0 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">{notice}</div>}
+      {error && <div className="shrink-0"><InlineAlert>{error}</InlineAlert></div>}
 
       {loading && !files ? (
-        <div className="flex min-h-64 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
+        <div className="flex min-h-64 flex-1 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div>
       ) : files ? (
-        <Tabs value={section} onValueChange={selectSection} className="gap-4">
-          <ScrollArea className="max-w-full" orientation="horizontal">
+        <Tabs value={section} onValueChange={selectSection} className="flex min-h-0 flex-1 flex-col gap-4">
+          <ScrollArea className="max-w-full shrink-0" orientation="horizontal">
             <TabsList className="w-max">
               <TabsTrigger value="home">首页模板 ({getTemplateGroup(files, "home").count})</TabsTrigger>
               <TabsTrigger value="cover">封面模板 ({getTemplateGroup(files, "cover").count})</TabsTrigger>
@@ -830,7 +843,7 @@ export function ThemePage() {
           {templateGroupDefinitions.map((definition) => {
             const group = getTemplateGroup(files, definition.key)
             return (
-              <TabsContent key={definition.key} value={definition.key} className="mt-0">
+              <TabsContent key={definition.key} value={definition.key} className="mt-0 flex min-h-0 flex-1 flex-col">
                 {definition.key === "home" ? (
                   <SingleTemplateEditor
                     filePath={activePath || group.files[0]?.path || "index.html"}
@@ -874,19 +887,39 @@ export function ThemePage() {
             )
           })}
 
-          <TabsContent value="tags" className="mt-0">
+          <TabsContent value="tags" className="mt-0 flex min-h-0 flex-1 flex-col">
             <TemplateLabelsPanel />
           </TabsContent>
 
-          <TabsContent value="tempvars" className="mt-0">
+          <TabsContent value="tempvars" className="mt-0 flex min-h-0 flex-1 flex-col">
             <TemplateVariablesPanel />
           </TabsContent>
 
-          <TabsContent value="custom" className="mt-0">
+          <TabsContent value="custom" className="mt-0 flex min-h-0 flex-1 flex-col">
             <CustomFilesPanel files={files} kind="css" onFilesChange={setFiles} onNotice={setNotice} onError={setError} />
           </TabsContent>
         </Tabs>
       ) : null}
+
+      <ConfirmDialog
+        open={pendingTheme !== null}
+        onOpenChange={(open) => {
+          if (!open && templateGroupActionID === "") {
+            setPendingTheme(null)
+          }
+        }}
+        title="确认切换模板组？"
+        description={pendingTheme ? `确定切换到模板组“${pendingTheme.name}”吗？切换后网站将使用新模板组并重新生成。` : "确认切换模板组吗？"}
+        confirmLabel="确认切换"
+        confirmVariant="default"
+        pending={templateGroupActionID !== ""}
+        onConfirm={async () => {
+          if (!pendingTheme) return
+          const target = pendingTheme
+          await handleActivate(target.id)
+          setPendingTheme(null)
+        }}
+      />
     </div>
   )
 }

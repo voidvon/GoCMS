@@ -1,6 +1,5 @@
 import { useState } from "react"
 import {
-  Globe,
   LoaderCircle,
   Pencil,
   Plus,
@@ -20,7 +19,6 @@ import {
 import { useLanguage } from "@/lib/language-context"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -160,41 +158,22 @@ export function LanguagesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-xl font-bold tracking-tight">多语言配置</h2>
-          <p className="text-sm text-muted-foreground">
-            管理网站多语言支持。主站语言生成在根目录(/)，副语言生成在专属目录(/en/)。翻译未填写时将自动使用兜底语言内容填充。
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => refreshLanguages()} disabled={loading}>
-            <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-            刷新
-          </Button>
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="size-4 mr-2" />
-            新增语言
-          </Button>
-        </div>
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <Button size="sm" onClick={openCreate}>
+          <Plus className="size-4 mr-2" />
+          新增语言
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => refreshLanguages()} disabled={loading}>
+          <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+          刷新
+        </Button>
       </div>
 
       {error && <InlineAlert>{error}</InlineAlert>}
       {successMsg && <p role="status" className="text-sm text-green-600 dark:text-green-400">{successMsg}</p>}
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-medium flex items-center gap-2">
-            <Globe className="size-4 text-primary" />
-            语言列表 ({languages.length})
-          </CardTitle>
-          <CardDescription>
-            已启用的语言将在重新生成网站时生成独立的页面目录，并支持在栏目和内容中单独进行翻译。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="p-0">
-          <Table>
+      <Table containerClassName="rounded-md border">
             <TableHeader>
               <TableRow>
                 <TableHead className="w-[140px]">语言代码</TableHead>
@@ -306,8 +285,6 @@ export function LanguagesPage() {
               )}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
 
       {/* Add / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

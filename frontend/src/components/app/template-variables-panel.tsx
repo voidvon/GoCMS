@@ -274,8 +274,8 @@ export function TemplateVariablesPanel() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 flex-1 flex-col space-y-4">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium">公共模板变量</p>
           <p className="text-xs text-muted-foreground">管理跨模板调用的公共片段变量（如页面头部、尾部、导航、介绍等代码块）。</p>
@@ -292,12 +292,12 @@ export function TemplateVariablesPanel() {
         </div>
       </div>
 
-      {notice && <p role="status" className="text-sm text-emerald-600 dark:text-emerald-400">{notice}</p>}
-      {error && <InlineAlert>{error}</InlineAlert>}
+      {notice && <p role="status" className="shrink-0 text-sm text-emerald-600 dark:text-emerald-400">{notice}</p>}
+      {error && <div className="shrink-0"><InlineAlert>{error}</InlineAlert></div>}
 
-      <div className="grid min-h-[38rem] overflow-hidden rounded-lg border lg:h-[calc(100dvh-14rem)] lg:grid-cols-[minmax(15rem,22rem)_minmax(0,1fr)]">
+      <div className="grid h-full min-h-[20rem] flex-1 min-h-0 overflow-hidden rounded-lg border lg:grid-cols-[minmax(15rem,22rem)_minmax(0,1fr)]">
         <section className="flex min-h-0 flex-col border-b bg-muted/20 lg:border-r lg:border-b-0">
-          <div className="space-y-2 border-b p-3">
+          <div className="shrink-0 space-y-2 border-b p-3">
             <form className="flex gap-2" onSubmit={submitSearch}>
               <SearchField value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模板变量" />
               <Button type="submit" variant="outline" size="icon" aria-label="搜索模板变量" title="搜索模板变量"><Search /></Button>
@@ -342,11 +342,13 @@ export function TemplateVariablesPanel() {
               </button>
             ))}
           </ScrollArea>
-          <TablePagination page={page} totalPages={totalPages} total={total} pageSize={20} loading={loading} onPageChange={changePage} />
+          <div className="shrink-0">
+            <TablePagination page={page} totalPages={totalPages} total={total} pageSize={20} loading={loading} onPageChange={changePage} />
+          </div>
         </section>
 
         <section className="flex min-h-0 min-w-0 flex-col bg-background">
-          <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+          <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{mode === "new" ? "新增公共模板变量" : form.name || "编辑公共模板变量"}</p>
               <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">{invocation}</p>
@@ -397,7 +399,7 @@ export function TemplateVariablesPanel() {
                   {copied === "content" ? "已复制" : "复制内容"}
                 </Button>
               </div>
-              <Textarea id="template-var-content" value={form.content} onChange={(event) => update("content", event.target.value)} className="min-h-80 resize-y font-mono text-xs leading-6" placeholder={'<header>\n  <nav>...</nav>\n</header>'} spellCheck={false} />
+              <Textarea id="template-var-content" value={form.content} onChange={(event) => update("content", event.target.value)} className="min-h-80 resize-y font-mono text-[12px] md:text-[12px] leading-6" style={{ fontSize: "12px" }} placeholder={'<header>\n  <nav>...</nav>\n</header>'} spellCheck={false} />
               <p className="text-[11px] text-muted-foreground">变量内容使用 Go template 语法；可包含 HTML、调用标签及站点配置。</p>
             </div>
 
@@ -412,10 +414,10 @@ export function TemplateVariablesPanel() {
                   {copied === "call" ? "已复制" : "复制调用代码"}
                 </Button>
               </div>
-              <code className="block overflow-x-auto rounded-md bg-background px-3 py-2 font-mono text-xs leading-6">{invocation}</code>
+              <code className="block overflow-x-auto rounded-md bg-background px-3 py-2 font-mono text-[12px] leading-6">{invocation}</code>
             </div>
           </ScrollArea>
-          <div className="flex flex-wrap justify-end gap-2 border-t p-4">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t p-4">
             {mode === "edit" && selectedItem && (
               <Button variant="ghost" className="mr-auto text-destructive hover:text-destructive" onClick={() => setDeletingItem(selectedItem)} disabled={saving}>
                 <Trash2 />

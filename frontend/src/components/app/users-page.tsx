@@ -43,7 +43,7 @@ export function UsersPage({ currentUserID }: { currentUserID: number }) {
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       {!loaded && <p className="text-sm text-muted-foreground">正在读取账号和用户组…</p>}
       <section className="space-y-3">
-        <div className="flex items-center justify-between"><h2 className="font-medium">后台账号</h2><Button disabled={busy || !loaded} onClick={() => { setGroup(null); setAccount({ id: 0, username: "", password: "", group_id: groups[0]?.id ?? 0, is_super: false, disabled: false }) }}>新增账号</Button></div>
+        <div className="flex items-center gap-3"><h2 className="font-medium">后台账号</h2><Button size="sm" disabled={busy || !loaded} onClick={() => { setGroup(null); setAccount({ id: 0, username: "", password: "", group_id: groups[0]?.id ?? 0, is_super: false, disabled: false }) }}>新增账号</Button></div>
         <p className="text-sm text-muted-foreground">普通账号按用户组获得模块权限；超级管理员可管理账号、用户组及全部模块。</p>
         <div className="overflow-x-auto rounded-md border">
           <table className="w-full text-left text-sm"><thead className="bg-muted/40"><tr><th className="p-3">账号</th><th className="p-3">用户组</th><th className="p-3">状态</th><th className="p-3">操作</th></tr></thead><tbody>
@@ -63,7 +63,7 @@ export function UsersPage({ currentUserID }: { currentUserID: number }) {
         </form>}
       </section>
       <section className="space-y-3">
-        <div className="flex items-center justify-between"><h2 className="font-medium">用户组</h2><Button disabled={busy || !loaded} onClick={() => { setAccount(null); setGroup({ id: 0, name: "", permissions: [] }) }}>新增用户组</Button></div>
+        <div className="flex items-center gap-3"><h2 className="font-medium">用户组</h2><Button size="sm" disabled={busy || !loaded} onClick={() => { setAccount(null); setGroup({ id: 0, name: "", permissions: [] }) }}>新增用户组</Button></div>
         <p className="text-sm text-muted-foreground">内容管理允许浏览内容，新增、修改、删除、审核需分别授权。审核人员还需修改权限。无审核权限只能保存隐藏内容，不能修改已公开内容。栏目、模型和语言的基本信息可供编辑内容时读取。</p>
         {groups.length === 0 && loaded && <p className="text-sm text-muted-foreground">暂无用户组。</p>}
         {groups.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3"><div><p className="text-sm font-medium">{item.name}</p><p className="text-xs text-muted-foreground">{item.permissions.map((key) => permissions.find((p) => p.key === key)?.label ?? key).join("、") || "未授权业务模块"}</p></div><div className="flex gap-2"><Button disabled={busy} variant="outline" size="sm" onClick={() => { setAccount(null); setGroup({ ...item }) }}>编辑</Button><Button disabled={busy} variant="ghost" size="sm" onClick={() => { if (window.confirm(`删除用户组“${item.name}”？`)) void run(() => deleteAdminGroup(item.id)) }}>删除</Button></div></div>)}

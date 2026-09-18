@@ -34,7 +34,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ConfirmDialog, IconButton, InlineAlert, SearchField, TablePagination } from "@/components/app/app-ui"
+import { ConfirmDialog, IconButton, InlineAlert, SearchField } from "@/components/app/app-ui"
+import { PaginatedTable } from "@/components/app/paginated-table"
 import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
 import { RichTextEditor } from "@/components/app/rich-text-editor"
 import { flattenCategoryTree } from "@/lib/category-tree"
@@ -1515,72 +1516,77 @@ export function ContentPage({ user }: { user: AdminUser }) {
 
   return (
     <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:space-y-0 lg:gap-4">
-      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-        <div className="flex w-full flex-wrap gap-2 sm:flex-nowrap">
-          <form className="flex w-full max-w-md gap-2" onSubmit={submitSearch}>
-            <SearchField value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、编号或关键词" />
-            <Button type="submit" variant="outline"><Search />搜索</Button>
-          </form>
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <Button size="sm" disabled={!allowed("content.add")} onClick={openNew}><Plus />新增内容</Button>
+        <form className="flex w-full sm:w-80 max-w-md gap-2" onSubmit={submitSearch}>
+          <SearchField size="sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、编号或关键词" />
+          <Button size="sm" type="submit" variant="outline"><Search />搜索</Button>
+        </form>
+        <Select
+          value={String(categoryID)}
+          onValueChange={(value) => {
+            setLoading(true)
+            setPage(1)
+            setCategoryID(Number(value ?? 0))
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-48" aria-label="按分类筛选">
+            <SelectValue>
+              {(value) => {
+                const selectedID = Number(value ?? 0)
+                return selectedID > 0
+                  ? categoryOptions.find((category) => category.id === selectedID)?.name ?? "全部分类"
+                  : "全部分类"
+              }}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="0">全部分类</SelectItem>
+            {categoryOptions.map((category) => (
+              <SelectItem key={category.id} value={String(category.id)}>
+                <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {languages.length > 1 && (
           <Select
-            value={String(categoryID)}
-            onValueChange={(value) => {
-              setLoading(true)
-              setPage(1)
-              setCategoryID(Number(value ?? 0))
+            value={activeLang}
+            onValueChange={(val) => {
+              if (val) setActiveLang(val)
             }}
           >
-            <SelectTrigger className="w-full sm:w-56" aria-label="按分类筛选">
+            <SelectTrigger size="sm" className="w-full sm:w-36" aria-label="选择语言">
+              <Languages className="size-3.5 mr-1 shrink-0 text-muted-foreground" />
               <SelectValue>
-                {(value) => {
-                  const selectedID = Number(value ?? 0)
-                  return selectedID > 0
-                    ? categoryOptions.find((category) => category.id === selectedID)?.name ?? "全部分类"
-                    : "全部分类"
-                }}
+                {currentLanguage?.name || activeLang}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="0">全部分类</SelectItem>
-              {categoryOptions.map((category) => (
-                <SelectItem key={category.id} value={String(category.id)}>
-                  <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
+              {languages.map((lang) => (
+                <SelectItem key={lang.code} value={lang.code}>
+                  <div className="flex items-center gap-1.5">
+                    <span>{lang.name}</span>
+                    {lang.is_default === 1 && <span className="text-[10px] text-muted-foreground">(主站)</span>}
+                    {lang.is_fallback === 1 && <span className="text-[10px] text-muted-foreground">(兜底)</span>}
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          {languages.length > 1 && (
-            <Select
-              value={activeLang}
-              onValueChange={(val) => {
-                if (val) setActiveLang(val)
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-36" aria-label="选择语言">
-                <Languages className="size-3.5 mr-1 shrink-0 text-muted-foreground" />
-                <SelectValue>
-                  {currentLanguage?.name || activeLang}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {languages.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code}>
-                    <div className="flex items-center gap-1.5">
-                      <span>{lang.name}</span>
-                      {lang.is_default === 1 && <span className="text-[10px] text-muted-foreground">(主站)</span>}
-                      {lang.is_fallback === 1 && <span className="text-[10px] text-muted-foreground">(兜底)</span>}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
-        <Button disabled={!allowed("content.add")} onClick={openNew}><Plus />新增内容</Button>
+        )}
       </div>
-      {notice && <p role="status" className="text-sm text-muted-foreground">{notice}</p>}
-      {error ? <InlineAlert>{error}</InlineAlert> : null}
-      <div className="border-y lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:overflow-hidden lg:border">
-        <ScrollArea className="lg:h-0 lg:min-h-0 lg:flex-1">
+      {notice && <p role="status" className="shrink-0 text-sm text-muted-foreground">{notice}</p>}
+      {error ? <InlineAlert className="shrink-0">{error}</InlineAlert> : null}
+      <PaginatedTable
+        className="lg:overflow-hidden"
+        page={page}
+        totalPages={totalPages}
+        total={total}
+        pageSize={pageSize}
+        loading={loading}
+        onPageChange={(nextPage) => { setLoading(true); setPage(nextPage) }}
+      >
           <Table>
             <TableHeader>
               <TableRow>
@@ -1627,9 +1633,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
               ))}
             </TableBody>
           </Table>
-        </ScrollArea>
-        <TablePagination page={page} totalPages={totalPages} total={total} pageSize={pageSize} loading={loading} onPageChange={(nextPage) => { setLoading(true); setPage(nextPage) }} />
-      </div>
+      </PaginatedTable>
 
       <Dialog open={editorOpen} onOpenChange={closeEditor}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden sm:max-w-5xl">

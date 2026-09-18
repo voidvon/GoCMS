@@ -434,8 +434,8 @@ export function TemplateLabelsPanel() {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 flex-1 flex-col space-y-4">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium">标签模板管理</p>
           <p className="text-xs text-muted-foreground">
@@ -458,13 +458,13 @@ export function TemplateLabelsPanel() {
         </div>
       </div>
 
-      {notice && <p role="status" className="text-sm text-emerald-600 dark:text-emerald-400">{notice}</p>}
-      {error && <InlineAlert>{error}</InlineAlert>}
+      {notice && <p role="status" className="shrink-0 text-sm text-emerald-600 dark:text-emerald-400">{notice}</p>}
+      {error && <div className="shrink-0"><InlineAlert>{error}</InlineAlert></div>}
 
-      <div className="grid min-h-[42rem] overflow-hidden rounded-lg border lg:h-[calc(100dvh-14rem)] lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]">
+      <div className="grid h-full min-h-[20rem] flex-1 min-h-0 overflow-hidden rounded-lg border lg:grid-cols-[minmax(16rem,22rem)_minmax(0,1fr)]">
         {/* 左侧模板列表 */}
         <section className="flex min-h-0 flex-col border-b bg-muted/20 lg:border-r lg:border-b-0">
-          <div className="space-y-2 border-b p-3">
+          <div className="shrink-0 space-y-2 border-b p-3">
             <form className="flex gap-2" onSubmit={submitSearch}>
               <SearchField value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标签模板" />
               <Button type="submit" variant="outline" size="icon" aria-label="搜索标签模板" title="搜索标签模板">
@@ -519,12 +519,14 @@ export function TemplateLabelsPanel() {
               ))
             )}
           </ScrollArea>
-          <TablePagination page={page} totalPages={totalPages} total={total} pageSize={20} loading={loading} onPageChange={changePage} />
+          <div className="shrink-0">
+            <TablePagination page={page} totalPages={totalPages} total={total} pageSize={20} loading={loading} onPageChange={changePage} />
+          </div>
         </section>
 
         {/* 右侧表单编辑区：两块核心代码结构 */}
         <section className="flex min-h-0 min-w-0 flex-col bg-background">
-          <div className="flex min-h-14 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+          <div className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">
                 {mode === "new" ? "增加标签模板" : `修改标签模板：${form.name || selectedItem?.name}`}
@@ -734,7 +736,8 @@ export function TemplateLabelsPanel() {
                 id="template-temptext"
                 value={form.temptext}
                 onChange={(event) => update("temptext", event.target.value)}
-                className="min-h-48 resize-y font-mono text-xs leading-6"
+                className="min-h-48 resize-y font-mono text-[12px] md:text-[12px] leading-6"
+                style={{ fontSize: "12px" }}
                 placeholder={'<ul class="news-list">\n[!--list.temp--]\n  <!--list.var1-->\n[!--list.temp--]\n</ul>'}
                 spellCheck={false}
               />
@@ -831,7 +834,8 @@ export function TemplateLabelsPanel() {
                 id="template-listvar"
                 value={form.listvar}
                 onChange={(event) => update("listvar", event.target.value)}
-                className="min-h-36 resize-y font-mono text-xs leading-6"
+                className="min-h-36 resize-y font-mono text-[12px] md:text-[12px] leading-6"
+                style={{ fontSize: "12px" }}
                 placeholder={'<li><a href="[!--url--]">[!--title--]</a><span>[!--date--]</span></li>'}
                 spellCheck={false}
               />
@@ -939,14 +943,14 @@ export function TemplateLabelsPanel() {
                   {copied === "call" ? "已复制" : "复制调用代码"}
                 </Button>
               </div>
-              <code className="block overflow-x-auto rounded-md bg-background px-3 py-2 font-mono text-xs leading-6">
+              <code className="block overflow-x-auto rounded-md bg-background px-3 py-2 font-mono text-[12px] leading-6">
                 {invocation}
               </code>
             </div>
           </ScrollArea>
 
           {/* 底部按钮栏 */}
-          <div className="flex flex-wrap justify-end gap-2 border-t p-4">
+          <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t p-4">
             {mode === "edit" && selectedItem && (
               <Button
                 variant="ghost"

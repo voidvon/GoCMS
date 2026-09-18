@@ -210,7 +210,7 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 		return
 	}
 	id := strings.TrimSpace(payload.ID)
-	base, dataRoot, _ := s.themeState()
+	base, dataRoot, currentActive := s.themeState()
 	if base == "" {
 		http.Error(response, "主题目录未配置", http.StatusServiceUnavailable)
 		return
@@ -218,6 +218,14 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 	definition, err := themepkg.Find(base, id)
 	if err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if currentActive.Manifest.ID != "" && currentActive.Manifest.ID == definition.Manifest.ID {
+		writeJSON(response, http.StatusOK, map[string]any{
+			"ok":              true,
+			"theme":           definition.Info(true),
+			"publish_started": false,
+		})
 		return
 	}
 	var report any

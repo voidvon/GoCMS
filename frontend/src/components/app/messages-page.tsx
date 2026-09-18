@@ -5,7 +5,6 @@ import {
   Copy,
   Inbox,
   LoaderCircle,
-  MailOpen,
   MessageSquare,
   Plus,
   Settings2,
@@ -37,8 +36,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { ConfirmDialog, IconButton, InlineAlert, TablePagination } from "@/components/app/app-ui"
+import { ConfirmDialog, IconButton, InlineAlert } from "@/components/app/app-ui"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { PaginatedTable } from "@/components/app/paginated-table"
 
 const pageSize = 20
 
@@ -271,106 +271,100 @@ export function MessagesPage() {
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:space-y-0 lg:gap-4">
       {error ? <InlineAlert>{error}</InlineAlert> : null}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">信息反馈管理</h1>
-          <p className="text-sm text-muted-foreground">
-            对标帝国CMS自定义反馈系统：多分类表单、自定义录入字段与客户反馈处理
-          </p>
-        </div>
-      </div>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:space-y-0 lg:gap-4">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+          {activeTab === "feedbacks" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={filterClass} onValueChange={(val) => setFilterClass(val ?? "all")}>
+                <SelectTrigger size="sm" className="w-[140px]">
+                  <SelectValue placeholder="全部分类">
+                    {(val) => {
+                      if (!val || val === "all") return "全部分类"
+                      const c = classes.find((item) => String(item.id) === String(val))
+                      return c ? c.name : "全部分类"
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部分类</SelectItem>
+                  {classes.map((c) => (
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="feedbacks" className="gap-2">
-            <Inbox className="size-4" />
-            反馈信息列表
-          </TabsTrigger>
-          <TabsTrigger value="classes" className="gap-2">
-            <MessageSquare className="size-4" />
-            反馈分类管理
-          </TabsTrigger>
-          <TabsTrigger value="fields" className="gap-2">
-            <Settings2 className="size-4" />
-            反馈字段管理
-          </TabsTrigger>
-        </TabsList>
+              <Select value={filterState} onValueChange={(val) => setFilterState(val ?? "all")}>
+                <SelectTrigger size="sm" className="w-[120px]">
+                  <SelectValue placeholder="处理状态">
+                    {(val) => {
+                      if (val === "0") return "待处理"
+                      if (val === "1") return "已处理"
+                      return "全部状态"
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部状态</SelectItem>
+                  <SelectItem value="0">待处理</SelectItem>
+                  <SelectItem value="1">已处理</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Input
+                size="sm"
+                className="w-[160px]"
+                placeholder="搜索标题/姓名/电话/IP"
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+              />
+
+              {selectedIds.length > 0 ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => setBatchDeleting(true)}
+                >
+                  <Trash2 className="size-4" />
+                  批量删除 ({selectedIds.length})
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
+
+          <TabsList size="sm" className="ml-auto">
+            <TabsTrigger value="feedbacks" className="gap-2">
+              <Inbox className="size-4" />
+              反馈信息列表
+            </TabsTrigger>
+            <TabsTrigger value="classes" className="gap-2">
+              <MessageSquare className="size-4" />
+              反馈分类管理
+            </TabsTrigger>
+            <TabsTrigger value="fields" className="gap-2">
+              <Settings2 className="size-4" />
+              反馈字段管理
+            </TabsTrigger>
+          </TabsList>
+        </div>
 
         {/* Tab 1: Feedback Records */}
-        <TabsContent value="feedbacks">
-          <Card>
-            <CardHeader className="flex flex-col gap-4 border-b pb-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <CardTitle>反馈与留言列表</CardTitle>
-                <CardDescription>
-                  {total.toLocaleString("zh-CN")} 条反馈记录，按最新提交排序
-                </CardDescription>
-              </div>
+        <TabsContent value="feedbacks" className="min-h-0 flex-1 lg:flex lg:flex-col">
 
-              <div className="flex flex-wrap items-center gap-2">
-                <Select value={filterClass} onValueChange={(val) => setFilterClass(val ?? "all")}>
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue placeholder="全部分类">
-                      {(val) => {
-                        if (!val || val === "all") return "全部分类"
-                        const c = classes.find((item) => String(item.id) === String(val))
-                        return c ? c.name : "全部分类"
-                      }}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">全部分类</SelectItem>
-                    {classes.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select value={filterState} onValueChange={(val) => setFilterState(val ?? "all")}>
-                  <SelectTrigger className="w-[120px]">
-                    <SelectValue placeholder="处理状态">
-                      {(val) => {
-                        if (val === "0") return "待处理"
-                        if (val === "1") return "已处理"
-                        return "全部状态"
-                      }}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">全部状态</SelectItem>
-                    <SelectItem value="0">待处理</SelectItem>
-                    <SelectItem value="1">已处理</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Input
-                  className="w-[160px]"
-                  placeholder="搜索标题/姓名/电话/IP"
-                  value={keyword}
-                  onChange={(e) => setKeyword(e.target.value)}
-                />
-
-                {selectedIds.length > 0 ? (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="gap-1.5"
-                    onClick={() => setBatchDeleting(true)}
-                  >
-                    <Trash2 className="size-4" />
-                    批量删除 ({selectedIds.length})
-                  </Button>
-                ) : null}
-              </div>
-            </CardHeader>
-
-            <CardContent className="p-0">
-              <Table>
+            <PaginatedTable
+              page={page}
+              totalPages={totalPages}
+              total={total}
+              pageSize={pageSize}
+              loading={loading}
+              onPageChange={setPage}
+            >
+                <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-10 pl-4">
@@ -425,7 +419,13 @@ export function MessagesPage() {
                           />
                         </TableCell>
                         <TableCell className="max-w-[280px]">
-                          <p className="truncate font-medium">{item.title}</p>
+                          <button
+                            type="button"
+                            className="block max-w-full truncate text-left font-medium hover:text-primary hover:underline focus-visible:outline-none focus-visible:underline"
+                            onClick={() => setViewingItem(item)}
+                          >
+                            {item.title}
+                          </button>
                           <p className="mt-0.5 truncate text-xs text-muted-foreground">
                             {item.content || "无留言内容"}
                           </p>
@@ -449,37 +449,22 @@ export function MessagesPage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="pr-4 text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button variant="ghost" size="sm" onClick={() => setViewingItem(item)}>
-                              <MailOpen className="size-4" />
-                              查看
-                            </Button>
-                            <IconButton
-                              variant="ghost"
-                              size="icon-sm"
-                              className="text-destructive hover:text-destructive"
-                              onClick={() => setDeletingItem(item)}
-                              label={`删除${item.title}`}
-                            >
-                              <Trash2 />
-                            </IconButton>
-                          </div>
+                          <IconButton
+                            variant="ghost"
+                            size="icon-sm"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => setDeletingItem(item)}
+                            label={`删除${item.title}`}
+                          >
+                            <Trash2 />
+                          </IconButton>
                         </TableCell>
                       </TableRow>
                     ))
                   )}
                 </TableBody>
-              </Table>
-              <TablePagination
-                page={page}
-                totalPages={totalPages}
-                total={total}
-                pageSize={pageSize}
-                loading={loading}
-                onPageChange={setPage}
-              />
-            </CardContent>
-          </Card>
+                </Table>
+            </PaginatedTable>
         </TabsContent>
 
         {/* Tab 2: Feedback Classes */}
@@ -634,7 +619,7 @@ export function MessagesPage() {
       {/* Dialog: View Feedback Item Detail */}
       <Dialog open={Boolean(viewingItem)} onOpenChange={(open) => { if (!open) setViewingItem(null) }}>
         {viewingItem ? (
-          <DialogContent className="max-w-lg">
+          <DialogContent className="max-w-3xl">
             <DialogHeader>
               <DialogTitle>{viewingItem.title}</DialogTitle>
               <DialogDescription>

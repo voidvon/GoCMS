@@ -320,6 +320,22 @@ func TestAdminThemeCatalogActions(t *testing.T) {
 		t.Fatalf("active roots = %q, %q", assetsRoot, templatesRoot)
 	}
 
+	reactivation := bytes.NewBufferString(`{"id":"second"}`)
+	reactivationResponse := request(http.MethodPost, "/api/admin/theme/activate", reactivation, "application/json")
+	if reactivationResponse.Code != http.StatusOK {
+		t.Fatalf("theme reactivation status = %d: %s", reactivationResponse.Code, reactivationResponse.Body.String())
+	}
+	var reactivated struct {
+		OK             bool `json:"ok"`
+		PublishStarted bool `json:"publish_started"`
+	}
+	if err := json.Unmarshal(reactivationResponse.Body.Bytes(), &reactivated); err != nil {
+		t.Fatal(err)
+	}
+	if !reactivated.OK || reactivated.PublishStarted {
+		t.Fatalf("expected publish_started = false on reactivation, got %+v", reactivated)
+	}
+
 	exportResponse := request(http.MethodGet, "/api/admin/theme/export?id=second", nil, "")
 	if exportResponse.Code != http.StatusOK || exportResponse.Header().Get("Content-Type") != "application/zip" {
 		t.Fatalf("theme export = %d %q", exportResponse.Code, exportResponse.Header().Get("Content-Type"))

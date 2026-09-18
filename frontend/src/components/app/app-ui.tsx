@@ -73,15 +73,23 @@ export function InlineAlert({
 
 export function SearchField({
   className,
+  size = "default",
   ...props
 }: ComponentProps<typeof Input>) {
   return (
     <div className="relative min-w-0 flex-1">
       <Search
-        className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+        className={cn(
+          "pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground",
+          size === "sm" && "left-2 size-3.5"
+        )}
         aria-hidden="true"
       />
-      <Input {...props} className={cn("pl-8", className)} />
+      <Input
+        size={size}
+        {...props}
+        className={cn(size === "sm" ? "pl-[26px]" : "pl-8", className)}
+      />
     </div>
   )
 }
@@ -145,6 +153,7 @@ type ConfirmDialogProps = {
   title: string
   description: ReactNode
   confirmLabel: string
+  confirmVariant?: "default" | "destructive"
   pending?: boolean
   onConfirm: () => void
 }
@@ -155,6 +164,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  confirmVariant = "destructive",
   pending = false,
   onConfirm,
 }: ConfirmDialogProps) {
@@ -174,7 +184,7 @@ export function ConfirmDialog({
             取消
           </Button>
           <Button
-            variant="destructive"
+            variant={confirmVariant}
             onClick={onConfirm}
             disabled={pending}
           >
