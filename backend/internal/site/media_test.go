@@ -37,11 +37,11 @@ func TestAdminMediaUploadAndAccess(t *testing.T) {
 	if !result.OK || result.Asset.Kind != "image" || result.Asset.MimeType != "image/png" || result.Asset.Width != 3 || result.Asset.Height != 2 {
 		t.Fatalf("unexpected media response: %+v", result)
 	}
-	if !strings.HasPrefix(result.Asset.URL, "/images/uploads/") || !strings.HasSuffix(result.Asset.URL, ".png") {
+	if !strings.HasPrefix(result.Asset.URL, "/assets/1/uploads/") || !strings.HasSuffix(result.Asset.URL, ".png") {
 		t.Fatalf("unexpected media URL: %q", result.Asset.URL)
 	}
 
-	diskPath := filepath.Join(server.assetsRoot, filepath.FromSlash(strings.TrimPrefix(result.Asset.URL, "/")))
+	diskPath := filepath.Join(server.assetsRoot, filepath.FromSlash(strings.TrimPrefix(result.Asset.URL, "/assets/")))
 	stored, err := os.ReadFile(diskPath)
 	if err != nil {
 		t.Fatalf("read stored image: %v", err)
@@ -297,8 +297,123 @@ func TestAdminMediaManagementSearchAndEmptyReferences(t *testing.T) {
 	if response := mediaItemRequest(t, server, token, http.MethodGet, second.ID); response.Code != http.StatusNotFound {
 		t.Fatalf("deleted detail returned %d", response.Code)
 	}
-	diskPath := filepath.Join(server.assetsRoot, filepath.FromSlash(strings.TrimPrefix(second.URL, "/")))
+	diskPath := filepath.Join(server.assetsRoot, filepath.FromSlash(strings.TrimPrefix(second.URL, "/assets/")))
 	if _, err := os.Stat(diskPath); !os.IsNotExist(err) {
 		t.Fatalf("deleted file still exists: %v", err)
 	}
+}
+
+func TestMultiSiteMediaAndThemeIsolation(t *testing.T) {
+	server, database, token := newCategoryTestServer(t)
+	server.assetsRoot = t.TempDir()
+	content := testPNG(t)
+
+	// Create Site 2 in DB
+	if _, err := database.Exec(`INSERT INTO "gocms_site" ("id", "name", "code") VALUES (2, '分站二', 'site2')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Upload media to Site 1
+	req1 := httptest.NewRequest(http.MethodPost, "/api/admin/media?site_id=1", bytes.NewReader(multipartUpload(t, "s1.png", content)))
+	req1.Header.Set("Content-Type", "multipart/form-data; boundary=testboundary")
+	req1.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
+	resp1 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp1, req1)
+	if resp1.Code != http.StatusCreated {
+		t.Fatalf("site 1 upload failed: %d %s", resp1.Code, resp1.Body.String())
+	}
+	var res1 struct {
+		Asset MediaAsset `json:"asset"`
+	}
+	_ = json.Unmarshal(resp1.Body.Bytes(), &res1)
+	if !strings.HasPrefix(res1.Asset.URL, "/assets/1/uploads/") {
+		t.Fatalf("site 1 asset URL does not have /assets/1/uploads/ prefix: %s", res1.Asset.URL)
+	}
+
+	// 2. Upload media to Site 2
+	req2 := httptest.NewRequest(http.MethodPost, "/api/admin/media", bytes.NewReader(multipartUpload(t, "s2.png", content)))
+	req2.Header.Set("Content-Type", "multipart/form-data; boundary=testboundary")
+	req2.Header.Set("X-Site-Id", "2")
+	req2.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
+	resp2 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp2, req2)
+	if resp2.Code != http.StatusCreated {
+		t.Fatalf("site 2 upload failed: %d %s", resp2.Code, resp2.Body.String())
+	}
+	var res2 struct {
+		Asset MediaAsset `json:"asset"`
+	}
+	_ = json.Unmarshal(resp2.Body.Bytes(), &res2)
+	if !strings.HasPrefix(res2.Asset.URL, "/assets/2/uploads/") {
+		t.Fatalf("site 2 asset URL does not have /assets/2/uploads/ prefix: %s", res2.Asset.URL)
+	}
+
+	// 3. Verify disk paths are properly separated under assets/{site_id}/uploads/
+	diskPath1 := filepath.Join(server.assetsRoot, filepath.FromSlash(strings.TrimPrefix(res1.Asset.URL, "/assets/")))
+	diskPath2 := filepath.Join(server.assetsRoot, filepath.FromSlash(strings.TrimPrefix(res2.Asset.URL, "/assets/")))
+	if _, err := os.Stat(diskPath1); err != nil {
+		t.Fatalf("site 1 file not found at %s: %v", diskPath1, err)
+	}
+	if _, err := os.Stat(diskPath2); err != nil {
+		t.Fatalf("site 2 file not found at %s: %v", diskPath2, err)
+	}
+	if filepath.Dir(filepath.Dir(filepath.Dir(diskPath1))) == filepath.Dir(filepath.Dir(filepath.Dir(diskPath2))) {
+		t.Fatalf("site 1 and site 2 shared the same site root: %s vs %s", diskPath1, diskPath2)
+	}
+
+	// 4. Verify public HTTP serving of both files
+	pub1 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(pub1, httptest.NewRequest(http.MethodGet, res1.Asset.URL, nil))
+	if pub1.Code != http.StatusOK || pub1.Body.Len() != len(content) {
+		t.Fatalf("public access site 1 returned %d", pub1.Code)
+	}
+
+	pub2 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(pub2, httptest.NewRequest(http.MethodGet, res2.Asset.URL, nil))
+	if pub2.Code != http.StatusOK || pub2.Body.Len() != len(content) {
+		t.Fatalf("public access site 2 returned %d", pub2.Code)
+	}
+
+	// 5. Verify security: direct access to themes directory under assets is blocked
+	themeBlockResp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(themeBlockResp, httptest.NewRequest(http.MethodGet, "/assets/1/themes/blue/templates/index.html", nil))
+	if themeBlockResp.Code != http.StatusNotFound {
+		t.Fatalf("direct themes access should be 404, got %d", themeBlockResp.Code)
+	}
+
+	// 6. Verify list isolation
+	listReq1 := httptest.NewRequest(http.MethodGet, "/api/admin/media?site_id=1", nil)
+	listReq1.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
+	listResp1 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(listResp1, listReq1)
+	var page1 MediaPage
+	_ = json.Unmarshal(listResp1.Body.Bytes(), &page1)
+	if page1.Total != 1 || page1.Items[0].ID != res1.Asset.ID {
+		t.Fatalf("unexpected site 1 media list: %+v", page1)
+	}
+
+	listReq2 := httptest.NewRequest(http.MethodGet, "/api/admin/media?site_id=2", nil)
+	listReq2.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
+	listResp2 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(listResp2, listReq2)
+	var page2 MediaPage
+	_ = json.Unmarshal(listResp2.Body.Bytes(), &page2)
+	if page2.Total != 1 || page2.Items[0].ID != res2.Asset.ID {
+		t.Fatalf("unexpected site 2 media list: %+v", page2)
+	}
+}
+
+func multipartUpload(t *testing.T, filename string, content []byte) []byte {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.SetBoundary("testboundary")
+	part, err := w.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	return buf.Bytes()
 }

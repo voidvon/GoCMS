@@ -1,5 +1,7 @@
 export type AdminUser = {
   category_ids: number[] | null
+  site_ids?: number[] | null
+  site_permissions?: Record<number, string[]>
   id: number
   username: string
   flags: string
@@ -7,6 +9,36 @@ export type AdminUser = {
   group_id: number
   permissions: string[]
 }
+
+export type Site = {
+  id: number
+  name: string
+  code: string
+  domain: string
+  aliases: string[]
+  theme_id: string
+  output_dir: string
+  is_default: boolean
+  status: "active" | "disabled"
+  created_at: string
+  updated_at: string
+}
+
+export const getSites = () => request<Site[]>("/api/admin/sites")
+export const getSite = (id: number) => request<Site>(`/api/admin/sites/${id}`)
+export const saveSite = (input: Partial<Site> & { id?: number }) =>
+  request<Site>(input.id ? `/api/admin/sites/${input.id}` : "/api/admin/sites", {
+    method: input.id ? "PUT" : "POST",
+    body: JSON.stringify(input),
+  })
+export const deleteSite = (id: number) => request(`/api/admin/sites/${id}`, { method: "DELETE" })
+export const getSiteSettings = (siteId?: number) =>
+  request<Record<string, string>>(`/api/admin/site-settings${siteId ? `?site_id=${siteId}` : ""}`)
+export const saveSiteSettings = (settings: Record<string, string>, siteId?: number) =>
+  request(`/api/admin/site-settings${siteId ? `?site_id=${siteId}` : ""}`, {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  })
 
 export type OperationLog = { id: number; username: string; method: string; path: string; status: number; ip: string; created_at: string }
 export const getOperationLogs = (page: number, username: string) => request<{ items: OperationLog[]; total: number; page_size: number }>(`/api/admin/logs?page=${page}&username=${encodeURIComponent(username)}`)
@@ -16,6 +48,7 @@ export const clearLogs = (before: string) => request<{ ok: boolean }>("/api/admi
 
 export type AdminAccount = {
   category_ids?: number[] | null
+  site_ids?: number[] | null
   id: number
   username: string
   group_id: number
@@ -23,7 +56,13 @@ export type AdminAccount = {
   disabled: boolean
   password?: string
 }
-export type AdminGroup = { id: number; name: string; permissions: string[] }
+export type AdminGroup = {
+  id: number
+  name: string
+  permissions: string[]
+  site_ids?: number[] | null
+  site_permissions?: Record<number, string[]>
+}
 export const getAdminAccounts = () => request<AdminAccount[]>("/api/admin/users")
 export const getAdminGroups = () => request<{ items: AdminGroup[]; permissions: { key: string; label: string }[] }>("/api/admin/groups")
 export const saveAdminAccount = (input: AdminAccount) => request("/api/admin/users", { method: input.id ? "PUT" : "POST", body: JSON.stringify(input) })
@@ -388,8 +427,31 @@ function endpoint(path: string) {
   return `${apiBase}${path}`
 }
 
+let currentActiveSiteId: number = 1
+
+export function setActiveSiteId(id: number) {
+  currentActiveSiteId = id
+  try {
+    localStorage.setItem("gocms_active_site_id", String(id))
+  } catch {}
+}
+
+export function getActiveSiteId(): number {
+  try {
+    const saved = localStorage.getItem("gocms_active_site_id")
+    if (saved) {
+      const parsed = parseInt(saved, 10)
+      if (parsed > 0) return parsed
+    }
+  } catch {}
+  return currentActiveSiteId || 1
+}
+
 async function request<T>(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
+  if (!headers.has("X-Site-Id")) {
+    headers.set("X-Site-Id", String(getActiveSiteId()))
+  }
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json")
   }

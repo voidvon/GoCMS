@@ -17,6 +17,7 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 		name string
 		fn   func(context.Context, *sql.DB) error
 	}{
+		{name: "sites", fn: EnsureSites},
 		{name: "site settings", fn: EnsureSiteSettings},
 		{name: "languages", fn: EnsureLanguages},
 		{name: "admin users", fn: EnsureAdminUsers},

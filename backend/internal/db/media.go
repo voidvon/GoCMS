@@ -42,6 +42,7 @@ func EnsureMedia(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("create media reference table: %w", err)
 	}
 	for _, statement := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_gocms_media_site ON "gocms_media" ("site_id", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_media_kind_status ON "gocms_media" ("kind", "status", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_media_created ON "gocms_media" ("created_at", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_media_ref_content ON "gocms_media_ref" ("content_id", "field_name")`,
@@ -50,6 +51,9 @@ func EnsureMedia(ctx context.Context, database *sql.DB) error {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create media index: %w", err)
 		}
+	}
+	if err := ensureTableColumn(ctx, database, mediaTable, "site_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
 	}
 	return nil
 }

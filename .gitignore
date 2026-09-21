@@ -16,6 +16,10 @@
 /web/
 
 # Business-managed content images stay outside Git.
+/assets/*/images/*
+!/assets/*/images/.gitkeep
+/assets/*/uploads/*
+!/assets/*/uploads/.gitkeep
 /assets/images/*
 !/assets/images/.gitkeep
 

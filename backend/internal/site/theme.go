@@ -19,10 +19,12 @@ import (
 	pathpkg "path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"gocms/internal/db"
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
 	"gocms/internal/templatelabel"
@@ -113,6 +115,59 @@ func (s *Server) setActiveTheme(definition themepkg.Definition) {
 	s.themeMu.Unlock()
 }
 
+func (s *Server) siteThemeBase(siteID int64) string {
+	if siteID <= 0 {
+		siteID = 1
+	}
+	if s.assetsRoot != "" {
+		return filepath.Join(s.assetsRoot, strconv.FormatInt(siteID, 10), "themes")
+	}
+	return s.themeBase
+}
+
+func (s *Server) siteThemePaths(ctx context.Context, siteID int64) (themeRoot, templateRoot, themeName, themeID string, err error) {
+	if siteID <= 0 {
+		siteID = 1
+	}
+	targetThemeID := ""
+	if s.database != nil {
+		if targetSite, err := db.GetSiteByID(ctx, s.database, siteID); err == nil && targetSite != nil {
+			targetThemeID = targetSite.ThemeID
+		}
+	}
+	if targetThemeID == "" && siteID == 1 {
+		s.themeMu.RLock()
+		targetThemeID = s.activeTheme.Manifest.ID
+		s.themeMu.RUnlock()
+	}
+	if targetThemeID == "" {
+		targetThemeID = "blue"
+	}
+
+	bases := []string{s.siteThemeBase(siteID)}
+	if siteID != 1 {
+		bases = append(bases, s.siteThemeBase(1))
+	}
+	if s.themeBase != "" {
+		bases = append(bases, s.themeBase)
+	}
+
+	for _, base := range bases {
+		if base != "" {
+			if def, findErr := themepkg.Find(base, targetThemeID); findErr == nil && def.Root != "" {
+				return def.AssetsRoot, def.TemplatesRoot, def.Manifest.Name, def.Manifest.ID, nil
+			}
+		}
+	}
+
+	tRoot, tplRoot := s.themePaths()
+	name := "当前主题"
+	if tRoot != "" {
+		name = filepath.Base(filepath.Clean(tRoot))
+	}
+	return tRoot, tplRoot, name, targetThemeID, nil
+}
+
 func (s *Server) adminTheme(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
 		methodNotAllowed(response)
@@ -122,10 +177,20 @@ func (s *Server) adminTheme(response http.ResponseWriter, request *http.Request)
 		return
 	}
 
+	user := s.currentAdmin(request)
+	siteID, _ := s.resolveSiteID(request, user)
+	if siteID <= 0 {
+		siteID = 1
+	}
+	themeRoot, templateRoot, name, activeThemeID, _ := s.siteThemePaths(request.Context(), siteID)
+	if themeRoot == "" || templateRoot == "" {
+		themeRoot, templateRoot = s.themePaths()
+	}
+
 	kind := strings.ToLower(strings.TrimSpace(request.URL.Query().Get("kind")))
 	relativePath := strings.TrimSpace(request.URL.Query().Get("path"))
 	if relativePath != "" {
-		root, extensions, ok := s.themeFileSpec(kind)
+		root, extensions, ok := s.themeFileSpecForRoots(kind, themeRoot, templateRoot)
 		if !ok {
 			http.Error(response, "invalid template file kind", http.StatusBadRequest)
 			return
@@ -145,7 +210,6 @@ func (s *Server) adminTheme(response http.ResponseWriter, request *http.Request)
 		return
 	}
 
-	themeRoot, templateRoot := s.themePaths()
 	cssFiles, err := listThemeFiles(themeRoot, ".css")
 	if err != nil {
 		http.Error(response, "读取主题 CSS 失败", http.StatusInternalServerError)
@@ -167,13 +231,28 @@ func (s *Server) adminTheme(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	templateGroups := s.themeTemplateGroups(templateFiles)
-	base, _, active := s.themeState()
-	themes, err := themepkg.List(base, active.Manifest.ID)
-	if err != nil {
-		http.Error(response, "读取主题列表失败", http.StatusInternalServerError)
-		return
+
+	siteBase := s.siteThemeBase(siteID)
+	themes, _ := themepkg.List(siteBase, activeThemeID)
+	if siteID != 1 {
+		defaultBase := s.siteThemeBase(1)
+		if defaultBase != siteBase {
+			if defaultThemes, err := themepkg.List(defaultBase, activeThemeID); err == nil {
+				seen := make(map[string]bool)
+				for _, t := range themes {
+					seen[t.ID] = true
+				}
+				for _, t := range defaultThemes {
+					if !seen[t.ID] {
+						themes = append(themes, t)
+					}
+				}
+			}
+		}
+	} else if len(themes) == 0 && s.themeBase != "" {
+		themes, _ = themepkg.List(s.themeBase, activeThemeID)
 	}
-	name := active.Manifest.Name
+
 	if name == "" {
 		name = filepath.Base(filepath.Clean(themeRoot))
 	}
@@ -182,7 +261,7 @@ func (s *Server) adminTheme(response http.ResponseWriter, request *http.Request)
 	}
 	writeJSON(response, http.StatusOK, ThemeFilesResponse{
 		Name:                 name,
-		ActiveTheme:          active.Manifest.ID,
+		ActiveTheme:          activeThemeID,
 		Themes:               themes,
 		TemplateGroupCatalog: themes,
 		CSSFiles:             cssFiles,
@@ -210,71 +289,105 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 		return
 	}
 	id := strings.TrimSpace(payload.ID)
-	base, dataRoot, currentActive := s.themeState()
-	if base == "" {
-		http.Error(response, "主题目录未配置", http.StatusServiceUnavailable)
-		return
-	}
-	definition, err := themepkg.Find(base, id)
-	if err != nil {
-		http.Error(response, err.Error(), http.StatusBadRequest)
-		return
-	}
-	if currentActive.Manifest.ID != "" && currentActive.Manifest.ID == definition.Manifest.ID {
-		writeJSON(response, http.StatusOK, map[string]any{
-			"ok":              true,
-			"theme":           definition.Info(true),
-			"publish_started": false,
-		})
-		return
-	}
-	var report any
-	started := false
-	if s.publication != nil {
-		if err := s.validateThemeTemplates(definition); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
-		s.publication.mu.Lock()
-		if s.publication.report.State == "running" {
-			s.publication.mu.Unlock()
-			http.Error(response, "网站正在发布，请稍后切换主题", http.StatusConflict)
-			return
-		}
-		if err := themepkg.SaveActive(dataRoot, definition.Manifest.ID); err != nil {
-			s.publication.mu.Unlock()
-			http.Error(response, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		s.setActiveTheme(definition)
-		s.publication.publisher.Templates = definition.TemplatesRoot
-		s.publication.publisher.Theme = definition.AssetsRoot
-		s.publication.publisher.HomeTemplate = definition.HomeTemplate()
-		publicationReport, publishStarted := s.startPublishLocked(s.publication, false)
-		report = publicationReport
-		started = publishStarted
-		s.publication.mu.Unlock()
-	} else {
-		if err := themepkg.SaveActive(dataRoot, definition.Manifest.ID); err != nil {
-			http.Error(response, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		s.setActiveTheme(definition)
+	user := s.currentAdmin(request)
+	siteID, _ := s.resolveSiteID(request, user)
+	if siteID <= 0 {
+		siteID = 1
 	}
 
-	result := map[string]any{
+	bases := []string{s.siteThemeBase(siteID)}
+	if siteID != 1 {
+		bases = append(bases, s.siteThemeBase(1))
+	}
+	if s.themeBase != "" {
+		bases = append(bases, s.themeBase)
+	}
+
+	var definition themepkg.Definition
+	var err error
+	for _, base := range bases {
+		if base != "" {
+			definition, err = themepkg.Find(base, id)
+			if err == nil && definition.Root != "" {
+				break
+			}
+		}
+	}
+	if definition.Root == "" {
+		http.Error(response, "主题未找到: "+id, http.StatusBadRequest)
+		return
+	}
+
+	_, dataRoot, currentActive := s.themeState()
+	if s.database != nil {
+		_, _ = s.database.ExecContext(request.Context(), `UPDATE "gocms_site" SET "theme_id" = ?, "updated_at" = CURRENT_TIMESTAMP WHERE "id" = ?`, definition.Manifest.ID, siteID)
+	}
+
+	if siteID == 1 {
+		if currentActive.Manifest.ID != "" && currentActive.Manifest.ID == definition.Manifest.ID {
+			writeJSON(response, http.StatusOK, map[string]any{
+				"ok":              true,
+				"theme":           definition.Info(true),
+				"publish_started": false,
+			})
+			return
+		}
+		if s.publication != nil {
+			if err := s.validateThemeTemplates(definition); err != nil {
+				http.Error(response, err.Error(), http.StatusBadRequest)
+				return
+			}
+			s.publication.mu.Lock()
+			if s.publication.report.State == "running" {
+				s.publication.mu.Unlock()
+				http.Error(response, "网站正在发布，请稍后切换主题", http.StatusConflict)
+				return
+			}
+			if err := themepkg.SaveActive(dataRoot, definition.Manifest.ID); err != nil {
+				s.publication.mu.Unlock()
+				http.Error(response, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			s.setActiveTheme(definition)
+			s.publication.publisher.Templates = definition.TemplatesRoot
+			s.publication.publisher.Theme = definition.AssetsRoot
+			s.publication.publisher.HomeTemplate = definition.HomeTemplate()
+			publicationReport, publishStarted := s.startPublishLocked(s.publication, false)
+			s.publication.mu.Unlock()
+			writeJSON(response, http.StatusOK, map[string]any{
+				"ok":              true,
+				"theme":           definition.Info(true),
+				"report":          publicationReport,
+				"publish_started": publishStarted,
+			})
+			return
+		} else {
+			_ = themepkg.SaveActive(dataRoot, definition.Manifest.ID)
+			s.setActiveTheme(definition)
+		}
+	} else {
+		pub := s.publicationForSite(request.Context(), siteID)
+		if pub != nil {
+			pub.mu.Lock()
+			pub.publisher.Templates = definition.TemplatesRoot
+			pub.publisher.Theme = definition.AssetsRoot
+			pub.publisher.HomeTemplate = definition.HomeTemplate()
+			publicationReport, publishStarted := s.startPublishLocked(pub, false)
+			pub.mu.Unlock()
+			writeJSON(response, http.StatusOK, map[string]any{
+				"ok":              true,
+				"theme":           definition.Info(true),
+				"report":          publicationReport,
+				"publish_started": publishStarted,
+			})
+			return
+		}
+	}
+	writeJSON(response, http.StatusOK, map[string]any{
 		"ok":              true,
 		"theme":           definition.Info(true),
-		"publish_started": started,
-	}
-	if report != nil {
-		result["publication"] = report
-	}
-	status := http.StatusOK
-	if started {
-		status = http.StatusAccepted
-	}
-	writeJSON(response, status, result)
+		"publish_started": false,
+	})
 }
 
 func (s *Server) validateThemeTemplates(definition themepkg.Definition) error {
@@ -341,9 +454,21 @@ func (s *Server) adminThemeImport(response http.ResponseWriter, request *http.Re
 	if !s.requireAdmin(response, request) {
 		return
 	}
-	base, _, _ := s.themeState()
+	user := s.currentAdmin(request)
+	siteID, _ := s.resolveSiteID(request, user)
+	if siteID <= 0 {
+		siteID = 1
+	}
+	base := s.siteThemeBase(siteID)
+	if base == "" {
+		base, _, _ = s.themeState()
+	}
 	if base == "" {
 		http.Error(response, "主题目录未配置", http.StatusServiceUnavailable)
+		return
+	}
+	if err := os.MkdirAll(base, 0755); err != nil {
+		http.Error(response, "创建主题目录失败", http.StatusInternalServerError)
 		return
 	}
 	request.Body = http.MaxBytesReader(response, request.Body, int64(themepkg.MaxImportArchiveSize)+1)
@@ -376,23 +501,65 @@ func (s *Server) adminThemeExport(response http.ResponseWriter, request *http.Re
 	if !s.requireAdmin(response, request) {
 		return
 	}
-	base, _, active := s.themeState()
+	user := s.currentAdmin(request)
+	siteID, _ := s.resolveSiteID(request, user)
+	if siteID <= 0 {
+		siteID = 1
+	}
+	bases := []string{s.siteThemeBase(siteID)}
+	if siteID != 1 {
+		bases = append(bases, s.siteThemeBase(1))
+	}
+	if s.themeBase != "" {
+		bases = append(bases, s.themeBase)
+	}
+
 	id := strings.TrimSpace(request.URL.Query().Get("id"))
-	definition := active
+	var definition themepkg.Definition
 	if id != "" {
-		var err error
-		definition, err = themepkg.Find(base, id)
-		if err != nil {
-			http.Error(response, err.Error(), http.StatusNotFound)
-			return
+		for _, b := range bases {
+			if b != "" {
+				if d, err := themepkg.Find(b, id); err == nil && d.Root != "" {
+					definition = d
+					break
+				}
+			}
 		}
+	} else {
+		themeRoot, templateRoot, _, activeID, _ := s.siteThemePaths(request.Context(), siteID)
+		if activeID != "" {
+			for _, b := range bases {
+				if b != "" {
+					if d, err := themepkg.Find(b, activeID); err == nil && d.Root != "" {
+						definition = d
+						break
+					}
+				}
+			}
+		}
+		if definition.Root == "" && themeRoot != "" {
+			definition.AssetsRoot = themeRoot
+			definition.TemplatesRoot = templateRoot
+			definition.Root = filepath.Dir(themeRoot)
+		}
+	}
+	if definition.Root == "" {
+		_, _, active := s.themeState()
+		definition = active
 	}
 	if definition.Root == "" {
 		http.Error(response, "主题未配置", http.StatusServiceUnavailable)
 		return
 	}
 	response.Header().Set("Content-Type", "application/zip")
-	response.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=theme-%s.zip", definition.Manifest.ID))
+	name := definition.Manifest.ID
+	if name == "" {
+		name = filepath.Base(filepath.Clean(definition.Root))
+	}
+	if name == "." || name == string(filepath.Separator) {
+		name = "theme"
+	}
+	response.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=theme-%s.zip", name))
 	if err := themepkg.WriteArchive(response, definition); err != nil {
 		return
 	}
@@ -423,7 +590,11 @@ func (s *Server) uploadThemeFile(response http.ResponseWriter, request *http.Req
 		http.Error(response, "multipart upload is required", http.StatusBadRequest)
 		return
 	}
-	root, _, ok := s.themeFileSpec("css")
+	user := s.currentAdmin(request)
+	siteID, _ := s.resolveSiteID(request, user)
+	themeRoot, templateRoot, _, _, _ := s.siteThemePaths(request.Context(), siteID)
+
+	root, _, ok := s.themeFileSpecForRoots("css", themeRoot, templateRoot)
 	if !ok || root == "" {
 		http.Error(response, "模板组资源目录未配置", http.StatusServiceUnavailable)
 		return
@@ -478,7 +649,7 @@ func (s *Server) uploadThemeFile(response http.ResponseWriter, request *http.Req
 		relativePath = filename
 	}
 
-	item, err := s.saveCustomThemeFile(kind, relativePath, data)
+	item, err := s.saveCustomThemeFileForRoots(kind, relativePath, data, themeRoot, templateRoot)
 	if err != nil {
 		writeThemeFileError(response, err)
 		return
@@ -510,7 +681,12 @@ func (s *Server) updateThemeFile(response http.ResponseWriter, request *http.Req
 		http.Error(response, "模板文件不能超过 8 MB", http.StatusRequestEntityTooLarge)
 		return
 	}
-	item, err := s.saveCustomThemeFile(kind, payload.Path, []byte(payload.Content))
+
+	user := s.currentAdmin(request)
+	siteID, _ := s.resolveSiteID(request, user)
+	themeRoot, templateRoot, _, _, _ := s.siteThemePaths(request.Context(), siteID)
+
+	item, err := s.saveCustomThemeFileForRoots(kind, payload.Path, []byte(payload.Content), themeRoot, templateRoot)
 	if err != nil {
 		writeThemeFileError(response, err)
 		return
@@ -524,7 +700,12 @@ func (s *Server) deleteThemeFile(response http.ResponseWriter, request *http.Req
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
-	root, _, ok := s.themeFileSpec(kind)
+
+	user := s.currentAdmin(request)
+	siteID, _ := s.resolveSiteID(request, user)
+	themeRoot, templateRoot, _, _, _ := s.siteThemePaths(request.Context(), siteID)
+
+	root, _, ok := s.themeFileSpecForRoots(kind, themeRoot, templateRoot)
 	if !ok || root == "" {
 		http.Error(response, "模板组资源目录未配置", http.StatusServiceUnavailable)
 		return
@@ -638,7 +819,12 @@ func normalizeCustomFilePath(kind, value string) (string, error) {
 }
 
 func (s *Server) saveCustomThemeFile(kind, relativePath string, data []byte) (ThemeFile, error) {
-	root, _, ok := s.themeFileSpec(kind)
+	themeRoot, templateRoot := s.themePaths()
+	return s.saveCustomThemeFileForRoots(kind, relativePath, data, themeRoot, templateRoot)
+}
+
+func (s *Server) saveCustomThemeFileForRoots(kind, relativePath string, data []byte, themeRoot, templateRoot string) (ThemeFile, error) {
+	root, _, ok := s.themeFileSpecForRoots(kind, themeRoot, templateRoot)
 	if !ok || root == "" {
 		return ThemeFile{}, fmt.Errorf("模板组资源目录未配置")
 	}
@@ -944,8 +1130,10 @@ func (s *Server) adminThemeAssignment(response http.ResponseWriter, request *htt
 	writeJSON(response, http.StatusOK, map[string]any{"ok": true, "key": key, "template_path": templatePath})
 }
 
-func (s *Server) themeFileSpec(kind string) (root string, extensions []string, ok bool) {
-	themeRoot, templateRoot := s.themePaths()
+func (s *Server) themeFileSpecForRoots(kind, themeRoot, templateRoot string) (root string, extensions []string, ok bool) {
+	if themeRoot == "" || templateRoot == "" {
+		themeRoot, templateRoot = s.themePaths()
+	}
 	switch kind {
 	case "css":
 		return themeRoot, []string{".css"}, themeRoot != ""
@@ -958,6 +1146,11 @@ func (s *Server) themeFileSpec(kind string) (root string, extensions []string, o
 	default:
 		return "", nil, false
 	}
+}
+
+func (s *Server) themeFileSpec(kind string) (root string, extensions []string, ok bool) {
+	themeRoot, templateRoot := s.themePaths()
+	return s.themeFileSpecForRoots(kind, themeRoot, templateRoot)
 }
 
 func (s *Server) themeFileRoot(kind string) (root, extension string, ok bool) {

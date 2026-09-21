@@ -57,6 +57,8 @@ func TestSeparateResources(t *testing.T) {
 		{path: "/assets/theme", status: 404},
 		{path: "/assets/theme/blue/assets/css/site.css", status: 404},
 		{path: "/assets/theme/blue/private.txt", status: 404},
+		{path: "/assets/1/themes/blue/assets/css/site.css", status: 404},
+		{path: "/assets/1/themes/blue/private.txt", status: 404},
 		{path: "/unknown-resource/product.jpg", status: 404},
 		{path: "/images/../secret.txt", status: 404},
 		{path: "/escape.txt", status: 404},

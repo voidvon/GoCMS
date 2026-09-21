@@ -18,12 +18,19 @@ type memberGroup struct {
 }
 
 func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
+	user := s.currentAdmin(r)
+	siteID, err := s.resolveSiteID(r, user)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+
 	if r.Method == http.MethodGet {
 		if r.URL.Query().Get("group_id") != "" {
 			s.listMemberGroupMembers(w, r)
 			return
 		}
-		rows, err := s.database.QueryContext(r.Context(), `SELECT id,name,slug,description,sort_order,status FROM gocms_user_group ORDER BY sort_order,id`)
+		rows, err := s.database.QueryContext(r.Context(), `SELECT id,name,slug,description,sort_order,status FROM gocms_user_group WHERE site_id=? ORDER BY sort_order,id`, siteID)
 		if err != nil {
 			accountError(w, err)
 			return
@@ -116,7 +123,6 @@ func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
 	if in.Status == "disabled" {
 		status = "disabled"
 	}
-	var err error
 	if r.Method == http.MethodPatch {
 		if in.ID <= 0 {
 			http.Error(w, "invalid id", 400)
@@ -124,7 +130,7 @@ func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
 		}
 		_, err = s.database.ExecContext(r.Context(), `UPDATE gocms_user_group SET name=?,slug=?,description=?,sort_order=?,status=? WHERE id=?`, in.Name, in.Slug, in.Description, in.SortOrder, status, in.ID)
 	} else {
-		_, err = s.database.ExecContext(r.Context(), `INSERT INTO gocms_user_group(name,slug,description,sort_order,status) VALUES(?,?,?,?,?)`, in.Name, in.Slug, in.Description, in.SortOrder, status)
+		_, err = s.database.ExecContext(r.Context(), `INSERT INTO gocms_user_group(site_id,name,slug,description,sort_order,status) VALUES(?,?,?,?,?,?)`, siteID, in.Name, in.Slug, in.Description, in.SortOrder, status)
 	}
 	if err != nil {
 		http.Error(w, "group already exists", 409)

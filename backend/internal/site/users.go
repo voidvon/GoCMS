@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"gocms/internal/auth"
@@ -44,21 +45,53 @@ func (u *AdminUser) hasPermission(key string) bool {
 
 func (s *Server) loadAdmin(ctx context.Context, username string) (*AdminUser, error) {
 	user := &AdminUser{Permissions: []string{}}
-	var permissions string
-	var categories string
+	var permissions, categories, groupSites, userSites, groupSitePerms sql.NullString
 	err := s.database.QueryRowContext(ctx, `SELECT u.id, u.username, u.flags, u.is_super,
-		u.group_id, COALESCE(g.permissions, '[]'), u.category_ids FROM gocms_admin_user u
+		u.group_id, COALESCE(g.permissions, '[]'), u.category_ids, g.site_ids, u.site_ids,
+		COALESCE(g.site_permissions, '{}') FROM gocms_admin_user u
 		LEFT JOIN gocms_admin_group g ON g.id = u.group_id
 		WHERE u.username = ? AND u.disabled = 0`, username).
-		Scan(&user.ID, &user.Username, &user.Flags, &user.IsSuper, &user.GroupID, &permissions, &categories)
+		Scan(&user.ID, &user.Username, &user.Flags, &user.IsSuper, &user.GroupID, &permissions, &categories, &groupSites, &userSites, &groupSitePerms)
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal([]byte(permissions), &user.Permissions); err != nil {
-		return nil, err
+	if permissions.Valid && permissions.String != "" {
+		if err := json.Unmarshal([]byte(permissions.String), &user.Permissions); err != nil {
+			return nil, err
+		}
 	}
-	if err := json.Unmarshal([]byte(categories), &user.CategoryIDs); err != nil {
-		return nil, err
+	if categories.Valid && categories.String != "" && categories.String != "null" {
+		_ = json.Unmarshal([]byte(categories.String), &user.CategoryIDs)
+	}
+	if groupSitePerms.Valid && groupSitePerms.String != "" && groupSitePerms.String != "{}" && groupSitePerms.String != "null" {
+		var rawMap map[string][]string
+		if err := json.Unmarshal([]byte(groupSitePerms.String), &rawMap); err == nil && len(rawMap) > 0 {
+			user.SitePermissions = make(map[int64][]string, len(rawMap))
+			var derivedSiteIDs []int64
+			for k, v := range rawMap {
+				if id, err := strconv.ParseInt(k, 10, 64); err == nil {
+					user.SitePermissions[id] = v
+					derivedSiteIDs = append(derivedSiteIDs, id)
+				}
+			}
+			user.SiteIDs = derivedSiteIDs
+		}
+	}
+	if user.SitePermissions == nil {
+		var ids []int64
+		hasGroupSites := groupSites.Valid && groupSites.String != "" && groupSites.String != "null"
+		hasUserSites := userSites.Valid && userSites.String != "" && userSites.String != "null"
+		if hasGroupSites {
+			if err := json.Unmarshal([]byte(groupSites.String), &ids); err == nil {
+				user.SiteIDs = ids
+			}
+		} else if hasUserSites {
+			if err := json.Unmarshal([]byte(userSites.String), &ids); err == nil {
+				user.SiteIDs = ids
+			}
+		} else {
+			user.SiteIDs = nil
+		}
 	}
 	return user, nil
 }
@@ -99,13 +132,20 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 	}
 	*r = *r.WithContext(context.WithValue(r.Context(), contentScopeKey{}, u))
 	// API keys cannot administer accounts or groups even when owned by a super administrator.
-	if module == "users" || module == "groups" || module == "site-users" || module == "member-groups" {
+	if module == "users" || module == "groups" || module == "site-users" || module == "member-groups" || (module == "sites" && r.Method != http.MethodGet) {
 		if u.IsSuper && session {
 			return true
 		}
 	} else if u.IsSuper {
 		return true
 	} else {
+		siteID, _ := s.resolveSiteID(r, u)
+		hasPerm := func(key string) bool {
+			if siteID > 0 {
+				return u.HasPermissionInSite(siteID, key)
+			}
+			return u.hasPermission(key)
+		}
 		if module == "content" {
 			key := "content"
 			switch r.Method {
@@ -116,7 +156,7 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 			case http.MethodDelete:
 				key = "content.delete"
 			}
-			if u.hasPermission("content") && u.hasPermission(key) {
+			if hasPerm("content") && hasPerm(key) {
 				return true
 			}
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此内容操作权限"})
@@ -125,8 +165,8 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 		switch module {
 		case "session", "stats":
 			return true
-		case "languages", "categories", "models", "model-fields", "model-tables":
-			// Editor selectors require read-only model, language and category metadata.
+		case "sites", "languages", "categories", "models", "model-fields", "model-tables":
+			// Editor selectors require read-only site, model, language and category metadata.
 			if r.Method == http.MethodGet {
 				return true
 			}
@@ -139,10 +179,8 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 		case "feedback", "feedback-classes", "feedback-fields":
 			module = "messages"
 		}
-		for _, permission := range u.Permissions {
-			if permission == module {
-				return true
-			}
+		if hasPerm(module) {
+			return true
 		}
 	}
 	writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此操作权限"})
@@ -150,14 +188,16 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 }
 
 type adminGroup struct {
-	ID          int64    `json:"id"`
-	Name        string   `json:"name"`
-	Permissions []string `json:"permissions"`
+	ID              int64              `json:"id"`
+	Name            string             `json:"name"`
+	Permissions     []string           `json:"permissions"`
+	SiteIDs         *[]int64           `json:"site_ids"`
+	SitePermissions map[int64][]string `json:"site_permissions,omitempty"`
 }
 
 func (s *Server) adminGroups(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		rows, err := s.database.QueryContext(r.Context(), `SELECT id, name, permissions FROM gocms_admin_group ORDER BY id`)
+		rows, err := s.database.QueryContext(r.Context(), `SELECT id, name, permissions, site_ids, site_permissions FROM gocms_admin_group ORDER BY id`)
 		if err != nil {
 			accountError(w, err)
 			return
@@ -167,13 +207,36 @@ func (s *Server) adminGroups(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var item adminGroup
 			var raw string
-			if err := rows.Scan(&item.ID, &item.Name, &raw); err != nil {
+			var rawSites, rawSitePerms sql.NullString
+			if err := rows.Scan(&item.ID, &item.Name, &raw, &rawSites, &rawSitePerms); err != nil {
 				accountError(w, err)
 				return
 			}
 			if err := json.Unmarshal([]byte(raw), &item.Permissions); err != nil {
 				accountError(w, err)
 				return
+			}
+			if rawSites.Valid && rawSites.String != "" && rawSites.String != "null" {
+				var sites []int64
+				if err := json.Unmarshal([]byte(rawSites.String), &sites); err == nil {
+					item.SiteIDs = &sites
+				}
+			}
+			if rawSitePerms.Valid && rawSitePerms.String != "" && rawSitePerms.String != "{}" && rawSitePerms.String != "null" {
+				var rawMap map[string][]string
+				if err := json.Unmarshal([]byte(rawSitePerms.String), &rawMap); err == nil && len(rawMap) > 0 {
+					item.SitePermissions = make(map[int64][]string, len(rawMap))
+					var derivedSiteIDs []int64
+					for k, v := range rawMap {
+						if id, err := strconv.ParseInt(k, 10, 64); err == nil {
+							item.SitePermissions[id] = v
+							derivedSiteIDs = append(derivedSiteIDs, id)
+						}
+					}
+					if item.SiteIDs == nil || len(*item.SiteIDs) == 0 {
+						item.SiteIDs = &derivedSiteIDs
+					}
+				}
 			}
 			items = append(items, item)
 		}
@@ -223,6 +286,15 @@ func (s *Server) adminGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	if r.Method != http.MethodDelete && input.SiteIDs != nil {
+		for _, siteID := range *input.SiteIDs {
+			var count int
+			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_site WHERE id = ?`, siteID).Scan(&count); err != nil || count == 0 {
+				accountInputError(w, "包含不存在的站点")
+				return
+			}
+		}
+	}
 	var result sql.Result
 	if r.Method == http.MethodDelete {
 		var count int
@@ -236,6 +308,44 @@ func (s *Server) adminGroups(w http.ResponseWriter, r *http.Request) {
 		}
 		result, err = tx.ExecContext(r.Context(), `DELETE FROM gocms_admin_group WHERE id = ?`, input.ID)
 	} else {
+		var rawSitePerms = "{}"
+		if input.SitePermissions != nil && len(input.SitePermissions) > 0 {
+			rawMap := make(map[string][]string, len(input.SitePermissions))
+			var derivedSiteIDs []int64
+			permSet := make(map[string]bool)
+			for siteID, perms := range input.SitePermissions {
+				var count int
+				if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_site WHERE id = ?`, siteID).Scan(&count); err != nil || count == 0 {
+					accountInputError(w, "包含不存在的站点")
+					return
+				}
+				for _, p := range perms {
+					valid := false
+					for _, ap := range adminPermissions {
+						if ap.Key == p {
+							valid = true
+							break
+						}
+					}
+					if !valid {
+						accountInputError(w, "包含未知权限")
+						return
+					}
+					permSet[p] = true
+				}
+				rawMap[strconv.FormatInt(siteID, 10)] = perms
+				derivedSiteIDs = append(derivedSiteIDs, siteID)
+			}
+			b, _ := json.Marshal(rawMap)
+			rawSitePerms = string(b)
+			input.SiteIDs = &derivedSiteIDs
+			if len(input.Permissions) == 0 {
+				for p := range permSet {
+					input.Permissions = append(input.Permissions, p)
+				}
+			}
+		}
+
 		if input.Permissions == nil {
 			input.Permissions = []string{}
 		}
@@ -249,10 +359,15 @@ func (s *Server) adminGroups(w http.ResponseWriter, r *http.Request) {
 			accountInputError(w, "用户组名称已存在")
 			return
 		}
+		rawSites := "null"
+		if input.SiteIDs != nil {
+			b, _ := json.Marshal(*input.SiteIDs)
+			rawSites = string(b)
+		}
 		if r.Method == http.MethodPost {
-			result, err = tx.ExecContext(r.Context(), `INSERT INTO gocms_admin_group (name, permissions) VALUES (?, ?)`, input.Name, string(raw))
+			result, err = tx.ExecContext(r.Context(), `INSERT INTO gocms_admin_group (name, permissions, site_ids, site_permissions) VALUES (?, ?, ?, ?)`, input.Name, string(raw), rawSites, rawSitePerms)
 		} else {
-			result, err = tx.ExecContext(r.Context(), `UPDATE gocms_admin_group SET name = ?, permissions = ? WHERE id = ?`, input.Name, string(raw), input.ID)
+			result, err = tx.ExecContext(r.Context(), `UPDATE gocms_admin_group SET name = ?, permissions = ?, site_ids = ?, site_permissions = ? WHERE id = ?`, input.Name, string(raw), rawSites, rawSitePerms, input.ID)
 		}
 	}
 	if err != nil {
@@ -271,18 +386,22 @@ func (s *Server) adminGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 type accountInput struct {
-	CategoryIDs []int64 `json:"category_ids"`
-	ID          int64   `json:"id"`
-	Username    string  `json:"username"`
-	Password    string  `json:"password,omitempty"`
-	GroupID     int64   `json:"group_id"`
-	IsSuper     bool    `json:"is_super"`
-	Disabled    bool    `json:"disabled"`
+	CategoryIDs *[]int64 `json:"category_ids"`
+	SiteIDs     *[]int64 `json:"site_ids"`
+	ID          int64    `json:"id"`
+	Username    string   `json:"username"`
+	Password    string   `json:"password,omitempty"`
+	GroupID     int64    `json:"group_id"`
+	IsSuper     bool     `json:"is_super"`
+	Disabled    bool     `json:"disabled"`
 }
 
 func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		rows, err := s.database.QueryContext(r.Context(), `SELECT id, username, group_id, is_super, disabled, category_ids FROM gocms_admin_user ORDER BY id`)
+		rows, err := s.database.QueryContext(r.Context(), `SELECT u.id, u.username, u.group_id, u.is_super, u.disabled, u.category_ids,
+			COALESCE(g.site_ids, u.site_ids) FROM gocms_admin_user u
+			LEFT JOIN gocms_admin_group g ON g.id = u.group_id
+			ORDER BY u.id`)
 		if err != nil {
 			accountError(w, err)
 			return
@@ -291,14 +410,22 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 		items := []accountInput{}
 		for rows.Next() {
 			var item accountInput
-			var raw string
-			if err := rows.Scan(&item.ID, &item.Username, &item.GroupID, &item.IsSuper, &item.Disabled, &raw); err != nil {
+			var raw, rawSites sql.NullString
+			if err := rows.Scan(&item.ID, &item.Username, &item.GroupID, &item.IsSuper, &item.Disabled, &raw, &rawSites); err != nil {
 				accountError(w, err)
 				return
 			}
-			if err := json.Unmarshal([]byte(raw), &item.CategoryIDs); err != nil {
-				accountError(w, err)
-				return
+			if raw.Valid && raw.String != "" && raw.String != "null" {
+				var cats []int64
+				if err := json.Unmarshal([]byte(raw.String), &cats); err == nil {
+					item.CategoryIDs = &cats
+				}
+			}
+			if rawSites.Valid && rawSites.String != "" && rawSites.String != "null" {
+				var sites []int64
+				if err := json.Unmarshal([]byte(rawSites.String), &sites); err == nil {
+					item.SiteIDs = &sites
+				}
 			}
 			items = append(items, item)
 		}
@@ -347,15 +474,30 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 	oldUsername := ""
-	for _, id := range input.CategoryIDs {
-		var count int
-		if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_category WHERE id = ?`, id).Scan(&count); err != nil {
-			accountError(w, err)
-			return
+	if input.CategoryIDs != nil {
+		for _, id := range *input.CategoryIDs {
+			var count int
+			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_category WHERE id = ?`, id).Scan(&count); err != nil {
+				accountError(w, err)
+				return
+			}
+			if count == 0 {
+				accountInputError(w, "包含不存在的栏目")
+				return
+			}
 		}
-		if count == 0 {
-			accountInputError(w, "包含不存在的栏目")
-			return
+	}
+	if input.SiteIDs != nil {
+		for _, id := range *input.SiteIDs {
+			var count int
+			if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_site WHERE id = ?`, id).Scan(&count); err != nil {
+				accountError(w, err)
+				return
+			}
+			if count == 0 {
+				accountInputError(w, "包含不存在的站点")
+				return
+			}
 		}
 	}
 	if r.Method != http.MethodPost {
@@ -418,7 +560,8 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodDelete {
 		raw, _ := json.Marshal(input.CategoryIDs)
-		if _, err := tx.ExecContext(r.Context(), `UPDATE gocms_admin_user SET category_ids = ? WHERE username = ?`, string(raw), input.Username); err != nil {
+		rawSites, _ := json.Marshal(input.SiteIDs)
+		if _, err := tx.ExecContext(r.Context(), `UPDATE gocms_admin_user SET category_ids = ?, site_ids = ? WHERE username = ?`, string(raw), string(rawSites), input.Username); err != nil {
 			accountError(w, err)
 			return
 		}

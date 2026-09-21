@@ -13,9 +13,9 @@ GoCMS 是主题驱动的通用 CMS。当前站点仅是一个使用案例，新�
 ## 项目结构
 
 - `backend/cmd/`：服务、生成、迁移等 Go 命令；`backend/internal/`：业务模块，测试与源码同目录。
-- `backend/templates/`：无主题包时使用的默认 Go 模板；`assets/theme/<id>/`：已安装主题及其资源。
+- `backend/templates/`：无主题包时使用的默认 Go 模板；`assets/<site_id>/themes/<id>/`：已安装主题及其资源。
 - `frontend/src/`：React + TypeScript 管理后台；业务组件放 `components/app/`。
-- `scripts/`：资源同步和 Release 脚本；`data/`、`assets/images/`、`web/` 分别保存运行数据、业务图片和生成页面。
+- `scripts/`：资源同步和 Release 脚本；`data/`、`assets/<site_id>/uploads/`、`assets/images/`、`web/` 分别保存运行数据、站点附件、历史图片和生成页面。
 
 ## 开发与验证命令
 
@@ -39,6 +39,6 @@ Go 测试使用标准 `testing`，文件命名为 `*_test.go`，测试函数为 
 
 ## 资源与配置边界
 
-程序支持单文件可执行文件，用户可编辑的主题、模板及数据保持外置，更新不得覆盖。禁止直接公开 `assets/theme/` 原始目录、模板源码或 `data/`；主题静态资源通过配置的公开资源路由提供。勿提交数据库、业务图片、生成页面或凭据。
+程序支持单文件可执行文件，用户可编辑的主题、模板及数据保持外置，更新不得覆盖。禁止直接公开 `assets/<site_id>/themes/` 原始目录、模板源码或 `data/`；主题静态资源通过配置的公开资源路由提供。勿提交数据库、业务图片、生成页面或凭据。
 
 主题包是 ZIP 文件，根目录必须包含 `theme.json`，并包含 `templates/` 下的 HTML 模板；公开资源放在 `assets/` 下的 `css/`、`js/`、`skin/`、`images/` 等目录。`theme.json` 至少提供唯一的字母数字、点、短横线或下划线组成的 `id`；可选提供 `name`、`version`、`description`、`author`。后台导入会校验归档大小、文件数量、路径和符号链接，导出使用同一格式。切换前会检查数据库中已配置的全局模板、`list_template` 和 `detail_template` 是否存在，主题作者应提供这些配置所引用的模板。活动主题记录在 `data/theme.json`，服务启动和 `make generate` 必须读取同一配置。

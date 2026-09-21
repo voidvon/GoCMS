@@ -65,6 +65,7 @@ func EnsureMessages(ctx context.Context, database *sql.DB) error {
 	}
 
 	for _, statement := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_gocms_message_site ON "gocms_message" ("site_id", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_message_state ON "gocms_message" ("state", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_message_content ON "gocms_message" ("content_id", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_message_class ON "gocms_message" ("class_id", "id")`,
@@ -78,6 +79,7 @@ func EnsureMessages(ctx context.Context, database *sql.DB) error {
 
 	// Seamless migration for existing gocms_message tables
 	for name, definition := range map[string]string{
+		"site_id":    "INTEGER NOT NULL DEFAULT 1",
 		"class_id":   "INTEGER NOT NULL DEFAULT 1",
 		"extra_data": "TEXT NOT NULL DEFAULT '{}'",
 		"ip":         "TEXT NOT NULL DEFAULT ''",
@@ -86,6 +88,7 @@ func EnsureMessages(ctx context.Context, database *sql.DB) error {
 			return err
 		}
 	}
+	_, _ = database.ExecContext(ctx, `UPDATE "`+unifiedMessageTable+`" SET "site_id" = 1 WHERE "site_id" <= 0 OR "site_id" IS NULL`)
 
 	return seedDefaultFeedback(ctx, database)
 }

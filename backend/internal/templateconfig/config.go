@@ -35,6 +35,7 @@ const (
 )
 
 type Assignment struct {
+	SiteID        int64
 	Key           string
 	Label         string
 	Dimension     string
@@ -68,30 +69,89 @@ func Default(key string) (Assignment, bool) {
 }
 
 func Ensure(ctx context.Context, database *sql.DB) error {
-	if _, err := database.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS "`+tableName+`" (
-			"key" TEXT PRIMARY KEY,
-			"template_path" TEXT NOT NULL,
-			"updated_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-		)`); err != nil {
-		return fmt.Errorf("create template assignment table: %w", err)
+	return EnsureForSite(ctx, database, 1)
+}
+
+func EnsureForSite(ctx context.Context, database *sql.DB, siteID int64) error {
+	if siteID <= 0 {
+		siteID = 1
 	}
+
+	var tableCount int
+	_ = database.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, tableName).Scan(&tableCount)
+
+	if tableCount == 0 {
+		if _, err := database.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS "`+tableName+`" (
+				"site_id" INTEGER NOT NULL DEFAULT 1,
+				"key" TEXT NOT NULL,
+				"template_path" TEXT NOT NULL,
+				"updated_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY ("site_id", "key")
+			)`); err != nil {
+			return fmt.Errorf("create template assignment table: %w", err)
+		}
+	} else {
+		var hasSiteID int
+		_ = database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('`+tableName+`') WHERE name = 'site_id'`).Scan(&hasSiteID)
+		if hasSiteID == 0 {
+			tx, err := database.BeginTx(ctx, nil)
+			if err != nil {
+				return err
+			}
+			defer tx.Rollback()
+
+			if _, err := tx.ExecContext(ctx, `
+				CREATE TABLE "gocms_template_assignment_v2" (
+					"site_id" INTEGER NOT NULL DEFAULT 1,
+					"key" TEXT NOT NULL,
+					"template_path" TEXT NOT NULL,
+					"updated_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+					PRIMARY KEY ("site_id", "key")
+				)`); err != nil {
+				return fmt.Errorf("create migration template assignment table: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, `
+				INSERT OR REPLACE INTO "gocms_template_assignment_v2" ("site_id", "key", "template_path", "updated_at")
+				SELECT 1, "key", "template_path", "updated_at" FROM "`+tableName+`"`); err != nil {
+				return fmt.Errorf("migrate existing template assignments: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, `DROP TABLE "`+tableName+`"`); err != nil {
+				return fmt.Errorf("drop legacy template assignment table: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE "gocms_template_assignment_v2" RENAME TO "`+tableName+`"`); err != nil {
+				return fmt.Errorf("rename template assignment table: %w", err)
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+	}
+
 	for _, item := range defaults {
 		if _, err := database.ExecContext(ctx, `
-			INSERT INTO "`+tableName+`" ("key", "template_path") VALUES (?, ?)
-			ON CONFLICT ("key") DO NOTHING`, item.Key, item.TemplatePath); err != nil {
-			return fmt.Errorf("seed template assignment %s: %w", item.Key, err)
+			INSERT INTO "`+tableName+`" ("site_id", "key", "template_path") VALUES (?, ?, ?)
+			ON CONFLICT ("site_id", "key") DO NOTHING`, siteID, item.Key, item.TemplatePath); err != nil {
+			return fmt.Errorf("seed template assignment %s for site %d: %w", item.Key, siteID, err)
 		}
 	}
 	return nil
 }
 
 func List(ctx context.Context, database *sql.DB) ([]Assignment, error) {
-	return load(ctx, database)
+	return ListForSite(ctx, database, 1)
+}
+
+func ListForSite(ctx context.Context, database *sql.DB, siteID int64) ([]Assignment, error) {
+	return load(ctx, database, siteID)
 }
 
 func Load(ctx context.Context, query queryer) (map[string]string, error) {
-	items, err := load(ctx, query)
+	return LoadForSite(ctx, query, 1)
+}
+
+func LoadForSite(ctx context.Context, query queryer, siteID int64) (map[string]string, error) {
+	items, err := load(ctx, query, siteID)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +163,13 @@ func Load(ctx context.Context, query queryer) (map[string]string, error) {
 }
 
 func Update(ctx context.Context, database *sql.DB, key, templatePath string) error {
+	return UpdateForSite(ctx, database, 1, key, templatePath)
+}
+
+func UpdateForSite(ctx context.Context, database *sql.DB, siteID int64, key, templatePath string) error {
+	if siteID <= 0 {
+		siteID = 1
+	}
 	if _, ok := Default(key); !ok {
 		return fmt.Errorf("unknown template assignment: %s", key)
 	}
@@ -111,16 +178,17 @@ func Update(ctx context.Context, database *sql.DB, key, templatePath string) err
 		return err
 	}
 	result, err := database.ExecContext(ctx, `
-		UPDATE "`+tableName+`"
-		SET "template_path" = ?, "updated_at" = CURRENT_TIMESTAMP
-		WHERE "key" = ?`, normalized, key)
+		INSERT INTO "`+tableName+`" ("site_id", "key", "template_path", "updated_at")
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT ("site_id", "key") DO UPDATE SET "template_path" = excluded.template_path, "updated_at" = CURRENT_TIMESTAMP`,
+		siteID, key, normalized)
 	if err != nil {
 		return fmt.Errorf("update template assignment %s: %w", key, err)
 	}
 	if affected, err := result.RowsAffected(); err != nil {
 		return fmt.Errorf("check template assignment %s: %w", key, err)
-	} else if affected != 1 {
-		return fmt.Errorf("template assignment does not exist: %s", key)
+	} else if affected == 0 {
+		return fmt.Errorf("template assignment could not be updated: %s", key)
 	}
 	return nil
 }
@@ -140,12 +208,16 @@ func NormalizePath(value string) (string, error) {
 	return clean, nil
 }
 
-func load(ctx context.Context, query queryer) ([]Assignment, error) {
+func load(ctx context.Context, query queryer, siteID int64) ([]Assignment, error) {
+	if siteID <= 0 {
+		siteID = 1
+	}
 	byKey := make(map[string]Assignment, len(defaults))
 	for _, item := range defaults {
+		item.SiteID = siteID
 		byKey[item.Key] = item
 	}
-	rows, err := query.QueryContext(ctx, `SELECT "key", "template_path" FROM "`+tableName+`"`)
+	rows, err := query.QueryContext(ctx, `SELECT "key", "template_path" FROM "`+tableName+`" WHERE "site_id" = ?`, siteID)
 	if err != nil {
 		return nil, fmt.Errorf("read template assignments: %w", err)
 	}

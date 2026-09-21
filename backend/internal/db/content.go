@@ -16,6 +16,7 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 	if _, err := database.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS "`+unifiedContentTable+`" (
 			"id" INTEGER PRIMARY KEY AUTOINCREMENT,
+			"site_id" INTEGER NOT NULL DEFAULT 1,
 			"category_id" INTEGER NOT NULL DEFAULT 0,
 			"route_key" TEXT NOT NULL DEFAULT '',
 			"title" TEXT NOT NULL DEFAULT '',
@@ -36,6 +37,7 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("create content table: %w", err)
 	}
 	for name, definition := range map[string]string{
+		"site_id":    "INTEGER NOT NULL DEFAULT 1",
 		"model_id":   "INTEGER NOT NULL DEFAULT 1",
 		"extra_data": "TEXT NOT NULL DEFAULT '{}'",
 	} {
@@ -44,6 +46,8 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	for _, statement := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_gocms_content_site ON "gocms_content" ("site_id", "category_id", "sort_order", "id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_content_site_vis ON "gocms_content" ("site_id", "visible", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_content_category ON "gocms_content" ("category_id", "sort_order", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_content_model ON "gocms_content" ("model_id", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_content_visible ON "gocms_content" ("visible", "id")`,
@@ -53,6 +57,10 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 			return fmt.Errorf("create content index: %w", err)
 		}
 	}
+	_, _ = database.ExecContext(ctx, `
+		UPDATE "gocms_content"
+		SET "site_id" = 1
+		WHERE "site_id" <= 0 OR "site_id" IS NULL`)
 
 	if _, err := database.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS "`+ContentTranslationTable+`" (

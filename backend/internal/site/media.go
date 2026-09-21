@@ -130,8 +130,15 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 	}
 	defer file.Close()
 
+	user := s.currentAdmin(request)
+	siteID, _ := s.resolveSiteID(request, user)
+	if siteID <= 0 {
+		siteID = 1
+	}
+	siteIDStr := strconv.FormatInt(siteID, 10)
+
 	monthPath := time.Now().UTC().Format("2006/01")
-	uploadDirectory := filepath.Join(s.assetsRoot, "images", "uploads", filepath.FromSlash(monthPath))
+	uploadDirectory := filepath.Join(s.assetsRoot, siteIDStr, "uploads", filepath.FromSlash(monthPath))
 	if err := os.MkdirAll(uploadDirectory, 0o755); err != nil {
 		http.Error(response, "创建图片目录失败", http.StatusInternalServerError)
 		return
@@ -191,7 +198,7 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 		return
 	}
 	filename := hex.EncodeToString(randomName) + extension
-	storagePath := path.Join("images", "uploads", monthPath, filename)
+	storagePath := path.Join(siteIDStr, "uploads", monthPath, filename)
 	finalPath := filepath.Join(s.assetsRoot, filepath.FromSlash(storagePath))
 	if err := temporary.Close(); err != nil {
 		http.Error(response, "保存图片失败", http.StatusInternalServerError)
@@ -220,11 +227,12 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 	}
 	uploadedBy, _ := s.adminUsername(request)
 	createdAt := time.Now().UTC().Format(time.RFC3339)
+	publicPath := "/assets/" + storagePath
 	result, err := s.database.ExecContext(request.Context(), `
 		INSERT INTO "gocms_media"
-		("kind", "storage_path", "public_path", "original_name", "mime_type", "size_bytes", "width", "height", "sha256", "status", "uploaded_by", "created_at")
-		VALUES ('image', ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-		storagePath, "/"+storagePath, originalName, mimeType, written, config.Width, config.Height,
+		("site_id", "kind", "storage_path", "public_path", "original_name", "mime_type", "size_bytes", "width", "height", "sha256", "status", "uploaded_by", "created_at")
+		VALUES (?, 'image', ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+		siteID, storagePath, publicPath, originalName, mimeType, written, config.Width, config.Height,
 		hex.EncodeToString(hasher.Sum(nil)), uploadedBy, createdAt)
 	if err != nil {
 		http.Error(response, "保存图片记录失败", http.StatusInternalServerError)
@@ -239,7 +247,7 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 	writeJSON(response, http.StatusCreated, map[string]any{
 		"ok": true,
 		"asset": MediaAsset{
-			ID: id, Kind: "image", URL: "/" + storagePath, OriginalName: originalName,
+			ID: id, Kind: "image", URL: publicPath, OriginalName: originalName,
 			MimeType: mimeType, SizeBytes: written, Width: config.Width, Height: config.Height,
 			SHA256: hex.EncodeToString(hasher.Sum(nil)), Status: "active", UploadedBy: uploadedBy, CreatedAt: createdAt,
 		},
@@ -273,10 +281,15 @@ func (s *Server) listMedia(response http.ResponseWriter, request *http.Request) 
 	if pageSize > 100 {
 		pageSize = 100
 	}
+	user := s.currentAdmin(request)
+	siteID, _ := s.resolveSiteID(request, user)
+	if siteID <= 0 {
+		siteID = 1
+	}
 	contentID := parseIntOrZero(request.URL.Query().Get("content_id"))
 	search := strings.TrimSpace(request.URL.Query().Get("q"))
-	where := `"status" = 'active' AND "kind" = ?`
-	args := []any{kind}
+	where := `"status" = 'active' AND "kind" = ? AND ("site_id" = ? OR "site_id" = 0)`
+	args := []any{kind, siteID}
 	if contentID > 0 {
 		where += ` AND EXISTS (SELECT 1 FROM "gocms_media_ref" AS ref WHERE ref."media_id" = "gocms_media"."id" AND ref."content_id" = ?)`
 		args = append(args, contentID)
@@ -380,10 +393,14 @@ func (s *Server) mediaDiskPath(publicPath string) (string, error) {
 		return "", fmt.Errorf("invalid media path")
 	}
 	cleanPublic := path.Clean(parsed.Path)
-	if !strings.HasPrefix(cleanPublic, "/images/") {
+	var storagePath string
+	if strings.HasPrefix(cleanPublic, "/assets/") {
+		storagePath = strings.TrimPrefix(cleanPublic, "/assets/")
+	} else if strings.HasPrefix(cleanPublic, "/images/") {
+		storagePath = strings.TrimPrefix(cleanPublic, "/")
+	} else {
 		return "", fmt.Errorf("invalid media path")
 	}
-	storagePath := strings.TrimPrefix(cleanPublic, "/")
 	root, err := filepath.Abs(s.assetsRoot)
 	if err != nil {
 		return "", err
@@ -468,7 +485,7 @@ func normalizeMediaURL(value string) string {
 		imagePath = "/" + imagePath
 	}
 	imagePath = path.Clean(imagePath)
-	if !strings.HasPrefix(imagePath, "/images/") {
+	if !strings.HasPrefix(imagePath, "/images/") && !strings.HasPrefix(imagePath, "/assets/") && !strings.HasPrefix(imagePath, "/uploads/") {
 		return ""
 	}
 	return imagePath

@@ -202,3 +202,213 @@ func TestContentCategoryScope(t *testing.T) {
 		t.Fatalf("empty scope leaked: %s", response.Body.String())
 	}
 }
+
+func TestAdminAccountSitePermissions(t *testing.T) {
+	s, database, root := newCategoryTestServer(t)
+
+	// Create Site 2
+	if _, err := database.Exec(`INSERT INTO gocms_site (id, name, code, domain) VALUES (2, 'Site 2', 'site2', 'site2.test')`); err != nil {
+		t.Fatal(err)
+	}
+
+	call := func(token, method, path, body string, want int) string {
+		t.Helper()
+		r := categoryRequest(t, s, token, method, path, body)
+		if r.Code != want {
+			t.Fatalf("%s %s: got %d want %d: %s", method, path, r.Code, want, r.Body.String())
+		}
+		return r.Body.String()
+	}
+
+	// Create editor group
+	call(root, "POST", "/api/admin/groups", `{"name":"Site2Only","permissions":["content","categories"]}`, 200)
+	var groupID int64
+	if err := database.QueryRow(`SELECT id FROM gocms_admin_group WHERE name = 'Site2Only'`).Scan(&groupID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create user with site_ids: [2]
+	call(root, "POST", "/api/admin/users", fmt.Sprintf(`{"username":"site2editor","password":"test-password","group_id":%d,"site_ids":[2]}`, groupID), 200)
+
+	editorToken, err := s.createSession("site2editor")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Check GET /api/admin/sites: user should only see Site 2
+	sitesResp := call(editorToken, "GET", "/api/admin/sites", "", 200)
+	var siteList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(sitesResp), &siteList); err != nil {
+		t.Fatal(err)
+	}
+	if len(siteList) != 1 || siteList[0].ID != 2 {
+		t.Fatalf("expected only site 2, got: %s", sitesResp)
+	}
+
+	// 2. Accessing Site 2 categories should succeed
+	call(editorToken, "GET", "/api/admin/categories?site_id=2", "", 200)
+
+	// 3. Accessing Site 1 categories should fail with 403 Forbidden
+	call(editorToken, "GET", "/api/admin/categories?site_id=1", "", 403)
+
+	// 4. Update user to have site_ids: null (all sites)
+	var userID int64
+	if err := database.QueryRow(`SELECT id FROM gocms_admin_user WHERE username = 'site2editor'`).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	call(root, "PUT", "/api/admin/users", fmt.Sprintf(`{"id":%d,"username":"site2editor","group_id":%d,"site_ids":null}`, userID, groupID), 200)
+
+	// In GoCMS, updating an account revokes its existing sessions.
+	editorToken, err = s.createSession("site2editor")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Now editor should see both sites
+	sitesRespAll := call(editorToken, "GET", "/api/admin/sites", "", 200)
+	var allSitesList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(sitesRespAll), &allSitesList); err != nil {
+		t.Fatal(err)
+	}
+	if len(allSitesList) != 2 {
+		t.Fatalf("expected 2 sites for all-sites admin, got: %s", sitesRespAll)
+	}
+	call(editorToken, "GET", "/api/admin/categories?site_id=1", "", 200)
+	call(editorToken, "GET", "/api/admin/categories?site_id=2", "", 200)
+}
+
+func TestAdminGroupSitePermissions(t *testing.T) {
+	s, database, root := newCategoryTestServer(t)
+
+	// Create Site 2
+	if _, err := database.Exec(`INSERT INTO gocms_site (id, name, code, is_default, status) VALUES (2, 'Site 2', 'site2', 0, 'active')`); err != nil {
+		t.Fatal(err)
+	}
+
+	call := func(token, method, path, body string, want int) string {
+		t.Helper()
+		r := categoryRequest(t, s, token, method, path, body)
+		if r.Code != want {
+			t.Fatalf("%s %s: got %d want %d: %s", method, path, r.Code, want, r.Body.String())
+		}
+		return r.Body.String()
+	}
+
+	// 1. Create a user group configured with site_ids: [2]
+	call(root, "POST", "/api/admin/groups", `{"name":"Site2Group","permissions":["content","categories"],"site_ids":[2]}`, 200)
+	var groupID int64
+	if err := database.QueryRow(`SELECT id FROM gocms_admin_group WHERE name = 'Site2Group'`).Scan(&groupID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create account belonging to Site2Group without setting account-level site_ids
+	call(root, "POST", "/api/admin/users", fmt.Sprintf(`{"username":"groupeditor","password":"test-password","group_id":%d}`, groupID), 200)
+
+	editorToken, err := s.createSession("groupeditor")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Editor should only see Site 2
+	sitesResp := call(editorToken, "GET", "/api/admin/sites", "", 200)
+	var siteList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(sitesResp), &siteList); err != nil {
+		t.Fatal(err)
+	}
+	if len(siteList) != 1 || siteList[0].ID != 2 {
+		t.Fatalf("expected only site 2 via group, got: %s", sitesResp)
+	}
+
+	call(editorToken, "GET", "/api/admin/categories?site_id=2", "", 200)
+	call(editorToken, "GET", "/api/admin/categories?site_id=1", "", 403)
+
+	// 3. Update the group to site_ids: [1, 2]
+	call(root, "PUT", "/api/admin/groups", fmt.Sprintf(`{"id":%d,"name":"Site2Group","permissions":["content","categories"],"site_ids":[1,2]}`, groupID), 200)
+
+	// Editor now has access to both sites
+	sitesRespAll := call(editorToken, "GET", "/api/admin/sites", "", 200)
+	var allSitesList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(sitesRespAll), &allSitesList); err != nil {
+		t.Fatal(err)
+	}
+	if len(allSitesList) != 2 {
+		t.Fatalf("expected 2 sites after group update, got: %s", sitesRespAll)
+	}
+	call(editorToken, "GET", "/api/admin/categories?site_id=1", "", 200)
+	call(editorToken, "GET", "/api/admin/categories?site_id=2", "", 200)
+}
+
+func TestAdminGroupPerSiteModulePermissions(t *testing.T) {
+	s, database, root := newCategoryTestServer(t)
+
+	// Create Site 2 and Site 3
+	if _, err := database.Exec(`INSERT INTO gocms_site (id, name, code, is_default, status) VALUES (2, 'Site 2', 'site2', 0, 'active'), (3, 'Site 3', 'site3', 0, 'active')`); err != nil {
+		t.Fatal(err)
+	}
+
+	call := func(token, method, path, body string, want int) string {
+		t.Helper()
+		r := categoryRequest(t, s, token, method, path, body)
+		if r.Code != want {
+			t.Fatalf("%s %s: got %d want %d: %s", method, path, r.Code, want, r.Body.String())
+		}
+		return r.Body.String()
+	}
+
+	// 1. Create a user group with per-site permissions:
+	// Site 1 has "content", "theme"
+	// Site 2 has only "content"
+	// Site 3 is omitted (no access)
+	call(root, "POST", "/api/admin/groups", `{
+		"name": "MatrixGroup",
+		"site_permissions": {
+			"1": ["content", "theme"],
+			"2": ["content"]
+		}
+	}`, 200)
+	var groupID int64
+	if err := database.QueryRow(`SELECT id FROM gocms_admin_group WHERE name = 'MatrixGroup'`).Scan(&groupID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create account belonging to MatrixGroup
+	call(root, "POST", "/api/admin/users", fmt.Sprintf(`{"username":"matrixuser","password":"test-password","group_id":%d}`, groupID), 200)
+
+	userToken, err := s.createSession("matrixuser")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Check sites: user should only see Site 1 and Site 2 (not Site 3)
+	sitesResp := call(userToken, "GET", "/api/admin/sites", "", 200)
+	var siteList []struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(sitesResp), &siteList); err != nil {
+		t.Fatal(err)
+	}
+	if len(siteList) != 2 {
+		t.Fatalf("expected 2 sites (1 and 2), got: %s", sitesResp)
+	}
+
+	// 4. Site 1 has "theme" permission -> 200 OK
+	call(userToken, "GET", "/api/admin/theme?site_id=1", "", 200)
+
+	// 5. Site 2 does NOT have "theme" permission -> 403 Forbidden!
+	call(userToken, "GET", "/api/admin/theme?site_id=2", "", 403)
+
+	// 6. Site 2 DOES have "content" permission -> 200 OK
+	call(userToken, "GET", "/api/admin/content?site_id=2", "", 200)
+
+	// 7. Site 3 is completely inaccessible -> 403 Forbidden
+	call(userToken, "GET", "/api/admin/content?site_id=3", "", 403)
+}
+

@@ -79,7 +79,7 @@ func TestApplyStagedUpdateReplacesOnlyBinary(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "gocms")
 	staging := filepath.Join(root, "downloaded-binary")
-	themeFile := filepath.Join(root, "assets", "theme", "blue", "css", "site.css")
+	themeFile := filepath.Join(root, "assets", "1", "themes", "blue", "css", "site.css")
 	if err := os.MkdirAll(filepath.Dir(themeFile), 0755); err != nil {
 		t.Fatal(err)
 	}

@@ -25,13 +25,69 @@ type adminCredentials struct {
 }
 
 type AdminUser struct {
-	CategoryIDs []int64  `json:"category_ids"`
-	ID          int64    `json:"id"`
-	Username    string   `json:"username"`
-	Flags       string   `json:"flags"`
-	IsSuper     bool     `json:"is_super"`
-	GroupID     int64    `json:"group_id"`
-	Permissions []string `json:"permissions"`
+	CategoryIDs     []int64            `json:"category_ids"`
+	SiteIDs         []int64            `json:"site_ids"`
+	SitePermissions map[int64][]string `json:"site_permissions,omitempty"`
+	ID              int64              `json:"id"`
+	Username        string             `json:"username"`
+	Flags           string             `json:"flags"`
+	IsSuper         bool               `json:"is_super"`
+	GroupID         int64              `json:"group_id"`
+	Permissions     []string           `json:"permissions"`
+}
+
+func (u *AdminUser) PermissionsForSite(siteID int64) []string {
+	if u == nil {
+		return nil
+	}
+	if u.IsSuper {
+		return []string{"*"}
+	}
+	if len(u.SitePermissions) > 0 {
+		if perms, ok := u.SitePermissions[siteID]; ok {
+			return perms
+		}
+		return nil
+	}
+	return u.Permissions
+}
+
+func (u *AdminUser) HasPermissionInSite(siteID int64, perm string) bool {
+	if u == nil {
+		return false
+	}
+	if u.IsSuper {
+		return true
+	}
+	perms := u.PermissionsForSite(siteID)
+	for _, p := range perms {
+		if p == perm || p == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+func (u *AdminUser) CanManageSite(siteID int64) bool {
+	if u == nil {
+		return false
+	}
+	if u.IsSuper {
+		return true
+	}
+	if len(u.SitePermissions) > 0 {
+		_, ok := u.SitePermissions[siteID]
+		return ok
+	}
+	if u.SiteIDs == nil {
+		return true
+	}
+	for _, id := range u.SiteIDs {
+		if id == siteID {
+			return true
+		}
+	}
+	return false
 }
 
 type AdminStats struct {
@@ -373,6 +429,13 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		s.saveCategory(response, request, 0)
 		return
 	}
+	user := s.currentAdmin(request)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
+
 	requestedLang := strings.TrimSpace(request.URL.Query().Get("lang"))
 	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(request.Context())
 	if requestedLang == "" {
@@ -387,7 +450,8 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		       COALESCE(c."cover_content", ''), COALESCE(c."model_id", 1), COALESCE(c."link_url", ''),
 		       COALESCE(c."nav_position", 'main')
 		FROM "gocms_category" c
-		ORDER BY c."parent_id", c."order_id", c."id"`)
+		WHERE c."site_id" = ?
+		ORDER BY c."parent_id", c."order_id", c."id"`, siteID)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -519,6 +583,13 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
+	user := s.currentAdmin(request)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
+
 	requestedLang := strings.TrimSpace(payload.Lang)
 	if requestedLang == "" {
 		requestedLang = strings.TrimSpace(request.URL.Query().Get("lang"))
@@ -529,15 +600,15 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 	}
 
 	if id == 0 {
-		if err := s.nextCategoryOrder(request.Context(), payload.ParentID, &payload.OrderID); err != nil {
+		if err := s.nextCategoryOrder(request.Context(), siteID, payload.ParentID, &payload.OrderID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
 		result, err := s.database.ExecContext(request.Context(), `
 			INSERT INTO "gocms_category"
-			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", "keywords", "description", "cover_content", "model_id", "link_url", "nav_position")
-			VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL, payload.NavPosition)
+			("site_id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", "keywords", "description", "cover_content", "model_id", "link_url", "nav_position")
+			VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			siteID, payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL, payload.NavPosition)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -559,6 +630,19 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			})
 		}
 	} else {
+		var existingSiteID int64
+		if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id" FROM "gocms_category" WHERE "id" = ?`, id).Scan(&existingSiteID); err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(response, "category not found", http.StatusNotFound)
+			} else {
+				http.Error(response, "database error", http.StatusInternalServerError)
+			}
+			return
+		}
+		if user != nil && !user.CanManageSite(existingSiteID) {
+			http.Error(response, "无权管理该站点的栏目", http.StatusForbidden)
+			return
+		}
 		if payload.Translations != nil && len(payload.Translations) > 0 {
 			_ = s.saveCategoryTranslations(request.Context(), s.database, id, payload.Translations)
 			if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Name) != "" {
@@ -788,15 +872,22 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 }
 
 func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Request, id int64) {
-	var exists, children, content int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_category" WHERE "id" = ?`, id).Scan(&exists); err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
+	var catSiteID int64
+	if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id" FROM "gocms_category" WHERE "id" = ?`, id).Scan(&catSiteID); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(response, "category not found", http.StatusNotFound)
+		} else {
+			http.Error(response, "database error", http.StatusInternalServerError)
+		}
 		return
 	}
-	if exists == 0 {
-		http.Error(response, "category not found", http.StatusNotFound)
+	user := s.currentAdmin(request)
+	if user != nil && !user.CanManageSite(catSiteID) {
+		http.Error(response, "无权管理该站点的栏目", http.StatusForbidden)
 		return
 	}
+
+	var children, content int64
 	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_category" WHERE "parent_id" = ?`, id).Scan(&children); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -822,12 +913,12 @@ func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Requ
 	s.contentSaved(response, request)
 }
 
-func (s *Server) nextCategoryOrder(ctx context.Context, parentID int64, orderID *int64) error {
+func (s *Server) nextCategoryOrder(ctx context.Context, siteID, parentID int64, orderID *int64) error {
 	if *orderID != 0 {
 		return nil
 	}
 	var maxOrder sql.NullInt64
-	if err := s.database.QueryRowContext(ctx, `SELECT MAX("order_id") FROM "gocms_category" WHERE "parent_id" = ?`, parentID).Scan(&maxOrder); err != nil {
+	if err := s.database.QueryRowContext(ctx, `SELECT MAX("order_id") FROM "gocms_category" WHERE "site_id" = ? AND "parent_id" = ?`, siteID, parentID).Scan(&maxOrder); err != nil {
 		return err
 	}
 	if maxOrder.Valid {

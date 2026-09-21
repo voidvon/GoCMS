@@ -37,7 +37,7 @@ func (p Publisher) generateIndex(ctx context.Context, format string) (string, er
 	if err := os.MkdirAll(p.Data, 0755); err != nil {
 		return "", err
 	}
-	lock, err := os.OpenFile(filepath.Join(p.Data, "publish.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(filepath.Join(p.Data, p.lockPath()), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return "", err
 	}
@@ -48,18 +48,27 @@ func (p Publisher) generateIndex(ctx context.Context, format string) (string, er
 	}
 	defer unlock()
 
-	web, err := filepath.Abs(p.Web)
+	targetWeb := p.TargetWeb()
+	if _, err := os.Stat(targetWeb); os.IsNotExist(err) && p.Web != "" {
+		if _, errWeb := os.Stat(p.Web); errWeb == nil {
+			targetWeb = p.Web
+		}
+	}
+	web, err := filepath.Abs(targetWeb)
 	if err != nil {
 		return "", err
 	}
 	if web == filepath.Dir(web) {
 		return "", fmt.Errorf("invalid web root")
 	}
+	if err := os.MkdirAll(web, 0755); err != nil {
+		return "", err
+	}
 	urls, err := publishedURLs(ctx, web)
 	if err != nil {
 		return "", err
 	}
-	base, err := configuredSiteURL(ctx, p.DB)
+	base, err := configuredSiteURL(ctx, p.DB, p.SiteID)
 	if err != nil {
 		return "", err
 	}
@@ -95,6 +104,9 @@ func sitemapFilename(format string) (string, bool) {
 }
 
 func publishedURLs(ctx context.Context, web string) ([]string, error) {
+	if _, err := os.Stat(web); os.IsNotExist(err) {
+		return []string{}, nil
+	}
 	urls := make([]string, 0)
 	err := filepath.WalkDir(web, func(filePath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -131,11 +143,14 @@ func publishedURLs(ctx context.Context, web string) ([]string, error) {
 	return urls, nil
 }
 
-func configuredSiteURL(ctx context.Context, database *sql.DB) (string, error) {
+func configuredSiteURL(ctx context.Context, database *sql.DB, siteID int64) (string, error) {
 	if database == nil {
 		return "", nil
 	}
-	settings, err := db.LoadSiteSettings(ctx, database)
+	if siteID <= 0 {
+		siteID = 1
+	}
+	settings, err := db.LoadSiteSettingsForSite(ctx, database, siteID)
 	if err != nil {
 		return "", fmt.Errorf("读取网站地址失败: %w", err)
 	}

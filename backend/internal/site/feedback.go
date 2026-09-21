@@ -1,6 +1,7 @@
 package site
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -129,11 +130,18 @@ func (s *Server) feedbackSubmit(response http.ResponseWriter, request *http.Requ
 	ip := clientIP(request)
 	now := time.Now().Format("2006-01-02 15:04:05")
 
+	var siteID int64 = 1
+	if s.database != nil {
+		if matched, err := db.GetSiteByHost(request.Context(), s.database, request.Host); err == nil && matched != nil {
+			siteID = matched.ID
+		}
+	}
+
 	_, err = s.database.ExecContext(request.Context(), `
 		INSERT INTO "gocms_message"
-		("class_id", "title", "name", "phone", "mobile", "fax", "email", "address", "content", "created_at", "state", "content_id", "extra_data", "ip")
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
-		classID, title, name, phone, mobile, fax, email, address, content, now, contentID, string(extraBytes), ip)
+		("site_id", "class_id", "title", "name", "phone", "mobile", "fax", "email", "address", "content", "created_at", "state", "content_id", "extra_data", "ip")
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+		siteID, classID, title, name, phone, mobile, fax, email, address, content, now, contentID, string(extraBytes), ip)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -158,6 +166,12 @@ func (s *Server) adminFeedbacks(response http.ResponseWriter, request *http.Requ
 	if request.Method != http.MethodGet || !s.requireAdmin(response, request) {
 		return
 	}
+	user := s.currentAdmin(request)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	page := positiveInt(request.URL.Query().Get("page"), 1)
 	pageSize := positiveInt(request.URL.Query().Get("page_size"), 20)
 	if pageSize > 100 {
@@ -168,8 +182,8 @@ func (s *Server) adminFeedbacks(response http.ResponseWriter, request *http.Requ
 	stateStr := request.URL.Query().Get("state")
 	keyword := strings.TrimSpace(request.URL.Query().Get("keyword"))
 
-	whereClauses := []string{"1=1"}
-	var args []any
+	whereClauses := []string{`m."site_id" = ?`}
+	var args []any = []any{siteID}
 
 	if classID > 0 {
 		whereClauses = append(whereClauses, `m."class_id" = ?`)
@@ -223,8 +237,10 @@ func (s *Server) adminFeedbacks(response http.ResponseWriter, request *http.Requ
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
-		item.ExtraData = make(map[string]any)
 		_ = json.Unmarshal([]byte(extraJSON), &item.ExtraData)
+		if item.ExtraData == nil {
+			item.ExtraData = make(map[string]any)
+		}
 		items = append(items, item)
 	}
 
@@ -243,6 +259,20 @@ func (s *Server) adminFeedbackItem(response http.ResponseWriter, request *http.R
 	id, err := strconv.ParseInt(rawID, 10, 64)
 	if err != nil || id < 1 {
 		http.Error(response, "invalid id", http.StatusBadRequest)
+		return
+	}
+	var msgSiteID int64
+	if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id" FROM "gocms_message" WHERE "id" = ?`, id).Scan(&msgSiteID); err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(response, "not found", http.StatusNotFound)
+		} else {
+			http.Error(response, "database error", http.StatusInternalServerError)
+		}
+		return
+	}
+	user := s.currentAdmin(request)
+	if user != nil && !user.CanManageSite(msgSiteID) {
+		http.Error(response, "无权管理该站点的留言", http.StatusForbidden)
 		return
 	}
 	switch request.Method {
@@ -287,6 +317,12 @@ func (s *Server) adminFeedbackBatchDelete(response http.ResponseWriter, request 
 	if request.Method != http.MethodPost || !s.requireAdmin(response, request) {
 		return
 	}
+	user := s.currentAdmin(request)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	var payload struct {
 		IDs []int64 `json:"ids"`
 	}
@@ -296,13 +332,14 @@ func (s *Server) adminFeedbackBatchDelete(response http.ResponseWriter, request 
 	}
 
 	placeholders := make([]string, len(payload.IDs))
-	args := make([]any, len(payload.IDs))
+	args := make([]any, len(payload.IDs)+1)
 	for i, id := range payload.IDs {
 		placeholders[i] = "?"
 		args[i] = id
 	}
+	args[len(payload.IDs)] = siteID
 
-	query := fmt.Sprintf(`DELETE FROM "gocms_message" WHERE "id" IN (%s)`, strings.Join(placeholders, ","))
+	query := fmt.Sprintf(`DELETE FROM "gocms_message" WHERE "id" IN (%s) AND "site_id" = ?`, strings.Join(placeholders, ","))
 	if _, err := s.database.ExecContext(request.Context(), query, args...); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return

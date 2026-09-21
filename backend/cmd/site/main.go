@@ -64,7 +64,11 @@ func main() {
 	if err := database.Ping(); err != nil {
 		log.Fatalf("cannot use SQLite database %s: %v; run cmd/migrate first", *databasePath, err)
 	}
-	themeDefinition, err := theme.Resolve(filepath.Join(*assets, "theme"), *data, *themeOverride, *templates)
+	themeDir := filepath.Join(*assets, "1", "themes")
+	if _, err := os.Stat(themeDir); os.IsNotExist(err) {
+		themeDir = filepath.Join(*assets, "theme")
+	}
+	themeDefinition, err := theme.Resolve(themeDir, *data, *themeOverride, *templates)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -74,7 +78,7 @@ func main() {
 		log.Fatal(err)
 	}
 	server.ConfigurePublishing(themeDefinition.TemplatesRoot, *data, *frontend, *assets, themeDefinition.AssetsRoot)
-	server.ConfigureThemeCatalog(filepath.Join(*assets, "theme"), *data, themeDefinition)
+	server.ConfigureThemeCatalog(themeDir, *data, themeDefinition)
 	if embeddedFrontend != nil {
 		server.ConfigureEmbeddedFrontend(embeddedFrontend)
 	}

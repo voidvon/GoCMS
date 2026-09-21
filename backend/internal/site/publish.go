@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"gocms/internal/db"
 	"gocms/internal/generator"
 )
 
@@ -29,14 +32,109 @@ func (s *Server) ConfigurePublishing(templates, data, frontend, assets, theme st
 	s.templateRoot = templates
 	homeTpl := s.activeTheme.HomeTemplate()
 	s.themeMu.Unlock()
-	p := &publication{publisher: generator.Publisher{DB: s.database, Web: s.siteRoot, Templates: templates, Data: data, Assets: assets, Theme: theme, HomeTemplate: homeTpl}, report: generator.Report{State: "idle"}}
+	p := &publication{
+		publisher: generator.Publisher{
+			DB:           s.database,
+			Web:          s.siteRoot,
+			Templates:    templates,
+			Data:         data,
+			Assets:       assets,
+			Theme:        theme,
+			HomeTemplate: homeTpl,
+			SiteID:       1,
+		},
+		report: generator.Report{State: "idle"},
+	}
 	if b, e := os.ReadFile(filepath.Join(data, "publish.json")); e == nil {
 		_ = json.Unmarshal(b, &p.report)
 	}
 	s.publication = p
 }
+
+func (s *Server) publicationForSite(ctx context.Context, siteID int64) *publication {
+	if s.publication == nil {
+		return nil
+	}
+	if siteID <= 1 {
+		if s.database != nil {
+			if s1, err := db.GetSiteByID(ctx, s.database, 1); err == nil && s1 != nil {
+				s.publication.publisher.OutputDir = s1.OutputDir
+			}
+		}
+		return s.publication
+	}
+	s.sitePubMu.Lock()
+	defer s.sitePubMu.Unlock()
+	if s.sitePublications == nil {
+		s.sitePublications = make(map[int64]*publication)
+	}
+	if pub, ok := s.sitePublications[siteID]; ok {
+		return pub
+	}
+
+	targetSite, err := db.GetSiteByID(ctx, s.database, siteID)
+	if err != nil || targetSite == nil {
+		return s.publication
+	}
+
+	tplRoot := s.templateRoot
+	assetRoot := s.assetsRoot
+	themeRoot := s.themeRoot
+	homeTpl := s.activeTheme.HomeTemplate()
+
+	themeID := targetSite.ThemeID
+	if themeID == "" && s.activeTheme.Manifest.ID != "" {
+		themeID = s.activeTheme.Manifest.ID
+	}
+	if themeID != "" {
+		siteIDStr := strconv.FormatInt(siteID, 10)
+		siteThemeDir := filepath.Join(s.assetsRoot, siteIDStr, "themes", themeID)
+		if _, err := os.Stat(siteThemeDir); os.IsNotExist(err) {
+			siteThemeDir = filepath.Join(s.assetsRoot, "1", "themes", themeID)
+		}
+		if _, err := os.Stat(siteThemeDir); os.IsNotExist(err) && s.themeBase != "" {
+			siteThemeDir = filepath.Join(s.themeBase, themeID)
+		}
+		themeAssets := filepath.Join(siteThemeDir, "assets")
+		themeTemplates := filepath.Join(siteThemeDir, "templates")
+		if stat, err := os.Stat(themeTemplates); err == nil && stat.IsDir() {
+			tplRoot = themeTemplates
+		}
+		if stat, err := os.Stat(themeAssets); err == nil && stat.IsDir() {
+			themeRoot = themeAssets
+		}
+	}
+
+	pub := &publication{
+		publisher: generator.Publisher{
+			DB:           s.database,
+			Web:          s.siteRoot,
+			Templates:    tplRoot,
+			Data:         s.publication.publisher.Data,
+			Assets:       assetRoot,
+			Theme:        themeRoot,
+			HomeTemplate: homeTpl,
+			SiteID:       siteID,
+			OutputDir:    targetSite.OutputDir,
+		},
+		report: generator.Report{State: "idle"},
+	}
+	reportFile := filepath.Join(pub.publisher.Data, fmt.Sprintf("publish_%d.json", siteID))
+	if b, e := os.ReadFile(reportFile); e == nil {
+		_ = json.Unmarshal(b, &pub.report)
+	}
+	s.sitePublications[siteID] = pub
+	return pub
+}
+
 func (s *Server) startPublish(queue bool) (generator.Report, bool) {
-	p := s.publication
+	return s.startPublishPub(s.publication, queue)
+}
+
+func (s *Server) startPublishPub(p *publication, queue bool) (generator.Report, bool) {
+	if p == nil {
+		return generator.Report{State: "failed", Error: "publishing is not configured"}, false
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return s.startPublishLocked(p, queue)
@@ -78,7 +176,11 @@ func (s *Server) publicationReport(p *publication) generator.Report {
 	defer p.mu.Unlock()
 	if p.report.State != "running" {
 		var persisted generator.Report
-		if data, err := os.ReadFile(filepath.Join(p.publisher.Data, "publish.json")); err == nil && json.Unmarshal(data, &persisted) == nil && persisted.Finished.After(p.report.Finished) {
+		reportFile := filepath.Join(p.publisher.Data, "publish.json")
+		if p.publisher.SiteID > 1 {
+			reportFile = filepath.Join(p.publisher.Data, fmt.Sprintf("publish_%d.json", p.publisher.SiteID))
+		}
+		if data, err := os.ReadFile(reportFile); err == nil && json.Unmarshal(data, &persisted) == nil && persisted.Finished.After(p.report.Finished) {
 			p.report = persisted
 		}
 	}
@@ -94,11 +196,22 @@ func (s *Server) adminPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.publication == nil {
-		http.Error(w, "publishing is not configured", 503)
+		http.Error(w, "publishing is not configured", http.StatusServiceUnavailable)
+		return
+	}
+	user := s.currentAdmin(r)
+	siteID, err := s.resolveSiteID(r, user)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+	pub := s.publicationForSite(r.Context(), siteID)
+	if pub == nil {
+		http.Error(w, "publishing is not configured", http.StatusServiceUnavailable)
 		return
 	}
 	if r.Method == http.MethodPost {
-		report, started := s.startPublish(false)
+		report, started := s.startPublishPub(pub, false)
 		code := http.StatusAccepted
 		if !started {
 			code = http.StatusConflict
@@ -106,8 +219,8 @@ func (s *Server) adminPublish(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, code, report)
 		return
 	}
-	report := s.publicationReport(s.publication)
-	writeJSON(w, 200, report)
+	report := s.publicationReport(pub)
+	writeJSON(w, http.StatusOK, report)
 }
 
 func (s *Server) adminSitemap(w http.ResponseWriter, r *http.Request) {
@@ -122,6 +235,18 @@ func (s *Server) adminSitemap(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "publishing is not configured", http.StatusServiceUnavailable)
 		return
 	}
+	user := s.currentAdmin(r)
+	siteID, err := s.resolveSiteID(r, user)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+	pub := s.publicationForSite(r.Context(), siteID)
+	if pub == nil {
+		http.Error(w, "publishing is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
 	var payload struct {
 		Format string `json:"format"`
 	}
@@ -130,7 +255,7 @@ func (s *Server) adminSitemap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	format := strings.ToLower(strings.TrimSpace(payload.Format))
-	filename, err := s.publication.publisher.GenerateSitemap(r.Context(), format)
+	filename, err := pub.publisher.GenerateSitemap(r.Context(), format)
 	if err != nil {
 		if errors.Is(err, generator.ErrPublishBusy) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
@@ -148,12 +273,17 @@ func (s *Server) adminSitemap(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) contentSaved(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("publish") == "1" && s.publication != nil {
-		report, started := s.startPublish(true)
-		// Never silently lose a publish request made while another snapshot is being generated.
-		writeJSON(w, 200, map[string]any{"ok": true, "publication": report, "publish_started": started})
-		return
+		user := s.currentAdmin(r)
+		siteID, _ := s.resolveSiteID(r, user)
+		pub := s.publicationForSite(r.Context(), siteID)
+		if pub != nil {
+			report, started := s.startPublishPub(pub, true)
+			// Never silently lose a publish request made while another snapshot is being generated.
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "publication": report, "publish_started": started})
+			return
+		}
 	}
-	writeJSON(w, 200, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) adminLLMS(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +298,19 @@ func (s *Server) adminLLMS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "publishing is not configured", http.StatusServiceUnavailable)
 		return
 	}
-	filename, err := s.publication.publisher.GenerateLLMS(r.Context())
+	user := s.currentAdmin(r)
+	siteID, err := s.resolveSiteID(r, user)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusForbidden)
+		return
+	}
+	pub := s.publicationForSite(r.Context(), siteID)
+	if pub == nil {
+		http.Error(w, "publishing is not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	filename, err := pub.publisher.GenerateLLMS(r.Context())
 	if err != nil {
 		if errors.Is(err, generator.ErrPublishBusy) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +35,8 @@ type Server struct {
 	activeTheme      theme.Definition
 	themeMu          sync.RWMutex
 	publication      *publication
+	sitePubMu        sync.Mutex
+	sitePublications map[int64]*publication
 	updateMu         sync.Mutex
 	updateActive     bool
 }
@@ -175,6 +179,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminModels(response, request)
 	case "/api/admin/categories":
 		s.adminCategories(response, request)
+	case "/api/admin/sites":
+		s.adminSites(response, request)
+	case "/api/admin/site-settings":
+		s.adminSiteSettings(response, request)
 	case "/api/admin/languages":
 		s.adminLanguages(response, request)
 	case "/api/admin/api-keys":
@@ -255,6 +263,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 			s.adminModelItem(response, request, cleanPath[len("/api/admin/models/"):])
 			return
 		}
+		if strings.HasPrefix(lowerPath, "/api/admin/sites/") {
+			s.adminSiteItem(response, request, cleanPath[len("/api/admin/sites/"):])
+			return
+		}
 		if strings.HasPrefix(lowerPath, "/api/admin/categories/") {
 			s.adminCategory(response, request, cleanPath[len("/api/admin/categories/"):])
 			return
@@ -327,9 +339,15 @@ func (s *Server) searchJSON(response http.ResponseWriter, request *http.Request)
 		methodNotAllowed(response)
 		return
 	}
+	var siteID int64 = 1
+	if s.database != nil {
+		if matched, err := db.GetSiteByHost(request.Context(), s.database, request.Host); err == nil && matched != nil {
+			siteID = matched.ID
+		}
+	}
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
-	result, err := s.queryContent(request.Context(), query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
+	result, err := s.queryContent(request.Context(), siteID, query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -348,7 +366,7 @@ func (s *Server) messages(response http.ResponseWriter, request *http.Request) {
 func (s *Server) staticFile(response http.ResponseWriter, request *http.Request) {
 	lowerPath := strings.ToLower(request.URL.Path)
 	privatePath := path.Clean("/" + strings.ReplaceAll(lowerPath, `\`, "/"))
-	if privatePath == "/assets/theme" || strings.HasPrefix(privatePath, "/assets/theme/") {
+	if privatePath == "/assets/theme" || strings.HasPrefix(privatePath, "/assets/theme/") || strings.Contains(privatePath, "/themes/") || strings.HasSuffix(privatePath, "/themes") {
 		http.NotFound(response, request)
 		return
 	}
@@ -366,7 +384,49 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 	if s.serveResource(response, request) {
 		return
 	}
+
+	if s.database != nil {
+		matched, err := db.GetSiteByHost(request.Context(), s.database, request.Host)
+		if err != nil || matched == nil {
+			matched, _ = db.GetDefaultSite(request.Context(), s.database)
+		}
+		if matched != nil {
+			siteDir := matched.OutputDir
+			if siteDir == "" && matched.ID > 0 {
+				siteDir = fmt.Sprintf("%d", matched.ID)
+			}
+			if siteDir != "" {
+				if !filepath.IsAbs(siteDir) {
+					primaryDir := filepath.Join(s.siteRoot, siteDir)
+					if _, err := os.Stat(primaryDir); os.IsNotExist(err) && matched.OutputDir == "" {
+						legacySitesDir := filepath.Join(s.siteRoot, "sites", siteDir)
+						if stat, err := os.Stat(legacySitesDir); err == nil && stat.IsDir() {
+							primaryDir = legacySitesDir
+						}
+					}
+					siteDir = primaryDir
+				}
+				relPath := strings.TrimPrefix(clean, "/")
+				if relPath == "" {
+					relPath = "index.html"
+				}
+				targetFile := filepath.Join(siteDir, filepath.FromSlash(relPath))
+				if stat, err := os.Stat(targetFile); err == nil {
+					if !stat.IsDir() || fileExistsInDir(targetFile, "index.html") {
+						http.FileServer(http.Dir(siteDir)).ServeHTTP(response, request)
+						return
+					}
+				}
+			}
+		}
+	}
+
 	s.fileServe.ServeHTTP(response, request)
+}
+
+func fileExistsInDir(dir, name string) bool {
+	stat, err := os.Stat(filepath.Join(dir, name))
+	return err == nil && !stat.IsDir()
 }
 
 func positiveInt(value string, fallback int) int {

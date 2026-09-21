@@ -46,6 +46,36 @@ type Publisher struct {
 	Assets               string
 	Theme                string
 	HomeTemplate         string
+	SiteID               int64
+	OutputDir            string
+}
+
+func (p Publisher) TargetWeb() string {
+	targetWeb := p.Web
+	if p.OutputDir != "" {
+		if filepath.IsAbs(p.OutputDir) {
+			targetWeb = p.OutputDir
+		} else {
+			targetWeb = filepath.Join(p.Web, p.OutputDir)
+		}
+	} else if p.SiteID > 0 {
+		targetWeb = filepath.Join(p.Web, fmt.Sprint(p.SiteID))
+	}
+	return targetWeb
+}
+
+func (p Publisher) lockPath() string {
+	if p.SiteID > 1 {
+		return fmt.Sprintf("publish_%d.lock", p.SiteID)
+	}
+	return "publish.lock"
+}
+
+func (p Publisher) reportPath() string {
+	if p.SiteID > 1 {
+		return fmt.Sprintf("publish_%d.json", p.SiteID)
+	}
+	return "publish.json"
 }
 
 type LanguageInfo struct {
@@ -632,7 +662,13 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	if err = os.MkdirAll(p.Data, 0755); err != nil {
 		return report, err
 	}
-	lock, err := os.OpenFile(filepath.Join(p.Data, "publish.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	siteID := p.SiteID
+	if siteID <= 0 {
+		siteID = 1
+	}
+	lockFile := p.lockPath()
+	reportFile := p.reportPath()
+	lock, err := os.OpenFile(filepath.Join(p.Data, lockFile), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return report, err
 	}
@@ -650,7 +686,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 			report.Error = err.Error()
 		}
 		data, _ := json.MarshalIndent(report, "", "  ")
-		_ = atomicWrite(filepath.Join(p.Data, "publish.json"), data)
+		_ = atomicWrite(filepath.Join(p.Data, reportFile), data)
 	}()
 
 	c := &content{
@@ -666,29 +702,40 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	if err != nil {
 		return report, err
 	}
+	siteIDStr := strconv.FormatInt(siteID, 10)
 	for _, name := range []string{"gocms_category", "gocms_content"} {
 		rows, readErr := readTable(ctx, tx, name)
 		if readErr != nil {
 			_ = tx.Rollback()
 			return report, readErr
 		}
-		c.tables[name] = rows
+		filtered := make([]Row, 0, len(rows))
+		for _, r := range rows {
+			rSite := r["site_id"]
+			if rSite == "" || rSite == "0" {
+				rSite = "1"
+			}
+			if rSite == siteIDStr {
+				filtered = append(filtered, r)
+			}
+		}
+		c.tables[name] = filtered
 	}
 	for _, name := range []string{"gocms_category_translation", "gocms_content_translation", "gocms_language", "gocms_model_field"} {
 		rows, _ := readOptionalTable(ctx, tx, name)
 		c.tables[name] = rows
 	}
-	c.settings, err = db.LoadSiteSettings(ctx, tx)
+	c.settings, err = db.LoadSiteSettingsForSite(ctx, tx, siteID)
 	if err != nil {
 		_ = tx.Rollback()
 		return report, err
 	}
-	c.assignments, err = templateconfig.Load(ctx, tx)
+	c.assignments, err = templateconfig.LoadForSite(ctx, tx, siteID)
 	if err != nil {
 		_ = tx.Rollback()
 		return report, err
 	}
-	labels, err := templatelabel.Load(ctx, tx)
+	labels, err := templatelabel.LoadForSite(ctx, tx, siteID)
 	if err != nil {
 		_ = tx.Rollback()
 		return report, err
@@ -854,12 +901,16 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	}
 	report.Files = len(c.pages)
 
-	web, err := filepath.Abs(p.Web)
+	targetWeb := p.TargetWeb()
+	web, err := filepath.Abs(targetWeb)
 	if err != nil {
 		return report, err
 	}
 	if web == filepath.Dir(web) {
 		return report, fmt.Errorf("invalid web root")
+	}
+	if err = os.MkdirAll(filepath.Dir(web), 0755); err != nil {
+		return report, err
 	}
 	stage, err := os.MkdirTemp(filepath.Dir(web), ".web-stage-")
 	if err != nil {

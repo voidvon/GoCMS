@@ -83,6 +83,13 @@ func (s *Server) adminContent(response http.ResponseWriter, request *http.Reques
 		return
 	}
 
+	user := s.currentAdmin(request)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
+
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	categoryID := parseIntOrZero(request.URL.Query().Get("category_id"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
@@ -91,7 +98,7 @@ func (s *Server) adminContent(response http.ResponseWriter, request *http.Reques
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	result, err := s.queryContent(request.Context(), query, categoryID, lang, page, pageSize, false)
+	result, err := s.queryContent(request.Context(), siteID, query, categoryID, lang, page, pageSize, false)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -143,13 +150,14 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 	}
 	if request.Method == http.MethodDelete {
 		var category int64
-		if err := s.database.QueryRowContext(request.Context(), `SELECT category_id FROM gocms_content WHERE id = ?`, id).Scan(&category); err != nil {
+		var contentSiteID int64
+		if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id", "category_id" FROM "gocms_content" WHERE "id" = ?`, id).Scan(&contentSiteID, &category); err != nil {
 			http.NotFound(response, request)
 			return
 		}
 		user, _, _ := s.authenticateRequest(request)
-		if user == nil || !user.canManageCategory(category) {
-			writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有该栏目的内容权限"})
+		if user == nil || !user.canManageCategory(category) || !user.CanManageSite(contentSiteID) {
+			writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有该内容的操作权限"})
 			return
 		}
 		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "gocms_content" WHERE "id" = ?`, id)
@@ -200,7 +208,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	payload.Featured = normalizeFlag(payload.Featured)
 	payload.Visible = normalizeFlag(payload.Visible)
 	user, authenticated, _ := s.authenticateRequest(request)
-	if !authenticated {
+	if !authenticated || user == nil {
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 		return
 	}
@@ -208,21 +216,29 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有目标栏目的内容权限"})
 		return
 	}
+	var targetSiteID int64
 	var catPageType string
-	if err := s.database.QueryRowContext(request.Context(), `SELECT page_type FROM gocms_category WHERE id = ?`, payload.Category).Scan(&catPageType); err == nil {
+	if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id", "page_type" FROM "gocms_category" WHERE "id" = ?`, payload.Category).Scan(&targetSiteID, &catPageType); err == nil {
 		if catPageType == routing.PageTypeLink {
 			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "链接类型栏目不能发布内容"})
 			return
 		}
+	} else {
+		targetSiteID = 1
+	}
+	if !user.CanManageSite(targetSiteID) {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有目标站点的操作权限"})
+		return
 	}
 	if id != 0 {
+		var origSiteID int64
 		var category int64
-		if err := s.database.QueryRowContext(request.Context(), `SELECT category_id FROM gocms_content WHERE id = ?`, id).Scan(&category); err != nil {
+		if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id", "category_id" FROM "gocms_content" WHERE "id" = ?`, id).Scan(&origSiteID, &category); err != nil {
 			http.NotFound(response, request)
 			return
 		}
-		if !user.canManageCategory(category) {
-			writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有原栏目的内容权限"})
+		if !user.canManageCategory(category) || !user.CanManageSite(origSiteID) {
+			writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有原内容的操作权限"})
 			return
 		}
 	}
@@ -283,9 +299,9 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		defer transaction.Rollback()
 		result, err := transaction.ExecContext(request.Context(), `
 			INSERT INTO "gocms_content"
-			("category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "keywords", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
-			VALUES (?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
+			("site_id", "category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "keywords", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
+			VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			targetSiteID, payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
 			payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
 			modelID, extraDataStr)
 		if err != nil {
@@ -371,10 +387,10 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 
 		if requestedLang == defaultLang || payload.Translations != nil {
 			result, err := transaction.ExecContext(request.Context(), `
-				UPDATE "gocms_content" SET "category_id" = ?, "title" = ?, "code" = ?, "summary" = ?, "body" = ?,
+				UPDATE "gocms_content" SET "site_id" = ?, "category_id" = ?, "title" = ?, "code" = ?, "summary" = ?, "body" = ?,
 				"cover_image" = ?, "published_at" = ?, "source" = ?, "keywords" = ?, "description" = ?,
 				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
-				payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
+				targetSiteID, payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
 				payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
 				modelID, extraDataStr, id)
 			if err != nil {
@@ -388,10 +404,10 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			}
 		} else {
 			result, err := transaction.ExecContext(request.Context(), `
-				UPDATE "gocms_content" SET "category_id" = ?, "code" = ?,
+				UPDATE "gocms_content" SET "site_id" = ?, "category_id" = ?, "code" = ?,
 				"cover_image" = ?, "published_at" = ?, "source" = ?,
 				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
-				payload.Category, payload.Code, payload.CoverImage,
+				targetSiteID, payload.Category, payload.Code, payload.CoverImage,
 				payload.PublishedAt, payload.Source, payload.OrderID, payload.Featured, payload.Visible,
 				modelID, extraDataStr, id)
 			if err != nil {
@@ -432,7 +448,7 @@ func normalizeContentDate(value string) string {
 	return value
 }
 
-func (s *Server) queryContent(ctx context.Context, query string, categoryID int64, lang string, page, pageSize int, visibleOnly bool) (ContentPage, error) {
+func (s *Server) queryContent(ctx context.Context, siteID int64, query string, categoryID int64, lang string, page, pageSize int, visibleOnly bool) (ContentPage, error) {
 	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx)
 	if lang == "" {
 		lang = defaultLang
@@ -440,6 +456,10 @@ func (s *Server) queryContent(ctx context.Context, query string, categoryID int6
 
 	where := "1=1" + contentScopeSQL(ctx)
 	var args []any
+	if siteID > 0 {
+		where += ` AND "site_id" = ?`
+		args = append(args, siteID)
+	}
 	if visibleOnly {
 		where += ` AND "visible" = 1`
 	}
@@ -616,9 +636,15 @@ func (s *Server) contentJSON(response http.ResponseWriter, request *http.Request
 		methodNotAllowed(response)
 		return
 	}
+	var siteID int64 = 1
+	if s.database != nil {
+		if matched, err := db.GetSiteByHost(request.Context(), s.database, request.Host); err == nil && matched != nil {
+			siteID = matched.ID
+		}
+	}
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
-	result, err := s.queryContent(request.Context(), query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
+	result, err := s.queryContent(request.Context(), siteID, query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return

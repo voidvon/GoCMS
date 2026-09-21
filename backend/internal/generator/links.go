@@ -56,8 +56,23 @@ func (c *content) normalizeLinks(assets, theme string) error {
 		return err
 	}
 	if assets != "" {
-		if err := addTree(filepath.Join(assets, "images"), "images"); err != nil {
-			return err
+		_ = addTree(filepath.Join(assets, "images"), "images")
+		_ = addTree(filepath.Join(assets, "uploads"), "uploads")
+		if entries, err := os.ReadDir(assets); err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					siteUploads := filepath.Join(assets, entry.Name(), "uploads")
+					if stat, err := os.Stat(siteUploads); err == nil && stat.IsDir() {
+						_ = addTree(siteUploads, path.Join("assets", entry.Name(), "uploads"))
+						_ = addTree(siteUploads, "uploads")
+					}
+					siteImages := filepath.Join(assets, entry.Name(), "images")
+					if stat, err := os.Stat(siteImages); err == nil && stat.IsDir() {
+						_ = addTree(siteImages, path.Join("assets", entry.Name(), "images"))
+						_ = addTree(siteImages, "images")
+					}
+				}
+			}
 		}
 	}
 	if theme != "" {

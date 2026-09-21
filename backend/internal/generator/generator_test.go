@@ -576,3 +576,133 @@ func TestPublisher_NavigationPositions(t *testing.T) {
 	}
 }
 
+func TestMultiSiteGenerationIndependentDirectories(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+
+	// Site 1 settings (Chinese default + English sub-site)
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_site_setting" ("site_id", "key", "value") VALUES
+			(1, 'site_name', '站点一'),
+			(1, 'site_url', 'https://site1.example.com/')
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add secondary language 'en'
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_language" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix")
+		VALUES ('en', 'English', 0, 0, 1, 10, 'en')
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Site 2 settings
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_site_setting" ("site_id", "key", "value") VALUES
+			(2, 'site_name', '站点二'),
+			(2, 'site_url', 'https://site2.example.com/')
+	`); err != nil {
+		t.Fatal(err)
+	}
+
+	templates := filepath.Join(t.TempDir(), "templates")
+	writeTemplate(t, templates, "index.html", `site={{setting "site_name"}} lang={{.lang}}`)
+	writeTemplate(t, templates, "msg.html", `message`)
+	writeTemplate(t, templates, "search.html", `search`)
+
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+
+	// 1. Generate Site 1 (Default site, OutputDir is empty)
+	pub1 := Publisher{
+		DB:        database,
+		Web:       web,
+		Templates: templates,
+		Data:      filepath.Join(root, "data"),
+		SiteID:    1,
+	}
+	rep1, err := pub1.Generate(ctx)
+	if err != nil {
+		t.Fatalf("site 1 generate failed: %v", err)
+	}
+	if rep1.State != "success" {
+		t.Fatalf("site 1 report state = %s", rep1.State)
+	}
+
+	// Verify Site 1 is generated in web/1/
+	site1Index := filepath.Join(web, "1", "index.html")
+	b1, err := os.ReadFile(site1Index)
+	if err != nil {
+		t.Fatalf("site 1 index.html not found in independent directory: %v", err)
+	}
+	if !strings.Contains(string(b1), "site=站点一") {
+		t.Fatalf("site 1 content mismatch: %s", string(b1))
+	}
+
+	// Verify Site 1's English sub-site is in web/1/en/index.html (not web/en/)
+	site1EnIndex := filepath.Join(web, "1", "en", "index.html")
+	b1En, err := os.ReadFile(site1EnIndex)
+	if err != nil {
+		t.Fatalf("site 1 sub-site en/index.html not found inside site 1 directory: %v", err)
+	}
+	if !strings.Contains(string(b1En), "site=站点一") {
+		t.Fatalf("site 1 en content mismatch: %s", string(b1En))
+	}
+
+	// Verify root web/index.html does NOT exist
+	if _, err := os.Stat(filepath.Join(web, "index.html")); err == nil {
+		t.Fatalf("web/index.html should not exist when sites generate into independent directories")
+	}
+
+	// 2. Generate Site 2 (OutputDir is empty -> web/2)
+	pub2 := Publisher{
+		DB:        database,
+		Web:       web,
+		Templates: templates,
+		Data:      filepath.Join(root, "data"),
+		SiteID:    2,
+	}
+	rep2, err := pub2.Generate(ctx)
+	if err != nil {
+		t.Fatalf("site 2 generate failed: %v", err)
+	}
+	if rep2.State != "success" {
+		t.Fatalf("site 2 report state = %s", rep2.State)
+	}
+
+	site2Index := filepath.Join(web, "2", "index.html")
+	b2, err := os.ReadFile(site2Index)
+	if err != nil {
+		t.Fatalf("site 2 index.html not found: %v", err)
+	}
+	if !strings.Contains(string(b2), "site=站点二") {
+		t.Fatalf("site 2 content mismatch: %s", string(b2))
+	}
+
+	// 3. Generate Site 2 with custom OutputDir "custom-portal"
+	pub2Custom := Publisher{
+		DB:        database,
+		Web:       web,
+		Templates: templates,
+		Data:      filepath.Join(root, "data"),
+		SiteID:    2,
+		OutputDir: "custom-portal",
+	}
+	if _, err := pub2Custom.Generate(ctx); err != nil {
+		t.Fatalf("site 2 custom generate failed: %v", err)
+	}
+	customIndex := filepath.Join(web, "custom-portal", "index.html")
+	if _, err := os.ReadFile(customIndex); err != nil {
+		t.Fatalf("custom-portal index.html not found: %v", err)
+	}
+}
+
+

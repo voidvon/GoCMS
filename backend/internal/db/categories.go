@@ -19,6 +19,7 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 	if _, err := database.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS "`+unifiedCategoryTable+`" (
 			"id" INTEGER PRIMARY KEY AUTOINCREMENT,
+			"site_id" INTEGER NOT NULL DEFAULT 1,
 			"name" TEXT NOT NULL,
 			"parent_id" INTEGER NOT NULL DEFAULT 0,
 			"order_id" INTEGER NOT NULL DEFAULT 0,
@@ -42,6 +43,7 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("create category table: %w", err)
 	}
 	for _, statement := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_gocms_category_site ON "gocms_category" ("site_id", "parent_id", "order_id", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_category_parent ON "gocms_category" ("parent_id", "order_id", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_category_model ON "gocms_category" ("model_id", "id")`,
 	} {
@@ -50,6 +52,7 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	for name, definition := range map[string]string{
+		"site_id":        "INTEGER NOT NULL DEFAULT 1",
 		"list_page_size": "INTEGER NOT NULL DEFAULT 14",
 		"page_type":      "TEXT NOT NULL DEFAULT 'list'",
 		"cover_template": "TEXT NOT NULL DEFAULT ''",
@@ -64,6 +67,10 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 			return err
 		}
 	}
+	_, _ = database.ExecContext(ctx, `
+		UPDATE "gocms_category"
+		SET "site_id" = 1
+		WHERE "site_id" <= 0 OR "site_id" IS NULL`)
 	if _, err := database.ExecContext(ctx, `
 		UPDATE "gocms_category"
 		SET "page_type" = 'list'

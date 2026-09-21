@@ -3,12 +3,43 @@ package site
 import (
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
+
+	"gocms/internal/db"
 )
 
-func (s *Server) resourceRoots(requestPath string) ([]string, string, bool) {
+func (s *Server) resourceRoots(r *http.Request) ([]string, string, bool) {
 	themeRoot, _ := s.themePaths()
+	var siteID int64 = 1
+	var themeID string
+	if s.database != nil && r != nil {
+		if matched, err := db.GetSiteByHost(r.Context(), s.database, r.Host); err == nil && matched != nil {
+			siteID = matched.ID
+			themeID = matched.ThemeID
+		}
+	}
+	siteIDStr := strconv.FormatInt(siteID, 10)
+
+	if themeID != "" && s.assetsRoot != "" {
+		siteThemeAssets := filepath.Join(s.assetsRoot, siteIDStr, "themes", themeID, "assets")
+		if stat, err := os.Stat(siteThemeAssets); err == nil && stat.IsDir() {
+			themeRoot = siteThemeAssets
+		} else {
+			fallbackThemeAssets := filepath.Join(s.assetsRoot, "1", "themes", themeID, "assets")
+			if stat, err := os.Stat(fallbackThemeAssets); err == nil && stat.IsDir() {
+				themeRoot = fallbackThemeAssets
+			}
+		}
+	} else if s.themeBase != "" && themeID != "" {
+		siteThemeAssets := filepath.Join(s.themeBase, themeID, "assets")
+		if stat, err := os.Stat(siteThemeAssets); err == nil && stat.IsDir() {
+			themeRoot = siteThemeAssets
+		}
+	}
+
 	themeRoots := func(directory string) []string {
 		if themeRoot == "" {
 			return nil
@@ -20,10 +51,34 @@ func (s *Server) resourceRoots(requestPath string) ([]string, string, bool) {
 		roots  func() []string
 	}{
 		{
-			prefix: "/images/",
+			prefix: "/assets/",
+			roots: func() []string {
+				if s.assetsRoot != "" {
+					return []string{s.assetsRoot}
+				}
+				return nil
+			},
+		},
+		{
+			prefix: "/uploads/",
 			roots: func() []string {
 				roots := make([]string, 0, 2)
 				if s.assetsRoot != "" {
+					roots = append(roots, filepath.Join(s.assetsRoot, siteIDStr, "uploads"))
+					if siteID != 1 {
+						roots = append(roots, filepath.Join(s.assetsRoot, "1", "uploads"))
+					}
+				}
+				return roots
+			},
+		},
+		{
+			prefix: "/images/",
+			roots: func() []string {
+				roots := make([]string, 0, 4)
+				if s.assetsRoot != "" {
+					roots = append(roots, filepath.Join(s.assetsRoot, siteIDStr, "images"))
+					roots = append(roots, filepath.Join(s.assetsRoot, "1", "images"))
 					roots = append(roots, filepath.Join(s.assetsRoot, "images"))
 				}
 				if themeRoot != "" {
@@ -36,13 +91,24 @@ func (s *Server) resourceRoots(requestPath string) ([]string, string, bool) {
 		{prefix: "/js/", roots: func() []string { return themeRoots("js") }},
 		{prefix: "/skin/", roots: func() []string { return themeRoots("skin") }},
 	} {
+		requestPath := r.URL.Path
 		lower := strings.ToLower(requestPath)
 		base := strings.TrimSuffix(route.prefix, "/")
 		if lower == base {
 			return route.roots(), "", true
 		}
 		if strings.HasPrefix(lower, route.prefix) {
-			return route.roots(), requestPath[len(route.prefix):], true
+			rel := requestPath[len(route.prefix):]
+			if route.prefix == "/assets/" {
+				cleanRel := path.Clean("/" + strings.ReplaceAll(rel, `\`, "/"))
+				lowerRel := strings.ToLower(cleanRel)
+				if strings.HasPrefix(lowerRel, "/theme/") || strings.HasPrefix(lowerRel, "/themes/") ||
+					strings.Contains(lowerRel, "/themes/") || strings.Contains(lowerRel, "/theme/") ||
+					strings.HasSuffix(lowerRel, ".html") || strings.HasSuffix(lowerRel, ".json") {
+					return nil, "", false
+				}
+			}
+			return route.roots(), rel, true
 		}
 	}
 	return nil, "", false
@@ -50,7 +116,7 @@ func (s *Server) resourceRoots(requestPath string) ([]string, string, bool) {
 
 // Files are opened inside the configured resource roots, without allowing symlink escapes.
 func (s *Server) serveResource(w http.ResponseWriter, r *http.Request) bool {
-	roots, rel, ok := s.resourceRoots(r.URL.Path)
+	roots, rel, ok := s.resourceRoots(r)
 	if !ok {
 		return false
 	}

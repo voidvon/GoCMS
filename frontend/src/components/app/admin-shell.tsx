@@ -3,6 +3,8 @@ import { useEffect, useState, type ComponentType } from "react"
 import {
   BarChart3,
   Boxes,
+  Building2,
+  ChevronDown,
   ChevronsUpDown,
   FolderTree,
   LayoutDashboard,
@@ -15,10 +17,15 @@ import {
   Languages,
   Palette,
   Paperclip,
+  ScrollText,
+  Users,
+  UserCheck,
 } from "lucide-react"
 
 import { logout, type AdminUser } from "@/lib/api"
 import { LanguageProvider } from "@/lib/language-context"
+import { SiteProvider, useSite } from "@/lib/site-context"
+import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
@@ -54,6 +61,7 @@ import { ApiKeysPage } from "@/components/app/api-keys-page"
 import { MediaPage } from "@/components/app/media-page"
 import { UsersPage } from "@/components/app/users-page"
 import { LogsPage } from "@/components/app/logs-page"
+import { SitesPage } from "@/components/app/sites-page"
 
 import { PublishPage } from "@/components/app/publish-page"
 import { SettingsDialog } from "@/components/app/settings-dialog"
@@ -79,7 +87,7 @@ type NavigationItem = {
   icon: ComponentType<{ className?: string }>
 }
 
-const navigationItems: NavigationItem[] = [
+const mainNavItems: NavigationItem[] = [
   { id: "overview", label: "仪表盘", icon: LayoutDashboard },
   { id: "content", label: "内容", icon: FileText },
   { id: "media", label: "附件", icon: Paperclip },
@@ -88,27 +96,50 @@ const navigationItems: NavigationItem[] = [
   { id: "messages", label: "信息反馈", icon: MessageSquareText },
   { id: "publish", label: "网站发布", icon: Globe },
   { id: "theme", label: "模板管理", icon: Palette },
-  { id: "models", label: "系统模型", icon: Boxes },
-  { id: "api-keys", label: "API Key", icon: KeyRound },
-  { id: "users", label: "用户管理", icon: KeyRound },
-  { id: "members", label: "会员管理", icon: KeyRound },
-  { id: "logs", label: "操作日志", icon: FileText },
 ]
 
-function canView(user: AdminUser, view: AdminView) {
-  if (view === "users" || view === "members") return user.is_super
+const platformNavItems: NavigationItem[] = [
+  { id: "sites", label: "多站点", icon: Globe },
+  { id: "users", label: "用户管理", icon: Users },
+  { id: "members", label: "会员管理", icon: UserCheck },
+  { id: "models", label: "系统模型", icon: Boxes },
+  { id: "api-keys", label: "API Key", icon: KeyRound },
+  { id: "logs", label: "操作日志", icon: ScrollText },
+]
+
+function canView(user: AdminUser, view: AdminView, activeSiteId?: number) {
+  if (view === "sites" || view === "users" || view === "members") return user.is_super
   if (view === "logs") return user.is_super || user.permissions.includes("logs") || user.permissions.includes("login_logs")
-  return user.is_super || view === "overview" || user.permissions.includes(view)
+  if (user.is_super || view === "overview") return true
+  if (activeSiteId && user.site_permissions && user.site_permissions[activeSiteId]) {
+    const sitePerms = user.site_permissions[activeSiteId]
+    return sitePerms.includes(view) || sitePerms.includes("*")
+  }
+  return user.permissions.includes(view)
 }
 
 function Navigation({ activeView, onNavigate, onClose, collapsed = false, user }: NavigationProps) {
+  const { activeSite } = useSite()
+  const visibleMainItems = mainNavItems.filter((item) => canView(user, item.id, activeSite?.id))
+  const visiblePlatformItems = platformNavItems.filter((item) => canView(user, item.id, activeSite?.id))
+  const isPlatformActive = visiblePlatformItems.some((item) => item.id === activeView)
+
+  const [platformOpen, setPlatformOpen] = useState(true)
+
+  useEffect(() => {
+    if (isPlatformActive) {
+      setPlatformOpen(true)
+    }
+  }, [isPlatformActive])
+
   return (
     <nav aria-label="主导航" className="space-y-1">
-      {navigationItems.filter((item) => canView(user, item.id)).map((item) => {
+      {visibleMainItems.map((item) => {
         const Icon = item.icon
         const active = activeView === item.id
         const button = (
           <Button
+            key={item.id}
             variant={active ? "secondary" : "ghost"}
             className={cn("w-full justify-start gap-3", active && "font-medium", collapsed && "justify-center px-0")}
             aria-label={item.label}
@@ -127,8 +158,107 @@ function Navigation({ activeView, onNavigate, onClose, collapsed = false, user }
             <TooltipTrigger render={button} />
             <TooltipContent side="right">{item.label}</TooltipContent>
           </Tooltip>
-        ) : <div key={item.id}>{button}</div>
+        ) : (
+          <div key={item.id}>{button}</div>
+        )
       })}
+
+      {visiblePlatformItems.length > 0 && (
+        <div className="pt-2">
+          {collapsed ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant={isPlatformActive ? "secondary" : "ghost"}
+                    className="w-full justify-center px-0"
+                    aria-label="平台管理"
+                    title="平台管理"
+                  >
+                    <Building2 />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent side="right" align="start" className="w-44">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>平台管理</DropdownMenuLabel>
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+                {visiblePlatformItems.map((item) => {
+                  const Icon = item.icon
+                  const active = activeView === item.id
+                  return (
+                    <DropdownMenuItem
+                      key={item.id}
+                      className={cn("flex items-center gap-2 cursor-pointer", active && "bg-secondary font-medium")}
+                      onClick={() => {
+                        onNavigate(item.id)
+                        onClose?.()
+                      }}
+                    >
+                      <Icon className="size-4 shrink-0" />
+                      <span>{item.label}</span>
+                    </DropdownMenuItem>
+                  )
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <div className="space-y-1">
+              <div className="my-1 border-t border-border/40 mx-2" />
+              <Button
+                variant={isPlatformActive ? "secondary" : "ghost"}
+                className={cn(
+                  "w-full justify-between gap-2 px-3 font-normal text-muted-foreground hover:text-foreground",
+                  isPlatformActive && "text-foreground font-medium"
+                )}
+                onClick={() => setPlatformOpen((open) => !open)}
+                aria-expanded={platformOpen}
+                aria-label="平台管理"
+              >
+                <div className="flex items-center gap-3">
+                  <Building2 className="size-4 shrink-0" />
+                  <span className="text-sm">平台管理</span>
+                </div>
+                <ChevronDown
+                  className={cn(
+                    "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
+                    !platformOpen && "-rotate-90"
+                  )}
+                />
+              </Button>
+              {platformOpen && (
+                <div className="ml-4 pl-3 border-l border-border/60 space-y-1 pt-0.5">
+                  {visiblePlatformItems.map((item) => {
+                    const Icon = item.icon
+                    const active = activeView === item.id
+                    return (
+                      <Button
+                        key={item.id}
+                        variant={active ? "secondary" : "ghost"}
+                        size="sm"
+                        className={cn(
+                          "w-full justify-start gap-2.5 h-8 text-xs font-normal text-muted-foreground hover:text-foreground",
+                          active && "font-medium text-foreground bg-secondary"
+                        )}
+                        aria-label={item.label}
+                        aria-current={active ? "page" : undefined}
+                        onClick={() => {
+                          onNavigate(item.id)
+                          onClose?.()
+                        }}
+                      >
+                        <Icon className="size-3.5 shrink-0" />
+                        <span>{item.label}</span>
+                      </Button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </nav>
   )
 }
@@ -210,14 +340,20 @@ function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarP
   )
 }
 
-function viewMeta(view: AdminView) {
+function viewMeta(view: AdminView): { parent?: string; title: string; description: string } {
   switch (view) {
+    case "sites":
+      return { parent: "平台管理", title: "多站点管理", description: "管理各独立网站实体、域名与主题配置" }
     case "logs":
-      return { title: "操作日志", description: "查看后台操作记录" }
+      return { parent: "平台管理", title: "操作日志", description: "查看后台操作记录" }
     case "members":
-      return { title: "会员管理", description: "管理前台会员、会员组和 VIP 有效期" }
+      return { parent: "平台管理", title: "会员管理", description: "管理前台会员、会员组和 VIP 有效期" }
     case "users":
-      return { title: "用户管理", description: "管理后台账号、用户组和模块权限" }
+      return { parent: "平台管理", title: "用户管理", description: "管理后台账号、用户组和模块权限" }
+    case "models":
+      return { parent: "平台管理", title: "系统模型", description: "管理数据表、扩展字段与系统内容模型" }
+    case "api-keys":
+      return { parent: "平台管理", title: "API Key", description: "管理用于外部系统调用接口的 API 凭据" }
     case "media":
       return { title: "附件管理", description: "管理全站上传图片及内容引用" }
     case "publish":
@@ -228,14 +364,10 @@ function viewMeta(view: AdminView) {
       return { title: "内容", description: "维护内容、分类和公开展示状态" }
     case "categories":
       return { title: "分类", description: "维护统一的栏目树和页面生成规则" }
-    case "models":
-      return { title: "系统模型", description: "管理数据表、扩展字段与系统内容模型" }
     case "languages":
       return { title: "多语言配置", description: "配置网站多语言、主站与兜底语言回退机制" }
     case "messages":
       return { title: "信息反馈", description: "管理自定义反馈分类、字段及用户提交信息" }
-    case "api-keys":
-      return { title: "API Key", description: "管理用于外部系统调用接口的 API 凭据" }
     default:
       return { title: "仪表盘", description: "站点内容和运营数据" }
   }
@@ -244,6 +376,8 @@ function viewMeta(view: AdminView) {
 function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
   if (!canView(user, view)) return <p className="text-sm text-muted-foreground">当前用户组没有此模块的管理权限。</p>
   switch (view) {
+    case "sites":
+      return <SitesPage />
     case "logs":
       return <LogsPage user={user} />
     case "members":
@@ -275,11 +409,13 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
 
 export function AdminShell({ user, onLogout }: AdminShellProps) {
   return (
-    <LanguageProvider>
-      <HeaderActionsProvider>
-        <AdminShellInner user={user} onLogout={onLogout} />
-      </HeaderActionsProvider>
-    </LanguageProvider>
+    <SiteProvider>
+      <LanguageProvider>
+        <HeaderActionsProvider>
+          <AdminShellInner user={user} onLogout={onLogout} />
+        </HeaderActionsProvider>
+      </LanguageProvider>
+    </SiteProvider>
   )
 }
 
@@ -379,11 +515,17 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
               </SheetContent>
             </Sheet>
             <div>
-              <h1 className="text-sm font-semibold tracking-tight">{meta.title}</h1>
+              <h1 className="text-sm font-semibold tracking-tight">
+                {meta.parent && <span className="text-muted-foreground font-normal">{meta.parent} / </span>}
+                {meta.title}
+              </h1>
               <p className="hidden text-xs text-muted-foreground sm:block">{meta.description}</p>
             </div>
           </div>
-          <HeaderActionsSlot className="flex items-center gap-2" />
+          <div className="flex items-center gap-2">
+            <SiteSwitcher onNavigate={navigate} />
+            <HeaderActionsSlot className="flex items-center gap-2" />
+          </div>
         </header>
         <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6 lg:overflow-hidden">
           <div className="mx-auto h-full w-full max-w-screen-2xl min-h-0">
@@ -392,5 +534,50 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
         </main>
       </div>
     </div>
+  )
+}
+
+function SiteSwitcher({ onNavigate }: { onNavigate: (view: AdminView) => void }) {
+  const { sites, activeSite, setActiveSite } = useSite()
+  if (!sites || sites.length === 0) return null
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="outline" size="sm" className="h-8 gap-2 px-2.5 text-xs font-normal">
+            <Globe className="h-3.5 w-3.5 text-primary" />
+            <span className="max-w-[120px] truncate font-medium sm:max-w-[160px]">
+              {activeSite?.name || "选择站点"}
+            </span>
+            <ChevronsUpDown className="h-3 w-3 opacity-50" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">切换管理站点</DropdownMenuLabel>
+          {sites.map((s) => (
+            <DropdownMenuItem
+              key={s.id}
+              className="flex items-center justify-between text-xs cursor-pointer"
+              onClick={() => setActiveSite(s)}
+            >
+              <span className="truncate">{s.name}</span>
+              {s.id === activeSite?.id && (
+                <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4">当前</Badge>
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="text-xs text-primary cursor-pointer"
+          onClick={() => onNavigate("sites")}
+        >
+          多站点管理...
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
