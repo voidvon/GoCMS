@@ -53,6 +53,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		if err := db.EnsureAdminUsers(context.Background(), database); err != nil {
 			return nil, err
 		}
+		if err := db.EnsureSiteUsers(context.Background(), database); err != nil {
+			return nil, err
+		}
 		if err := db.EnsureAuditLog(context.Background(), database); err != nil {
 			return nil, err
 		}
@@ -78,6 +81,13 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) {
+	if strings.HasPrefix(request.URL.Path, "/api/v1/") {
+		s.memberAPI(response, request)
+		return
+	}
+	if strings.HasPrefix(request.URL.Path, "/api/auth/") && !memberRequest(response, request) {
+		return
+	}
 	cleanPath := request.URL.Path
 	if cleanPath != "/" {
 		cleanPath = strings.TrimSuffix(cleanPath, "/")
@@ -101,6 +111,14 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		}
 	}
 	switch lowerAdminPath {
+	case "/api/auth/register":
+		s.userRegister(response, request)
+	case "/api/auth/login":
+		s.userLogin(response, request)
+	case "/api/auth/logout":
+		s.userLogout(response, request)
+	case "/api/auth/session":
+		s.userSession(response, request)
 	case "/api/admin/setup-status":
 		s.adminSetupStatus(response, request)
 	case "/api/admin/logs":
@@ -111,6 +129,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminClearLogs(response, request)
 	case "/api/admin/users":
 		s.adminUsers(response, request)
+	case "/api/admin/site-users":
+		s.adminSiteUsers(response, request)
+	case "/api/admin/member-groups":
+		s.adminMemberGroups(response, request)
 	case "/api/admin/groups":
 		s.adminGroups(response, request)
 	case "/api/admin/update/check":

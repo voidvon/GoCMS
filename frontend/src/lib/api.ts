@@ -910,3 +910,34 @@ export function getMediaItem(id: number) {
 export function deleteMedia(id: number) {
   return request<{ ok: boolean }>(`/api/admin/media/${id}`, { method: "DELETE" })
 }
+
+export type SiteUser = {
+  max_sessions: number
+  id: number
+  username: string
+  email?: string
+  display_name: string
+  status: "active" | "disabled" | "pending"
+  created_at: string
+  last_login_at?: string
+}
+export const getSiteUsers = (page: number, q: string) =>
+  request<{ items: SiteUser[]; total: number; page_size: number }>(`/api/admin/site-users?page=${page}&q=${encodeURIComponent(q)}`)
+export const setSiteUserStatus = (id: number, status: SiteUser["status"]) =>
+  request("/api/admin/site-users", { method: "PATCH", body: JSON.stringify({ id, status }) })
+export const deleteSiteUser = (id: number) =>
+  request("/api/admin/site-users", { method: "DELETE", body: JSON.stringify({ id }) })
+export type MemberGroup = { id: number; name: string; slug: string; description: string; sort_order: number; status: "active" | "disabled" }
+export type MemberGroupMember = { id: number; username: string; email: string; display_name: string; status: string; expires_at?: string }
+export const getMemberGroups = () => request<{ items: MemberGroup[] }>("/api/admin/member-groups")
+export const saveMemberGroup = (input: Partial<MemberGroup> & { id?: number }) => request("/api/admin/member-groups", { method: input.id ? "PATCH" : "POST", body: JSON.stringify(input) })
+export const deleteMemberGroup = (id: number) => request("/api/admin/member-groups", { method: "DELETE", body: JSON.stringify({ id }) })
+export const getMemberGroupMembers = (id: number) => request<{ items: MemberGroupMember[] }>(`/api/admin/member-groups?group_id=${id}`)
+export const assignMemberGroup = (user_id: number, group_id: number, expires_at?: string) => request("/api/admin/member-groups", { method: "POST", body: JSON.stringify({ user_id, group_id, expires_at: expires_at || null }) })
+export const removeMemberGroup = (user_id: number, group_id: number) => request("/api/admin/member-groups", { method: "DELETE", body: JSON.stringify({ user_id, group_id }) })
+
+
+export const setSiteUserSessionLimit = (id: number, max_sessions: number) =>
+  request("/api/admin/site-users", { method: "PATCH", body: JSON.stringify({ id, max_sessions }) })
+export const revokeSiteUserSessions = (id: number) =>
+  request("/api/admin/site-users", { method: "PATCH", body: JSON.stringify({ id, revoke_sessions: true }) })

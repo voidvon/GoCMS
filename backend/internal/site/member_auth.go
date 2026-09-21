@@ -1,0 +1,136 @@
+package site
+
+import (
+	"net/http"
+	"strings"
+
+	"gocms/internal/member"
+)
+
+type siteUserCredentials struct {
+	Identifier string `json:"identifier"`
+	Username   string `json:"username"`
+	Email      string `json:"email"`
+	Password   string `json:"password"`
+}
+type siteUser struct {
+	ID          int64    `json:"id"`
+	Username    string   `json:"username"`
+	Email       string   `json:"email,omitempty"`
+	DisplayName string   `json:"display_name"`
+	AvatarURL   string   `json:"avatar_url,omitempty"`
+	Groups      []string `json:"groups,omitempty"`
+}
+
+func (s *Server) userRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var in siteUserCredentials
+	if memberDecode(r, &in) != nil {
+		http.Error(w, "invalid payload", 400)
+		return
+	}
+	if !s.memberAttempt(w, r, "register", in.Username, 10) {
+		return
+	}
+	p, err := (member.Service{DB: s.database}).Register(r.Context(), in.Username, in.Email, in.Password)
+	if err != nil {
+		memberResult(w, nil, err)
+		return
+	}
+	u := siteUser{ID: p.ID, Username: p.Username, Email: p.Email, DisplayName: p.DisplayName, AvatarURL: p.AvatarURL}
+	writeJSON(w, 201, map[string]any{"user": u})
+
+}
+
+func (s *Server) userLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	var in siteUserCredentials
+	if memberDecode(r, &in) != nil {
+		http.Error(w, "invalid payload", 400)
+		return
+	}
+	idf := strings.TrimSpace(in.Identifier)
+	if idf == "" {
+		idf = strings.TrimSpace(in.Username)
+	}
+	if !s.memberAttempt(w, r, "login", idf, 20) {
+		return
+	}
+	currentToken := ""
+	if cookie, err := r.Cookie("gocms_user"); err == nil {
+		currentToken = cookie.Value
+	}
+	p, token, err := (member.Service{DB: s.database}).Login(r.Context(), idf, in.Password, clientIP(r), r.UserAgent(), currentToken)
+	if err != nil {
+		memberResult(w, nil, err)
+		return
+	}
+	u := siteUser{ID: p.ID, Username: p.Username, Email: p.Email, DisplayName: p.DisplayName, AvatarURL: p.AvatarURL}
+	s.attachMemberGroups(r, &u)
+	http.SetCookie(w, userCookie(token, 30*24*60*60, r.TLS != nil))
+	writeJSON(w, 200, map[string]any{"user": u})
+
+}
+
+func (s *Server) userSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	u, ok := s.currentSiteUser(r)
+	if !ok {
+		writeJSON(w, 200, map[string]any{"user": nil})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"user": u})
+}
+
+func (s *Server) attachMemberGroups(r *http.Request, u *siteUser) {
+	memberships, err := (member.Service{DB: s.database}).Memberships(r.Context(), u.ID)
+	if err != nil {
+		return
+	}
+	for _, m := range memberships {
+		if m.Status == "active" {
+			u.Groups = append(u.Groups, m.Slug)
+		}
+	}
+
+}
+func (s *Server) userLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if c, e := r.Cookie("gocms_user"); e == nil {
+		if err := (member.Service{DB: s.database}).Logout(r.Context(), c.Value); err != nil {
+			memberResult(w, nil, err)
+			return
+		}
+	}
+	http.SetCookie(w, userCookie("", -1, r.TLS != nil))
+	writeJSON(w, 200, map[string]any{"ok": true})
+}
+func (s *Server) currentSiteUser(r *http.Request) (siteUser, bool) {
+	c, e := r.Cookie("gocms_user")
+	if e != nil {
+		return siteUser{}, false
+	}
+	p, err := (member.Service{DB: s.database}).Authenticate(r.Context(), c.Value)
+	if err != nil {
+		return siteUser{}, false
+	}
+	u := siteUser{ID: p.ID, Username: p.Username, Email: p.Email, DisplayName: p.DisplayName, AvatarURL: p.AvatarURL}
+	s.attachMemberGroups(r, &u)
+	return u, true
+}
+func hashToken(v string) string { return member.TokenHash(v) }
+func userCookie(v string, age int, secure bool) *http.Cookie {
+	return &http.Cookie{Name: "gocms_user", Value: v, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: age, Secure: secure}
+}

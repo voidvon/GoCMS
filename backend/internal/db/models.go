@@ -26,7 +26,7 @@ func EnsureModels(ctx context.Context, database *sql.DB) error {
 			"is_default" INTEGER NOT NULL DEFAULT 0,
 			"created_at" TEXT NOT NULL DEFAULT ''
 		)`); err != nil {
-			return fmt.Errorf("create model table table: %w", err)
+		return fmt.Errorf("create model table table: %w", err)
 	}
 
 	if _, err := database.ExecContext(ctx, `
@@ -332,4 +332,3 @@ func ensureModelFieldColumn(ctx context.Context, database *sql.DB, name, definit
 	}
 	return nil
 }
-

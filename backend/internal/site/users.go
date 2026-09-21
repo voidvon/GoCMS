@@ -99,7 +99,7 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 	}
 	*r = *r.WithContext(context.WithValue(r.Context(), contentScopeKey{}, u))
 	// API keys cannot administer accounts or groups even when owned by a super administrator.
-	if module == "users" || module == "groups" {
+	if module == "users" || module == "groups" || module == "site-users" || module == "member-groups" {
 		if u.IsSuper && session {
 			return true
 		}

@@ -1,3 +1,4 @@
+import { SiteUsersPage } from "@/components/app/site-users-page"
 import { useEffect, useState, type ComponentType } from "react"
 import {
   BarChart3,
@@ -89,11 +90,13 @@ const navigationItems: NavigationItem[] = [
   { id: "theme", label: "模板管理", icon: Palette },
   { id: "models", label: "系统模型", icon: Boxes },
   { id: "api-keys", label: "API Key", icon: KeyRound },
-  { id: "users", label: "用户与权限", icon: KeyRound },
+  { id: "users", label: "用户管理", icon: KeyRound },
+  { id: "members", label: "会员管理", icon: KeyRound },
   { id: "logs", label: "操作日志", icon: FileText },
 ]
 
 function canView(user: AdminUser, view: AdminView) {
+  if (view === "users" || view === "members") return user.is_super
   if (view === "logs") return user.is_super || user.permissions.includes("logs") || user.permissions.includes("login_logs")
   return user.is_super || view === "overview" || user.permissions.includes(view)
 }
@@ -211,8 +214,10 @@ function viewMeta(view: AdminView) {
   switch (view) {
     case "logs":
       return { title: "操作日志", description: "查看后台操作记录" }
+    case "members":
+      return { title: "会员管理", description: "管理前台会员、会员组和 VIP 有效期" }
     case "users":
-      return { title: "用户与权限", description: "管理后台账号、用户组和模块权限" }
+      return { title: "用户管理", description: "管理后台账号、用户组和模块权限" }
     case "media":
       return { title: "附件管理", description: "管理全站上传图片及内容引用" }
     case "publish":
@@ -241,6 +246,8 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
   switch (view) {
     case "logs":
       return <LogsPage user={user} />
+    case "members":
+      return <div className="h-full overflow-auto pb-6"><SiteUsersPage /></div>
     case "users":
       return <UsersPage currentUserID={user.id} />
     case "media":
