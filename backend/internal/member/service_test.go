@@ -2,8 +2,10 @@ package member
 
 import (
 	"context"
-	"gocms/internal/db"
+	"strings"
 	"testing"
+
+	"gocms/internal/db"
 )
 
 func TestMembershipTimeSemantics(t *testing.T) {
@@ -75,18 +77,7 @@ func TestAuthenticateMultiSiteScoping(t *testing.T) {
 		t.Fatalf("expected auth on site 1 to succeed, got %v", err)
 	}
 
-	// 2. Authenticate on Site 2 should fail (not a member of site 2)
-	_, err = svc.Authenticate(ctx, token, 2)
-	if err != ErrUnauthorized {
-		t.Fatalf("expected ErrUnauthorized on site 2, got %v", err)
-	}
-
-	// 3. Add to Site 2
-	if _, err := database.Exec("INSERT INTO gocms_site_member(site_id, user_id, status) VALUES(2, ?, 'active')", p.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	// 4. Authenticate on Site 2 should now succeed with unified display name
+	// 2. Authenticate on Site 2 should succeed and auto-join Site 2
 	auth2, err := svc.Authenticate(ctx, token, 2)
 	if err != nil || auth2.ID != p.ID {
 		t.Fatalf("expected auth on site 2 to succeed, got %v", err)
@@ -95,25 +86,30 @@ func TestAuthenticateMultiSiteScoping(t *testing.T) {
 		t.Fatalf("expected display name 'alice', got %q", auth2.DisplayName)
 	}
 
-	// 5. Ban/disable member on Site 2
-	if _, err := database.Exec("UPDATE gocms_site_member SET status='disabled' WHERE site_id=2 AND user_id=?", p.ID); err != nil {
+	// 3. Verify user's site_ids in DB contains [1, 2]
+	var sidsRaw string
+	if err := database.QueryRow("SELECT site_ids FROM gocms_user WHERE id=?", p.ID).Scan(&sidsRaw); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sidsRaw, "1") || !strings.Contains(sidsRaw, "2") {
+		t.Fatalf("expected site_ids to contain 1 and 2, got %q", sidsRaw)
+	}
+
+	// 4. Disable user globally
+	if _, err := database.Exec("UPDATE gocms_user SET status='disabled' WHERE id=?", p.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	// 6. Authenticate on Site 2 should fail
-	_, err = svc.Authenticate(ctx, token, 2)
-	if err != ErrUnauthorized {
-		t.Fatalf("expected ErrUnauthorized on site 2 after ban, got %v", err)
+	// 5. Authenticate on Site 2 and Site 1 should fail
+	if _, err = svc.Authenticate(ctx, token, 2); err != ErrUnauthorized {
+		t.Fatalf("expected ErrUnauthorized on site 2 after disable, got %v", err)
+	}
+	if _, err = svc.Authenticate(ctx, token, 1); err != ErrUnauthorized {
+		t.Fatalf("expected ErrUnauthorized on site 1 after disable, got %v", err)
 	}
 
-	// 7. Authenticate on Site 1 should still succeed
-	auth1After, err := svc.Authenticate(ctx, token, 1)
-	if err != nil || auth1After.ID != p.ID {
-		t.Fatalf("expected auth on site 1 to still succeed, got %v", err)
-	}
-
-	// 8. Re-enable Site 2 and test unified Profile & UpdateProfile
-	if _, err := database.Exec("UPDATE gocms_site_member SET status='active' WHERE site_id=2 AND user_id=?", p.ID); err != nil {
+	// 6. Re-enable user and test unified Profile & UpdateProfile
+	if _, err := database.Exec("UPDATE gocms_user SET status='active' WHERE id=?", p.ID); err != nil {
 		t.Fatal(err)
 	}
 	prof, err := svc.Profile(ctx, p.ID)

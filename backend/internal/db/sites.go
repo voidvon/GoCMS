@@ -520,9 +520,7 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 		"gocms_site_setting",
 		"gocms_template_assignment",
 		"gocms_template_label",
-		"gocms_site_member",
 		"gocms_user_group",
-		"gocms_user",
 		"gocms_admin_operation",
 	}
 	for _, t := range tables {
@@ -531,6 +529,58 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 		if count > 0 {
 			if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM "%s" WHERE "site_id" = ?`, t), id); err != nil {
 				return fmt.Errorf("delete site records from %s: %w", t, err)
+			}
+		}
+	}
+
+	// Clean up users associated with the deleted site
+	var userTableCount int
+	_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'gocms_user'`).Scan(&userTableCount)
+	if userTableCount > 0 {
+		rows, err := tx.QueryContext(ctx, `SELECT id, site_id, COALESCE(site_ids, '[]') FROM gocms_user`)
+		if err == nil {
+			type userCleanUp struct {
+				uid        int64
+				nextSiteID int64
+				newSiteIDs string
+				shouldDel  bool
+			}
+			var toClean []userCleanUp
+			for rows.Next() {
+				var uid, uSiteID int64
+				var rawSIDs string
+				if err := rows.Scan(&uid, &uSiteID, &rawSIDs); err == nil {
+					var ids []int64
+					_ = json.Unmarshal([]byte(rawSIDs), &ids)
+					hasDeletedSite := (uSiteID == id)
+					otherSites := make([]int64, 0, len(ids))
+					for _, sid := range ids {
+						if sid == id {
+							hasDeletedSite = true
+						} else {
+							otherSites = append(otherSites, sid)
+						}
+					}
+					if hasDeletedSite {
+						if len(otherSites) == 0 {
+							toClean = append(toClean, userCleanUp{uid: uid, shouldDel: true})
+						} else {
+							nextSite := otherSites[0]
+							newJSON, _ := json.Marshal(otherSites)
+							toClean = append(toClean, userCleanUp{uid: uid, nextSiteID: nextSite, newSiteIDs: string(newJSON)})
+						}
+					}
+				}
+			}
+			rows.Close()
+			for _, u := range toClean {
+				if u.shouldDel {
+					_, _ = tx.ExecContext(ctx, `DELETE FROM gocms_user WHERE id = ?`, u.uid)
+					_, _ = tx.ExecContext(ctx, `DELETE FROM gocms_user_group_member WHERE user_id = ?`, u.uid)
+					_, _ = tx.ExecContext(ctx, `DELETE FROM gocms_user_session WHERE user_id = ?`, u.uid)
+				} else {
+					_, _ = tx.ExecContext(ctx, `UPDATE gocms_user SET site_id = ?, site_ids = ? WHERE id = ?`, u.nextSiteID, u.newSiteIDs, u.uid)
+				}
 			}
 		}
 	}

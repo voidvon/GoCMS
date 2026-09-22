@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/mail"
 	"strings"
 	"time"
@@ -42,7 +44,8 @@ func (s Service) Register(ctx context.Context, username, email, password string,
 	if len(siteID) > 0 && siteID[0] > 0 {
 		sid = siteID[0]
 	}
-	result, err := s.DB.ExecContext(ctx, "INSERT INTO gocms_user(site_id,username,email,password_hash,display_name) VALUES(?,?,?,?,?)", sid, username, email, encoded, username)
+	siteIDsJSON := fmt.Sprintf("[%d]", sid)
+	result, err := s.DB.ExecContext(ctx, "INSERT INTO gocms_user(site_id,site_ids,username,email,password_hash,display_name) VALUES(?,?,?,?,?,?)", sid, siteIDsJSON, username, email, encoded, username)
 	if err != nil {
 		var constraint interface{ Code() int }
 		if errors.As(err, &constraint) && constraint.Code()&255 == 19 {
@@ -54,34 +57,55 @@ func (s Service) Register(ctx context.Context, username, email, password string,
 	if err != nil {
 		return Profile{}, err
 	}
-	_, _ = s.DB.ExecContext(ctx, "INSERT OR IGNORE INTO gocms_site_member(site_id,user_id,status) VALUES(?,?,?)", sid, id, "active")
 	return s.Profile(ctx, id)
 }
 func (s Service) Login(ctx context.Context, identifier, password, ip, agent string, currentToken string, siteIDOpt ...int64) (Profile, string, error) {
 	if len(identifier) > 254 || len(password) > 1024 {
 		return Profile{}, "", ErrInvalid
 	}
-	var id int64
-	var encoded, status, siteStatus string
-	query := "SELECT u.id, u.password_hash, u.status, u.status FROM gocms_user u WHERE (u.username=? OR (u.email<>'' AND u.email=?))"
+	var id, originSiteID int64
+	var encoded, status, rawSiteIDs string
+	query := "SELECT u.id, u.site_id, u.password_hash, u.status, COALESCE(u.site_ids, '[]') FROM gocms_user u WHERE (u.username=? OR (u.email<>'' AND u.email=?))"
 	args := []any{identifier, strings.ToLower(identifier)}
-	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
-		query = `SELECT u.id, u.password_hash, u.status, COALESCE(sm.status, u.status)
-		         FROM gocms_user u
-		         LEFT JOIN gocms_site_member sm ON sm.user_id = u.id AND sm.site_id = ?
-		         WHERE (u.username=? OR (u.email<>'' AND u.email=?))
-		           AND (u.site_id=? OR sm.site_id=?)`
-		args = []any{siteIDOpt[0], identifier, strings.ToLower(identifier), siteIDOpt[0], siteIDOpt[0]}
-	}
-	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&id, &encoded, &status, &siteStatus)
+	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&id, &originSiteID, &encoded, &status, &rawSiteIDs)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Profile{}, "", err
 	}
-	if err != nil || status != "active" || siteStatus != "active" || !auth.ComparePassword(password, encoded) {
+	if err != nil || status != "active" || !auth.ComparePassword(password, encoded) {
 		if _, e := s.DB.ExecContext(ctx, "INSERT INTO gocms_user_login(identifier,success,ip) VALUES(?,0,?)", identifier, ip); e != nil {
 			return Profile{}, "", e
 		}
 		return Profile{}, "", ErrUnauthorized
+	}
+
+	// Auto-join site on login
+	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
+		targetSiteID := siteIDOpt[0]
+		var sids []int64
+		_ = json.Unmarshal([]byte(rawSiteIDs), &sids)
+		hasOrigin := false
+		hasTarget := false
+		for _, sid := range sids {
+			if sid == originSiteID {
+				hasOrigin = true
+			}
+			if sid == targetSiteID {
+				hasTarget = true
+			}
+		}
+		needsUpdate := false
+		if !hasOrigin && originSiteID > 0 {
+			sids = append(sids, originSiteID)
+			needsUpdate = true
+		}
+		if !hasTarget {
+			sids = append(sids, targetSiteID)
+			needsUpdate = true
+		}
+		if needsUpdate {
+			newJSON, _ := json.Marshal(sids)
+			_, _ = s.DB.ExecContext(ctx, "UPDATE gocms_user SET site_ids=? WHERE id=?", string(newJSON), id)
+		}
 	}
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -149,33 +173,55 @@ func (s Service) Login(ctx context.Context, identifier, password, ip, agent stri
 
 func (s Service) Authenticate(ctx context.Context, token string, siteIDOpt ...int64) (Profile, error) {
 	var p Profile
-	var status, siteStatus string
-	query := `SELECT u.id, u.username, u.email, u.display_name, u.avatar_url, u.status, u.status
+	var originSiteID int64
+	var status, rawSiteIDs string
+	query := `SELECT u.id, u.site_id, u.username, u.email, u.display_name, u.avatar_url, u.status, COALESCE(u.site_ids, '[]')
 	          FROM gocms_user u
 	          JOIN gocms_user_session s ON s.user_id=u.id
 	          WHERE s.token_hash=? AND s.expires_at>?`
 	args := []any{TokenHash(token), time.Now().Unix()}
 
-	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
-		sid := siteIDOpt[0]
-		query = `SELECT u.id, u.username, u.email, u.display_name, u.avatar_url, u.status, COALESCE(sm.status, u.status)
-		         FROM gocms_user u
-		         JOIN gocms_user_session s ON s.user_id=u.id
-		         LEFT JOIN gocms_site_member sm ON sm.user_id=u.id AND sm.site_id=?
-		         WHERE s.token_hash=? AND s.expires_at>?
-		           AND (u.site_id=? OR sm.site_id=?)`
-		args = []any{sid, TokenHash(token), time.Now().Unix(), sid, sid}
-	}
-	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&p.ID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL, &status, &siteStatus)
+	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&p.ID, &originSiteID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL, &status, &rawSiteIDs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrUnauthorized
 	}
 	if err != nil {
 		return p, err
 	}
-	if status != "active" || siteStatus != "active" {
+	if status != "active" {
 		return p, ErrUnauthorized
 	}
+
+	// Auto-join site on authenticate
+	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
+		targetSiteID := siteIDOpt[0]
+		var sids []int64
+		_ = json.Unmarshal([]byte(rawSiteIDs), &sids)
+		hasOrigin := false
+		hasTarget := false
+		for _, sid := range sids {
+			if sid == originSiteID {
+				hasOrigin = true
+			}
+			if sid == targetSiteID {
+				hasTarget = true
+			}
+		}
+		needsUpdate := false
+		if !hasOrigin && originSiteID > 0 {
+			sids = append(sids, originSiteID)
+			needsUpdate = true
+		}
+		if !hasTarget {
+			sids = append(sids, targetSiteID)
+			needsUpdate = true
+		}
+		if needsUpdate {
+			newJSON, _ := json.Marshal(sids)
+			_, _ = s.DB.ExecContext(ctx, "UPDATE gocms_user SET site_ids=? WHERE id=?", string(newJSON), p.ID)
+		}
+	}
+
 	return p, nil
 }
 func (s Service) Logout(ctx context.Context, token string) error {

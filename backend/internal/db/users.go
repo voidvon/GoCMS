@@ -77,7 +77,7 @@ func EnsureSiteUsers(ctx context.Context, database *sql.DB) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS gocms_user_event(id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,action TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_user_event_rate ON gocms_user_event(action,created_at)`,
-		`CREATE TABLE IF NOT EXISTS gocms_user (id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL DEFAULT 1, username TEXT NOT NULL UNIQUE, email TEXT NOT NULL DEFAULT '', password_hash TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '', avatar_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_login_at TEXT, last_login_ip TEXT)`,
+		`CREATE TABLE IF NOT EXISTS gocms_user (id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL DEFAULT 1, site_ids TEXT NOT NULL DEFAULT '[]', username TEXT NOT NULL UNIQUE, email TEXT NOT NULL DEFAULT '', password_hash TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '', avatar_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_login_at TEXT, last_login_ip TEXT)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_gocms_user_email ON gocms_user(email) WHERE email <> ''`,
 		`CREATE TABLE IF NOT EXISTS gocms_user_session (token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ip TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', FOREIGN KEY(user_id) REFERENCES gocms_user(id) ON DELETE CASCADE)`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_user_session_expiry ON gocms_user_session(expires_at)`,
@@ -85,9 +85,6 @@ func EnsureSiteUsers(ctx context.Context, database *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS gocms_user_group (id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL DEFAULT 1, name TEXT NOT NULL, slug TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active')`,
 		`CREATE TABLE IF NOT EXISTS gocms_user_group_member (user_id INTEGER NOT NULL, group_id INTEGER NOT NULL, started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TEXT, status TEXT NOT NULL DEFAULT 'active', PRIMARY KEY(user_id, group_id), FOREIGN KEY(user_id) REFERENCES gocms_user(id) ON DELETE CASCADE, FOREIGN KEY(group_id) REFERENCES gocms_user_group(id) ON DELETE CASCADE)`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_user_group_member_expiry ON gocms_user_group_member(user_id, expires_at)`,
-		`CREATE TABLE IF NOT EXISTS gocms_site_member (site_id INTEGER NOT NULL, user_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active', joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(site_id, user_id), FOREIGN KEY(user_id) REFERENCES gocms_user(id) ON DELETE CASCADE)`,
-		`CREATE INDEX IF NOT EXISTS idx_gocms_site_member_user ON gocms_site_member(user_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_gocms_site_member_site ON gocms_site_member(site_id, status)`,
 	}
 	for _, statement := range statements {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
@@ -111,6 +108,16 @@ func EnsureSiteUsers(ctx context.Context, database *sql.DB) error {
 			return err
 		}
 	}
+	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('gocms_user') WHERE name='site_ids'").Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		if _, err := database.ExecContext(ctx, "ALTER TABLE gocms_user ADD COLUMN site_ids TEXT NOT NULL DEFAULT '[]'"); err != nil {
+			return err
+		}
+	}
+	_, _ = database.ExecContext(ctx, "UPDATE gocms_user SET site_ids = '[' || site_id || ']' WHERE site_ids = '[]' OR site_ids IS NULL OR site_ids = ''")
+	_, _ = database.ExecContext(ctx, "DROP TABLE IF EXISTS gocms_site_member")
 	_, _ = database.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_gocms_user_site ON gocms_user(site_id, id)")
 
 	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('gocms_user_group') WHERE name='site_id'").Scan(&exists); err != nil {
@@ -128,9 +135,6 @@ func EnsureSiteUsers(ctx context.Context, database *sql.DB) error {
 	if _, err := database.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_user_session_owner ON gocms_user_session(user_id,expires_at)"); err != nil {
 		return err
 	}
-	_, _ = database.ExecContext(ctx, `
-		INSERT OR IGNORE INTO gocms_site_member (site_id, user_id, status, joined_at)
-		SELECT site_id, id, status, created_at FROM gocms_user`)
 
 	return nil
 }

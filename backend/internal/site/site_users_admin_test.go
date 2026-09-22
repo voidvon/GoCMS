@@ -325,16 +325,25 @@ func TestMultiSiteSecurityAndIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Try login on site 2 with credentials of site 1 member -> should fail 401
+	// Member of Site 1 logs into Site 2 -> succeeds and auto-joins Site 2
 	loginReqSite2 := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/auth/login?site_id=%d", site2ID), strings.NewReader(`{"username":"member_site1","password":"password123"}`))
 	loginReqSite2.Header.Set("Content-Type", "application/json")
 	wLoginS2 := httptest.NewRecorder()
 	s.Handler().ServeHTTP(wLoginS2, loginReqSite2)
-	if wLoginS2.Code != 401 {
-		t.Fatalf("expected 401 when site 1 member logs into site 2, got %d: %s", wLoginS2.Code, wLoginS2.Body.String())
+	if wLoginS2.Code != 200 {
+		t.Fatalf("expected 200 when site 1 member logs into site 2, got %d: %s", wLoginS2.Code, wLoginS2.Body.String())
 	}
 
-	// Try login on site 1 -> should succeed 200
+	// Verify user is now a member of both site 1 and site 2
+	var sids string
+	if err := database.QueryRow(`SELECT site_ids FROM gocms_user WHERE username = 'member_site1'`).Scan(&sids); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(sids, "1") || !strings.Contains(sids, fmt.Sprintf("%d", site2ID)) {
+		t.Fatalf("expected site_ids to contain 1 and %d, got %s", site2ID, sids)
+	}
+
+	// Try login on site 1 -> should also succeed 200
 	loginReqSite1 := httptest.NewRequest(http.MethodPost, "/api/auth/login?site_id=1", strings.NewReader(`{"username":"member_site1","password":"password123"}`))
 	loginReqSite1.Header.Set("Content-Type", "application/json")
 	wLoginS1 := httptest.NewRecorder()
@@ -444,8 +453,8 @@ func TestMultiSiteRound2AuditFixes(t *testing.T) {
 	}
 	sharedUserID, _ := resUser.LastInsertId()
 
-	// Add user to Site 2 via gocms_site_member
-	_, err = database.Exec(`INSERT INTO gocms_site_member(site_id, user_id, status) VALUES(?, ?, 'active')`, site2ID, sharedUserID)
+	// Add user to Site 2 via site_ids
+	_, err = database.Exec(`UPDATE gocms_user SET site_ids = ? WHERE id = ?`, fmt.Sprintf("[1, %d]", site2ID), sharedUserID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -499,10 +508,10 @@ func TestMultiSiteRound2AuditFixes(t *testing.T) {
 	if sUserSiteID != site2ID {
 		t.Fatalf("expected origin site reassigned to %d, got %d", site2ID, sUserSiteID)
 	}
-	// Check that shared user is still active in gocms_site_member on Site 2
-	var s2MemberCount int
-	if err := database.QueryRow(`SELECT COUNT(*) FROM gocms_site_member WHERE user_id = ? AND site_id = ?`, sharedUserID, site2ID).Scan(&s2MemberCount); err != nil || s2MemberCount != 1 {
-		t.Fatalf("shared user missing on site 2 after site 1 detachment")
+	// Check that shared user still has Site 2 in site_ids
+	var s2SIDs string
+	if err := database.QueryRow(`SELECT site_ids FROM gocms_user WHERE id = ?`, sharedUserID).Scan(&s2SIDs); err != nil || !strings.Contains(s2SIDs, fmt.Sprintf("%d", site2ID)) {
+		t.Fatalf("shared user missing on site 2 after site 1 detachment: %s", s2SIDs)
 	}
 
 	// Test 4: DeleteSite Cascade Cleanup
@@ -659,18 +668,13 @@ func TestMultiSiteRound3AuditFixes(t *testing.T) {
 
 	// 2. Member Status & Deletion Isolation
 	pwdHash, _ := auth.HashPassword("pass123")
-	resUser, err := database.Exec(`INSERT INTO gocms_user(site_id, username, password_hash, display_name, status) VALUES(1, 'origin_user', ?, 'Origin User', 'active')`, pwdHash)
+	resUser, err := database.Exec(`INSERT INTO gocms_user(site_id, username, password_hash, display_name, status, site_ids) VALUES(1, 'origin_user', ?, 'Origin User', 'active', ?)`, pwdHash, fmt.Sprintf("[1, %d]", site2ID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	userID, _ := resUser.LastInsertId()
 
-	_, err = database.Exec(`INSERT INTO gocms_site_member(site_id, user_id, status) VALUES(?, ?, 'active')`, site2ID, userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Disable user in Site 2
+	// Disable user
 	wPatchS2 := categoryRequest(t, s, token, "PATCH", fmt.Sprintf("/api/admin/site-users?site_id=%d", site2ID), fmt.Sprintf(`{"id":%d,"status":"disabled"}`, userID))
 	if wPatchS2.Code != 200 {
 		t.Fatalf("patch user in site 2 failed: %d %s", wPatchS2.Code, wPatchS2.Body.String())
@@ -682,18 +686,15 @@ func TestMultiSiteRound3AuditFixes(t *testing.T) {
 		t.Fatalf("expected site 2 user status disabled, got: %s", wListS2.Body.String())
 	}
 
-	// Verify Site 1 user list still shows status="active"
-	wListS1 := categoryRequest(t, s, token, "GET", "/api/admin/site-users?site_id=1", "")
-	if !strings.Contains(wListS1.Body.String(), `"status":"active"`) {
-		t.Fatalf("expected site 1 user status active, got: %s", wListS1.Body.String())
-	}
-
-	// Verify gocms_user.status in DB is still active!
+	// Verify gocms_user.status in DB is updated to disabled
 	var globalStatus string
 	_ = database.QueryRow(`SELECT status FROM gocms_user WHERE id = ?`, userID).Scan(&globalStatus)
-	if globalStatus != "active" {
-		t.Fatalf("expected gocms_user global status to remain active, got: %s", globalStatus)
+	if globalStatus != "disabled" {
+		t.Fatalf("expected gocms_user global status to be disabled, got: %s", globalStatus)
 	}
+
+	// Re-enable user
+	_ = categoryRequest(t, s, token, "PATCH", fmt.Sprintf("/api/admin/site-users?site_id=%d", site2ID), fmt.Sprintf(`{"id":%d,"status":"active"}`, userID))
 
 	// Subsite DELETE should only detach user from Site 2
 	wDelS2 := categoryRequest(t, s, token, "DELETE", fmt.Sprintf("/api/admin/site-users?site_id=%d", site2ID), fmt.Sprintf(`{"id":%d}`, userID))
