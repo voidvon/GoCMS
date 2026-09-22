@@ -274,13 +274,15 @@ func (s *Server) adminSitemap(w http.ResponseWriter, r *http.Request) {
 func (s *Server) contentSaved(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("publish") == "1" && s.publication != nil {
 		user := s.currentAdmin(r)
-		siteID, _ := s.resolveSiteID(r, user)
-		pub := s.publicationForSite(r.Context(), siteID)
-		if pub != nil {
-			report, started := s.startPublishPub(pub, true)
-			// Never silently lose a publish request made while another snapshot is being generated.
-			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "publication": report, "publish_started": started})
-			return
+		siteID, err := s.resolveSiteID(r, user)
+		if err == nil {
+			pub := s.publicationForSite(r.Context(), siteID)
+			if pub != nil {
+				report, started := s.startPublishPub(pub, true)
+				// Never silently lose a publish request made while another snapshot is being generated.
+				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "publication": report, "publish_started": started})
+				return
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

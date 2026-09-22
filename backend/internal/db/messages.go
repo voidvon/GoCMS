@@ -19,6 +19,7 @@ func EnsureMessages(ctx context.Context, database *sql.DB) error {
 	if _, err := database.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS "`+unifiedMessageTable+`" (
 			"id" INTEGER PRIMARY KEY AUTOINCREMENT,
+			"site_id" INTEGER NOT NULL DEFAULT 1,
 			"class_id" INTEGER NOT NULL DEFAULT 1,
 			"title" TEXT NOT NULL DEFAULT '',
 			"name" TEXT NOT NULL DEFAULT '',

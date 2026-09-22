@@ -422,6 +422,7 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
 
 function AdminShellInner({ user, onLogout }: AdminShellProps) {
   const { view: activeView, navigate } = useAdminRoute()
+  const { activeSiteId } = useSite()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("gocms-sidebar-collapsed") === "true" }
@@ -530,7 +531,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
         </header>
         <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6 lg:overflow-hidden">
           <div className="mx-auto h-full w-full max-w-screen-2xl min-h-0">
-            <ViewContent view={activeView} user={user} />
+            <ViewContent key={`${activeView}-${activeSiteId}`} view={activeView} user={user} />
           </div>
         </main>
       </div>

@@ -35,6 +35,7 @@ var contentImageSource = regexp.MustCompile(`(?is)<img\b[^>]*?\ssrc\s*=\s*(?:"([
 
 type MediaAsset struct {
 	ID           int64  `json:"id"`
+	SiteID       int64  `json:"site_id"`
 	Kind         string `json:"kind"`
 	URL          string `json:"url"`
 	OriginalName string `json:"original_name"`
@@ -58,7 +59,7 @@ type MediaPage struct {
 func (s *Server) adminMedia(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet && request.Method != http.MethodPost {
 		response.Header().Set("Allow", "GET, POST")
-		http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(response)
 		return
 	}
 	if !s.requireAdmin(response, request) {
@@ -74,7 +75,7 @@ func (s *Server) adminMedia(response http.ResponseWriter, request *http.Request)
 func (s *Server) adminMediaItem(response http.ResponseWriter, request *http.Request, rawID string) {
 	if request.Method != http.MethodGet && request.Method != http.MethodDelete {
 		response.Header().Set("Allow", "GET, DELETE")
-		http.Error(response, "method not allowed", http.StatusMethodNotAllowed)
+		methodNotAllowed(response)
 		return
 	}
 	if !s.requireAdmin(response, request) {
@@ -92,6 +93,11 @@ func (s *Server) adminMediaItem(response http.ResponseWriter, request *http.Requ
 	}
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
+		return
+	}
+	user := s.currentAdmin(request)
+	if user != nil && !user.CanManageSite(asset.SiteID) {
+		http.Error(response, "无权管理该站点的附件", http.StatusForbidden)
 		return
 	}
 	if request.Method == http.MethodGet {
@@ -131,7 +137,11 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 	defer file.Close()
 
 	user := s.currentAdmin(request)
-	siteID, _ := s.resolveSiteID(request, user)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	if siteID <= 0 {
 		siteID = 1
 	}
@@ -247,7 +257,7 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 	writeJSON(response, http.StatusCreated, map[string]any{
 		"ok": true,
 		"asset": MediaAsset{
-			ID: id, Kind: "image", URL: publicPath, OriginalName: originalName,
+			ID: id, SiteID: siteID, Kind: "image", URL: publicPath, OriginalName: originalName,
 			MimeType: mimeType, SizeBytes: written, Width: config.Width, Height: config.Height,
 			SHA256: hex.EncodeToString(hasher.Sum(nil)), Status: "active", UploadedBy: uploadedBy, CreatedAt: createdAt,
 		},
@@ -282,14 +292,24 @@ func (s *Server) listMedia(response http.ResponseWriter, request *http.Request) 
 		pageSize = 100
 	}
 	user := s.currentAdmin(request)
-	siteID, _ := s.resolveSiteID(request, user)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	if siteID <= 0 {
 		siteID = 1
 	}
 	contentID := parseIntOrZero(request.URL.Query().Get("content_id"))
 	search := strings.TrimSpace(request.URL.Query().Get("q"))
-	where := `"status" = 'active' AND "kind" = ? AND ("site_id" = ? OR "site_id" = 0)`
-	args := []any{kind, siteID}
+	where := `"status" = 'active' AND "kind" = ?`
+	args := []any{kind}
+	if siteID == 1 {
+		where += ` AND ("site_id" = 1 OR "site_id" = 0)`
+	} else {
+		where += ` AND "site_id" = ?`
+		args = append(args, siteID)
+	}
 	if contentID > 0 {
 		where += ` AND EXISTS (SELECT 1 FROM "gocms_media_ref" AS ref WHERE ref."media_id" = "gocms_media"."id" AND ref."content_id" = ?)`
 		args = append(args, contentID)
@@ -306,7 +326,7 @@ func (s *Server) listMedia(response http.ResponseWriter, request *http.Request) 
 	}
 	listArgs := append(append([]any{}, args...), pageSize, (page-1)*pageSize)
 	rows, err := s.database.QueryContext(request.Context(), `
-		SELECT "id", "kind", "public_path", "original_name", "mime_type", "size_bytes", "width", "height", "sha256", "status", "uploaded_by", "created_at"
+		SELECT "id", COALESCE("site_id", 1), "kind", "public_path", "original_name", "mime_type", "size_bytes", "width", "height", "sha256", "status", "uploaded_by", "created_at"
 		FROM "gocms_media" WHERE `+where+` ORDER BY "id" DESC LIMIT ? OFFSET ?`, listArgs...)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
@@ -336,7 +356,7 @@ type mediaScanner interface {
 func scanMedia(scanner mediaScanner) (MediaAsset, error) {
 	var asset MediaAsset
 	err := scanner.Scan(
-		&asset.ID, &asset.Kind, &asset.URL, &asset.OriginalName, &asset.MimeType, &asset.SizeBytes,
+		&asset.ID, &asset.SiteID, &asset.Kind, &asset.URL, &asset.OriginalName, &asset.MimeType, &asset.SizeBytes,
 		&asset.Width, &asset.Height, &asset.SHA256, &asset.Status, &asset.UploadedBy, &asset.CreatedAt,
 	)
 	return asset, err
@@ -344,7 +364,7 @@ func scanMedia(scanner mediaScanner) (MediaAsset, error) {
 
 func (s *Server) readMedia(ctx context.Context, id int64) (MediaAsset, error) {
 	return scanMedia(s.database.QueryRowContext(ctx, `
-		SELECT "id", "kind", "public_path", "original_name", "mime_type", "size_bytes", "width", "height", "sha256", "status", "uploaded_by", "created_at"
+		SELECT "id", COALESCE("site_id", 1), "kind", "public_path", "original_name", "mime_type", "size_bytes", "width", "height", "sha256", "status", "uploaded_by", "created_at"
 		FROM "gocms_media" WHERE "id" = ?`, id))
 }
 

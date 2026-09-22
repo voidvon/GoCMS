@@ -178,7 +178,11 @@ func (s *Server) adminTheme(response http.ResponseWriter, request *http.Request)
 	}
 
 	user := s.currentAdmin(request)
-	siteID, _ := s.resolveSiteID(request, user)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	if siteID <= 0 {
 		siteID = 1
 	}
@@ -230,7 +234,7 @@ func (s *Server) adminTheme(response http.ResponseWriter, request *http.Request)
 		http.Error(response, "读取 HTML 模板失败", http.StatusInternalServerError)
 		return
 	}
-	templateGroups := s.themeTemplateGroups(templateFiles)
+	templateGroups := s.themeTemplateGroups(templateFiles, siteID)
 
 	siteBase := s.siteThemeBase(siteID)
 	themes, _ := themepkg.List(siteBase, activeThemeID)
@@ -290,7 +294,11 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 	}
 	id := strings.TrimSpace(payload.ID)
 	user := s.currentAdmin(request)
-	siteID, _ := s.resolveSiteID(request, user)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	if siteID <= 0 {
 		siteID = 1
 	}
@@ -304,11 +312,11 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 	}
 
 	var definition themepkg.Definition
-	var err error
+	var findErr error
 	for _, base := range bases {
 		if base != "" {
-			definition, err = themepkg.Find(base, id)
-			if err == nil && definition.Root != "" {
+			definition, findErr = themepkg.Find(base, id)
+			if findErr == nil && definition.Root != "" {
 				break
 			}
 		}
@@ -323,65 +331,54 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 		_, _ = s.database.ExecContext(request.Context(), `UPDATE "gocms_site" SET "theme_id" = ?, "updated_at" = CURRENT_TIMESTAMP WHERE "id" = ?`, definition.Manifest.ID, siteID)
 	}
 
-	if siteID == 1 {
-		if currentActive.Manifest.ID != "" && currentActive.Manifest.ID == definition.Manifest.ID {
-			writeJSON(response, http.StatusOK, map[string]any{
-				"ok":              true,
-				"theme":           definition.Info(true),
-				"publish_started": false,
-			})
+	if siteID == 1 && currentActive.Manifest.ID != "" && currentActive.Manifest.ID == definition.Manifest.ID {
+		writeJSON(response, http.StatusOK, map[string]any{
+			"ok":              true,
+			"theme":           definition.Info(true),
+			"publish_started": false,
+		})
+		return
+	}
+
+	pub := s.publication
+	if siteID > 1 {
+		pub = s.publicationForSite(request.Context(), siteID)
+	}
+
+	if pub != nil {
+		if err := s.validateThemeTemplates(definition, siteID); err != nil {
+			http.Error(response, err.Error(), http.StatusBadRequest)
 			return
 		}
-		if s.publication != nil {
-			if err := s.validateThemeTemplates(definition); err != nil {
-				http.Error(response, err.Error(), http.StatusBadRequest)
-				return
-			}
-			s.publication.mu.Lock()
-			if s.publication.report.State == "running" {
-				s.publication.mu.Unlock()
-				http.Error(response, "网站正在发布，请稍后切换主题", http.StatusConflict)
-				return
-			}
+		pub.mu.Lock()
+		if pub.report.State == "running" {
+			pub.mu.Unlock()
+			http.Error(response, "网站正在发布，请稍后切换主题", http.StatusConflict)
+			return
+		}
+		if siteID == 1 {
 			if err := themepkg.SaveActive(dataRoot, definition.Manifest.ID); err != nil {
-				s.publication.mu.Unlock()
+				pub.mu.Unlock()
 				http.Error(response, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			s.setActiveTheme(definition)
-			s.publication.publisher.Templates = definition.TemplatesRoot
-			s.publication.publisher.Theme = definition.AssetsRoot
-			s.publication.publisher.HomeTemplate = definition.HomeTemplate()
-			publicationReport, publishStarted := s.startPublishLocked(s.publication, false)
-			s.publication.mu.Unlock()
-			writeJSON(response, http.StatusOK, map[string]any{
-				"ok":              true,
-				"theme":           definition.Info(true),
-				"report":          publicationReport,
-				"publish_started": publishStarted,
-			})
-			return
-		} else {
-			_ = themepkg.SaveActive(dataRoot, definition.Manifest.ID)
-			s.setActiveTheme(definition)
 		}
-	} else {
-		pub := s.publicationForSite(request.Context(), siteID)
-		if pub != nil {
-			pub.mu.Lock()
-			pub.publisher.Templates = definition.TemplatesRoot
-			pub.publisher.Theme = definition.AssetsRoot
-			pub.publisher.HomeTemplate = definition.HomeTemplate()
-			publicationReport, publishStarted := s.startPublishLocked(pub, false)
-			pub.mu.Unlock()
-			writeJSON(response, http.StatusOK, map[string]any{
-				"ok":              true,
-				"theme":           definition.Info(true),
-				"report":          publicationReport,
-				"publish_started": publishStarted,
-			})
-			return
-		}
+		pub.publisher.Templates = definition.TemplatesRoot
+		pub.publisher.Theme = definition.AssetsRoot
+		pub.publisher.HomeTemplate = definition.HomeTemplate()
+		publicationReport, publishStarted := s.startPublishLocked(pub, false)
+		pub.mu.Unlock()
+		writeJSON(response, http.StatusOK, map[string]any{
+			"ok":              true,
+			"theme":           definition.Info(true),
+			"report":          publicationReport,
+			"publish_started": publishStarted,
+		})
+		return
+	} else if siteID == 1 {
+		_ = themepkg.SaveActive(dataRoot, definition.Manifest.ID)
+		s.setActiveTheme(definition)
 	}
 	writeJSON(response, http.StatusOK, map[string]any{
 		"ok":              true,
@@ -390,14 +387,18 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 	})
 }
 
-func (s *Server) validateThemeTemplates(definition themepkg.Definition) error {
+func (s *Server) validateThemeTemplates(definition themepkg.Definition, siteIDOpt ...int64) error {
 	if definition.TemplatesRoot == "" {
 		return fmt.Errorf("主题未提供模板目录")
+	}
+	siteID := int64(1)
+	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
+		siteID = siteIDOpt[0]
 	}
 	paths := make(map[string]struct{})
 	paths[definition.HomeTemplate()] = struct{}{}
 	if s.database != nil {
-		assignments, err := templateconfig.List(context.Background(), s.database)
+		assignments, err := templateconfig.ListForSite(context.Background(), s.database, siteID)
 		if err != nil {
 			return fmt.Errorf("读取模板绑定失败: %w", err)
 		}
@@ -409,7 +410,7 @@ func (s *Server) validateThemeTemplates(definition themepkg.Definition) error {
 			return fmt.Errorf("检查分类模板失败: %w", err)
 		}
 		if categoryTable > 0 {
-			rows, err := s.database.Query(`SELECT DISTINCT "page_type", "list_template", "cover_template", "detail_template" FROM "gocms_category"`)
+			rows, err := s.database.Query(`SELECT DISTINCT "page_type", "list_template", "cover_template", "detail_template" FROM "gocms_category" WHERE "site_id" = ?`, siteID)
 			if err != nil {
 				return fmt.Errorf("读取分类模板失败: %w", err)
 			}
@@ -455,7 +456,11 @@ func (s *Server) adminThemeImport(response http.ResponseWriter, request *http.Re
 		return
 	}
 	user := s.currentAdmin(request)
-	siteID, _ := s.resolveSiteID(request, user)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	if siteID <= 0 {
 		siteID = 1
 	}
@@ -502,7 +507,11 @@ func (s *Server) adminThemeExport(response http.ResponseWriter, request *http.Re
 		return
 	}
 	user := s.currentAdmin(request)
-	siteID, _ := s.resolveSiteID(request, user)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	if siteID <= 0 {
 		siteID = 1
 	}
@@ -683,7 +692,11 @@ func (s *Server) updateThemeFile(response http.ResponseWriter, request *http.Req
 	}
 
 	user := s.currentAdmin(request)
-	siteID, _ := s.resolveSiteID(request, user)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	themeRoot, templateRoot, _, _, _ := s.siteThemePaths(request.Context(), siteID)
 
 	item, err := s.saveCustomThemeFileForRoots(kind, payload.Path, []byte(payload.Content), themeRoot, templateRoot)
@@ -702,7 +715,11 @@ func (s *Server) deleteThemeFile(response http.ResponseWriter, request *http.Req
 	}
 
 	user := s.currentAdmin(request)
-	siteID, _ := s.resolveSiteID(request, user)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	themeRoot, templateRoot, _, _, _ := s.siteThemePaths(request.Context(), siteID)
 
 	root, _, ok := s.themeFileSpecForRoots(kind, themeRoot, templateRoot)
@@ -1006,9 +1023,13 @@ func writeThemeFileError(response http.ResponseWriter, err error) {
 	http.Error(response, err.Error(), status)
 }
 
-func (s *Server) themeTemplateGroups(files []ThemeFile) []ThemeTemplateGroup {
+func (s *Server) themeTemplateGroups(files []ThemeFile, siteIDOpt ...int64) []ThemeTemplateGroup {
+	siteID := int64(1)
+	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
+		siteID = siteIDOpt[0]
+	}
 	_, _, active := s.themeState()
-	assignments, _ := templateconfig.List(context.Background(), s.database)
+	assignments, _ := templateconfig.ListForSite(context.Background(), s.database, siteID)
 	labelCount := int64(0)
 	if s.database != nil {
 		labelCount, _ = templatelabel.Count(context.Background(), s.database)

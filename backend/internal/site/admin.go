@@ -97,20 +97,6 @@ type AdminStats struct {
 	PendingMessages int64 `json:"pending_messages"`
 }
 
-type MessageItem struct {
-	ID        int64  `json:"id"`
-	Title     string `json:"title"`
-	Name      string `json:"name"`
-	Phone     string `json:"phone"`
-	Mobile    string `json:"mobile"`
-	Email     string `json:"email"`
-	Address   string `json:"address"`
-	Content   string `json:"content"`
-	CreatedAt string `json:"created_at"`
-	State     int64  `json:"state"`
-	ContentID int64  `json:"content_id"`
-}
-
 type CategoryItem struct {
 	ID                int64                              `json:"id"`
 	Name              string                             `json:"name"`
@@ -312,109 +298,29 @@ func (s *Server) adminStats(response http.ResponseWriter, request *http.Request)
 	if request.Method != http.MethodGet || !s.requireAdmin(response, request) {
 		return
 	}
+	user := s.currentAdmin(request)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
 	var stats AdminStats
 	queries := []struct {
 		destination *int64
 		query       string
 	}{
-		{&stats.Contents, `SELECT COUNT(*) FROM "gocms_content"`},
-		{&stats.VisibleContents, `SELECT COUNT(*) FROM "gocms_content" WHERE "visible" = 1`},
-		{&stats.Messages, `SELECT COUNT(*) FROM "gocms_message"`},
-		{&stats.PendingMessages, `SELECT COUNT(*) FROM "gocms_message" WHERE COALESCE("state", 0) = 0`},
+		{&stats.Contents, `SELECT COUNT(*) FROM "gocms_content" WHERE "site_id" = ?`},
+		{&stats.VisibleContents, `SELECT COUNT(*) FROM "gocms_content" WHERE "site_id" = ? AND "visible" = 1`},
+		{&stats.Messages, `SELECT COUNT(*) FROM "gocms_message" WHERE "site_id" = ?`},
+		{&stats.PendingMessages, `SELECT COUNT(*) FROM "gocms_message" WHERE "site_id" = ? AND COALESCE("state", 0) = 0`},
 	}
 	for _, item := range queries {
-		if err := s.database.QueryRowContext(request.Context(), item.query).Scan(item.destination); err != nil {
+		if err := s.database.QueryRowContext(request.Context(), item.query, siteID).Scan(item.destination); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
 	}
 	writeJSON(response, http.StatusOK, stats)
-}
-
-func (s *Server) adminMessages(response http.ResponseWriter, request *http.Request) {
-	if request.Method != http.MethodGet || !s.requireAdmin(response, request) {
-		return
-	}
-	page := positiveInt(request.URL.Query().Get("page"), 1)
-	pageSize := positiveInt(request.URL.Query().Get("page_size"), 20)
-	if pageSize > 100 {
-		pageSize = 100
-	}
-	var total int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_message"`).Scan(&total); err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	rows, err := s.database.QueryContext(request.Context(), `
-		SELECT "id", COALESCE("title", ''), COALESCE("name", ''), COALESCE("phone", ''), COALESCE("mobile", ''),
-		       COALESCE("email", ''), COALESCE("address", ''), COALESCE("content", ''), COALESCE("created_at", ''),
-		       COALESCE("state", 0), COALESCE("content_id", 0)
-		FROM "gocms_message" ORDER BY "id" DESC LIMIT ? OFFSET ?`, pageSize, (page-1)*pageSize)
-	if err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-	items := make([]MessageItem, 0, pageSize)
-	for rows.Next() {
-		var item MessageItem
-		if err := rows.Scan(&item.ID, &item.Title, &item.Name, &item.Phone, &item.Mobile, &item.Email, &item.Address, &item.Content, &item.CreatedAt, &item.State, &item.ContentID); err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		items = append(items, item)
-	}
-	writeJSON(response, http.StatusOK, map[string]any{"page": page, "page_size": pageSize, "total": total, "items": items})
-}
-
-func (s *Server) adminMessage(response http.ResponseWriter, request *http.Request, rawID string) {
-	if request.Method != http.MethodPatch && request.Method != http.MethodDelete {
-		methodNotAllowed(response)
-		return
-	}
-	if !s.requireAdmin(response, request) {
-		return
-	}
-	id, err := strconv.ParseInt(rawID, 10, 64)
-	if err != nil || id < 1 {
-		http.Error(response, "invalid message id", http.StatusBadRequest)
-		return
-	}
-	if request.Method == http.MethodDelete {
-		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "gocms_message" WHERE "id" = ?`, id)
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		affected, err := result.RowsAffected()
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		if affected == 0 {
-			http.Error(response, "message not found", http.StatusNotFound)
-			return
-		}
-		writeJSON(response, http.StatusOK, map[string]bool{"ok": true})
-		return
-	}
-	var payload struct {
-		State int64 `json:"state"`
-	}
-	if err := decodeRequest(request, &payload); err != nil {
-		http.Error(response, "invalid message payload", http.StatusBadRequest)
-		return
-	}
-	if payload.State != 0 && payload.State != 1 {
-		http.Error(response, "state must be 0 or 1", http.StatusBadRequest)
-		return
-	}
-	_, err = s.database.ExecContext(request.Context(), `UPDATE "gocms_message" SET "state" = ? WHERE "id" = ?`, payload.State, id)
-	if err != nil {
-		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	writeJSON(response, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) adminCategories(response http.ResponseWriter, request *http.Request) {
@@ -579,14 +485,33 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.validateCategoryParent(request.Context(), id, payload.ParentID); err != nil {
-		http.Error(response, err.Error(), http.StatusBadRequest)
-		return
-	}
 	user := s.currentAdmin(request)
 	siteID, err := s.resolveSiteID(request, user)
 	if err != nil {
 		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
+
+	targetSiteID := siteID
+	if id != 0 {
+		var existingSiteID int64
+		if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id" FROM "gocms_category" WHERE "id" = ?`, id).Scan(&existingSiteID); err != nil {
+			if err == sql.ErrNoRows {
+				http.Error(response, "category not found", http.StatusNotFound)
+			} else {
+				http.Error(response, "database error", http.StatusInternalServerError)
+			}
+			return
+		}
+		if user != nil && !user.CanManageSite(existingSiteID) {
+			http.Error(response, "无权管理该站点的栏目", http.StatusForbidden)
+			return
+		}
+		targetSiteID = existingSiteID
+	}
+
+	if err := s.validateCategoryParent(request.Context(), targetSiteID, id, payload.ParentID); err != nil {
+		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -630,19 +555,6 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			})
 		}
 	} else {
-		var existingSiteID int64
-		if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id" FROM "gocms_category" WHERE "id" = ?`, id).Scan(&existingSiteID); err != nil {
-			if err == sql.ErrNoRows {
-				http.Error(response, "category not found", http.StatusNotFound)
-			} else {
-				http.Error(response, "database error", http.StatusInternalServerError)
-			}
-			return
-		}
-		if user != nil && !user.CanManageSite(existingSiteID) {
-			http.Error(response, "无权管理该站点的栏目", http.StatusForbidden)
-			return
-		}
 		if payload.Translations != nil && len(payload.Translations) > 0 {
 			_ = s.saveCategoryTranslations(request.Context(), s.database, id, payload.Translations)
 			if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Name) != "" {
@@ -927,7 +839,7 @@ func (s *Server) nextCategoryOrder(ctx context.Context, siteID, parentID int64, 
 	return nil
 }
 
-func (s *Server) validateCategoryParent(ctx context.Context, id, parentID int64) error {
+func (s *Server) validateCategoryParent(ctx context.Context, siteID, id, parentID int64) error {
 	if id > 0 && id == parentID {
 		return fmt.Errorf("分类不能设置自己为父分类")
 	}
@@ -940,12 +852,15 @@ func (s *Server) validateCategoryParent(ctx context.Context, id, parentID int64)
 			return fmt.Errorf("分类层级存在循环引用")
 		}
 		seen[current] = true
-		var parent int64
-		if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("parent_id", 0) FROM "gocms_category" WHERE "id" = ?`, current).Scan(&parent); err != nil {
+		var parent, parentSiteID int64
+		if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("parent_id", 0), "site_id" FROM "gocms_category" WHERE "id" = ?`, current).Scan(&parent, &parentSiteID); err != nil {
 			if err == sql.ErrNoRows {
 				return fmt.Errorf("父分类不存在")
 			}
 			return fmt.Errorf("读取父分类失败: %w", err)
+		}
+		if siteID > 0 && parentSiteID != siteID {
+			return fmt.Errorf("父分类属于其他站点，不可跨站点关联")
 		}
 		current = parent
 	}

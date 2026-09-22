@@ -2,6 +2,7 @@ package site
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"gocms/internal/apikey"
+	"gocms/internal/auth"
 )
 
 func TestSiteUserManagementBoundaryAndRevocation(t *testing.T) {
@@ -223,3 +225,118 @@ func TestSiteUsersAndMemberGroupsMultiSiteIsolation(t *testing.T) {
 		t.Fatal("u2 should still exist on site 2")
 	}
 }
+
+func TestMultiSiteSecurityAndIsolation(t *testing.T) {
+	s, database, root := newCategoryTestServer(t)
+
+	// Create Site 2
+	res, err := database.Exec(`INSERT INTO gocms_site (name, code, domain, output_dir, is_default, status) VALUES ('Sub Site', 'sub', 'sub.example.com', 'web_sub', 0, 'active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	site2ID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Test adminStats site scoping
+	// Insert contents into site 1 and site 2
+	_, _ = database.Exec(`INSERT INTO gocms_content(site_id, category_id, title, visible) VALUES(1, 0, 'S1 Content 1', 1)`)
+	_, _ = database.Exec(`INSERT INTO gocms_content(site_id, category_id, title, visible) VALUES(1, 0, 'S1 Content 2', 0)`)
+	_, _ = database.Exec(`INSERT INTO gocms_content(site_id, category_id, title, visible) VALUES(?, 0, 'S2 Content 1', 1)`, site2ID)
+
+	// Insert messages into site 1 and site 2
+	_, _ = database.Exec(`INSERT INTO gocms_message(site_id, title, content, state) VALUES(1, 'M1', 'msg', 0)`)
+	_, _ = database.Exec(`INSERT INTO gocms_message(site_id, title, content, state) VALUES(?, 'M2', 'msg', 0)`, site2ID)
+	_, _ = database.Exec(`INSERT INTO gocms_message(site_id, title, content, state) VALUES(?, 'M3', 'msg', 1)`, site2ID)
+
+	var stats1 AdminStats
+	wStats1 := categoryRequest(t, s, root, "GET", "/api/admin/stats?site_id=1", "")
+	if wStats1.Code != 200 {
+		t.Fatalf("stats site 1 status = %d: %s", wStats1.Code, wStats1.Body.String())
+	}
+	if err := json.Unmarshal(wStats1.Body.Bytes(), &stats1); err != nil {
+		t.Fatal(err)
+	}
+	if stats1.Contents != 2 || stats1.VisibleContents != 1 || stats1.Messages != 1 || stats1.PendingMessages != 1 {
+		t.Fatalf("unexpected stats for site 1: %+v", stats1)
+	}
+
+	var stats2 AdminStats
+	wStats2 := categoryRequest(t, s, root, "GET", fmt.Sprintf("/api/admin/stats?site_id=%d", site2ID), "")
+	if wStats2.Code != 200 {
+		t.Fatalf("stats site 2 status = %d: %s", wStats2.Code, wStats2.Body.String())
+	}
+	if err := json.Unmarshal(wStats2.Body.Bytes(), &stats2); err != nil {
+		t.Fatal(err)
+	}
+	if stats2.Contents != 1 || stats2.VisibleContents != 1 || stats2.Messages != 2 || stats2.PendingMessages != 1 {
+		t.Fatalf("unexpected stats for site 2: %+v", stats2)
+	}
+
+	// 2. Test cross-site category parenting prevention
+	resCat1, err := database.Exec(`INSERT INTO gocms_category(site_id, name, parent_id, order_id, list_page_size, page_type) VALUES(1, 'S1 Cat', 0, 1, 20, 'list')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cat1ID, _ := resCat1.LastInsertId()
+
+	wCatFail := categoryRequest(t, s, root, "POST", fmt.Sprintf("/api/admin/categories?site_id=%d", site2ID), fmt.Sprintf(`{"name":"S2 Child Cat","parent_id":%d,"order_id":1,"page_type":"list"}`, cat1ID))
+	if wCatFail.Code != 400 || !strings.Contains(wCatFail.Body.String(), "父分类属于其他站点") {
+		t.Fatalf("expected 400 rejection for cross-site category parent, got %d: %s", wCatFail.Code, wCatFail.Body.String())
+	}
+
+	// 3. Test cross-site content category prevention
+	wContentFail := categoryRequest(t, s, root, "POST", fmt.Sprintf("/api/admin/content?site_id=%d", site2ID), fmt.Sprintf(`{"title":"Test Content","category_id":%d}`, cat1ID))
+	if wContentFail.Code != 400 || !strings.Contains(wContentFail.Body.String(), "属于其他站点") {
+		t.Fatalf("expected 400 rejection for cross-site content category, got %d: %s", wContentFail.Code, wContentFail.Body.String())
+	}
+
+	// 4. Test cross-site media deletion prevention
+	resMedia1, err := database.Exec(`INSERT INTO gocms_media(site_id, kind, public_path, original_name, mime_type, storage_path, status) VALUES(1, 'image', '/assets/1/uploads/test.png', 'test.png', 'image/png', '1/uploads/test.png', 'active')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	media1ID, _ := resMedia1.LastInsertId()
+
+	// Admin only on site 2
+	_, _ = database.Exec(`INSERT INTO gocms_admin_group(name, permissions, site_permissions) VALUES('Site 2 Media Admin', '["media"]', '{"2":["media"]}')`)
+	var grp2ID int64
+	_ = database.QueryRow(`SELECT id FROM gocms_admin_group WHERE name='Site 2 Media Admin'`).Scan(&grp2ID)
+	_, _ = database.Exec(`INSERT INTO gocms_admin_user(username, group_id) VALUES('site2_media_admin', ?)`, grp2ID)
+	s2AdminToken, err := s.createSession("site2_media_admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wDelMedia := categoryRequest(t, s, s2AdminToken, "DELETE", fmt.Sprintf("/api/admin/media/%d", media1ID), "")
+	if wDelMedia.Code != 403 {
+		t.Fatalf("expected 403 when deleting other site media, got %d: %s", wDelMedia.Code, wDelMedia.Body.String())
+	}
+
+	// 5. Test member login cross-site isolation
+	hash, _ := auth.HashPassword("password123")
+	_, err = database.Exec(`INSERT INTO gocms_user(site_id, username, password_hash, status) VALUES(1, 'member_site1', ?, 'active')`, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Try login on site 2 with credentials of site 1 member -> should fail 401
+	loginReqSite2 := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/auth/login?site_id=%d", site2ID), strings.NewReader(`{"username":"member_site1","password":"password123"}`))
+	loginReqSite2.Header.Set("Content-Type", "application/json")
+	wLoginS2 := httptest.NewRecorder()
+	s.Handler().ServeHTTP(wLoginS2, loginReqSite2)
+	if wLoginS2.Code != 401 {
+		t.Fatalf("expected 401 when site 1 member logs into site 2, got %d: %s", wLoginS2.Code, wLoginS2.Body.String())
+	}
+
+	// Try login on site 1 -> should succeed 200
+	loginReqSite1 := httptest.NewRequest(http.MethodPost, "/api/auth/login?site_id=1", strings.NewReader(`{"username":"member_site1","password":"password123"}`))
+	loginReqSite1.Header.Set("Content-Type", "application/json")
+	wLoginS1 := httptest.NewRecorder()
+	s.Handler().ServeHTTP(wLoginS1, loginReqSite1)
+	if wLoginS1.Code != 200 {
+		t.Fatalf("expected 200 when site 1 member logs into site 1, got %d: %s", wLoginS1.Code, wLoginS1.Body.String())
+	}
+}
+

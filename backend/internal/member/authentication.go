@@ -57,13 +57,19 @@ func (s Service) Register(ctx context.Context, username, email, password string,
 	_, _ = s.DB.ExecContext(ctx, "INSERT OR IGNORE INTO gocms_site_member(site_id,user_id,display_name,status) VALUES(?,?,?,?)", sid, id, username, "active")
 	return s.Profile(ctx, id)
 }
-func (s Service) Login(ctx context.Context, identifier, password, ip, agent string, currentToken string) (Profile, string, error) {
+func (s Service) Login(ctx context.Context, identifier, password, ip, agent string, currentToken string, siteIDOpt ...int64) (Profile, string, error) {
 	if len(identifier) > 254 || len(password) > 1024 {
 		return Profile{}, "", ErrInvalid
 	}
 	var id int64
 	var encoded, status string
-	err := s.DB.QueryRowContext(ctx, "SELECT id,password_hash,status FROM gocms_user WHERE username=? OR (email<>'' AND email=?)", identifier, strings.ToLower(identifier)).Scan(&id, &encoded, &status)
+	query := "SELECT id,password_hash,status FROM gocms_user WHERE (username=? OR (email<>'' AND email=?))"
+	args := []any{identifier, strings.ToLower(identifier)}
+	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
+		query += " AND (site_id=? OR id IN (SELECT user_id FROM gocms_site_member WHERE site_id=?))"
+		args = append(args, siteIDOpt[0], siteIDOpt[0])
+	}
+	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&id, &encoded, &status)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Profile{}, "", err
 	}

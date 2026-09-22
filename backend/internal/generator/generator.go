@@ -917,7 +917,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		return report, err
 	}
 	defer os.RemoveAll(stage)
-	if err = c.normalizeLinks(p.Assets, p.Theme); err != nil {
+	if err = c.normalizeLinks(p.Assets, p.Theme, p.SiteID); err != nil {
 		return report, err
 	}
 	for relative, data := range c.pages {

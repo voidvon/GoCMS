@@ -16,7 +16,7 @@ var resourceAttribute = regexp.MustCompile(`(?i)\b(href|src|action)\s*=\s*("[^"]
 
 // Normalize theme and content resource references to the public URL space and
 // match the actual case of files on disk.
-func (c *content) normalizeLinks(assets, theme string) error {
+func (c *content) normalizeLinks(assets, theme string, siteIDOpt ...int64) error {
 	index := map[string]string{}
 	basenames := map[string]string{}
 	addTree := func(root, publicPrefix string) error {
@@ -56,20 +56,41 @@ func (c *content) normalizeLinks(assets, theme string) error {
 		return err
 	}
 	if assets != "" {
+		siteID := int64(1)
+		if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
+			siteID = siteIDOpt[0]
+		}
+		siteIDStr := fmt.Sprint(siteID)
+
+		// Current site uploads & images
+		siteUploads := filepath.Join(assets, siteIDStr, "uploads")
+		if stat, err := os.Stat(siteUploads); err == nil && stat.IsDir() {
+			_ = addTree(siteUploads, path.Join("assets", siteIDStr, "uploads"))
+			_ = addTree(siteUploads, "uploads")
+		}
+		siteImages := filepath.Join(assets, siteIDStr, "images")
+		if stat, err := os.Stat(siteImages); err == nil && stat.IsDir() {
+			_ = addTree(siteImages, path.Join("assets", siteIDStr, "images"))
+			_ = addTree(siteImages, "images")
+		}
+
+		// Global/legacy fallback directories
 		_ = addTree(filepath.Join(assets, "images"), "images")
 		_ = addTree(filepath.Join(assets, "uploads"), "uploads")
+		_ = addTree(filepath.Join(assets, "images"), "assets/images")
+		_ = addTree(filepath.Join(assets, "uploads"), "assets/uploads")
+
+		// Other sites' uploads/images only accessible via explicit assets/<id>/ path
 		if entries, err := os.ReadDir(assets); err == nil {
 			for _, entry := range entries {
-				if entry.IsDir() {
-					siteUploads := filepath.Join(assets, entry.Name(), "uploads")
-					if stat, err := os.Stat(siteUploads); err == nil && stat.IsDir() {
-						_ = addTree(siteUploads, path.Join("assets", entry.Name(), "uploads"))
-						_ = addTree(siteUploads, "uploads")
+				if entry.IsDir() && entry.Name() != siteIDStr {
+					otherUploads := filepath.Join(assets, entry.Name(), "uploads")
+					if stat, err := os.Stat(otherUploads); err == nil && stat.IsDir() {
+						_ = addTree(otherUploads, path.Join("assets", entry.Name(), "uploads"))
 					}
-					siteImages := filepath.Join(assets, entry.Name(), "images")
-					if stat, err := os.Stat(siteImages); err == nil && stat.IsDir() {
-						_ = addTree(siteImages, path.Join("assets", entry.Name(), "images"))
-						_ = addTree(siteImages, "images")
+					otherImages := filepath.Join(assets, entry.Name(), "images")
+					if stat, err := os.Stat(otherImages); err == nil && stat.IsDir() {
+						_ = addTree(otherImages, path.Join("assets", entry.Name(), "images"))
 					}
 				}
 			}

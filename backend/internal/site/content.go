@@ -212,19 +212,36 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 		return
 	}
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
 	if !user.canManageCategory(payload.Category) {
 		writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有目标栏目的内容权限"})
 		return
 	}
-	var targetSiteID int64
-	var catPageType string
-	if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id", "page_type" FROM "gocms_category" WHERE "id" = ?`, payload.Category).Scan(&targetSiteID, &catPageType); err == nil {
+	targetSiteID := siteID
+	if payload.Category > 0 {
+		var catSiteID int64
+		var catPageType string
+		if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id", "page_type" FROM "gocms_category" WHERE "id" = ?`, payload.Category).Scan(&catSiteID, &catPageType); err != nil {
+			if err == sql.ErrNoRows {
+				writeJSON(response, http.StatusBadRequest, map[string]string{"error": "所选栏目不存在"})
+			} else {
+				writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "读取栏目失败"})
+			}
+			return
+		}
 		if catPageType == routing.PageTypeLink {
 			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "链接类型栏目不能发布内容"})
 			return
 		}
-	} else {
-		targetSiteID = 1
+		if catSiteID != siteID {
+			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "所选栏目属于其他站点，不可跨站点发布"})
+			return
+		}
+		targetSiteID = catSiteID
 	}
 	if !user.CanManageSite(targetSiteID) {
 		writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有目标站点的操作权限"})
@@ -239,6 +256,10 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		}
 		if !user.canManageCategory(category) || !user.CanManageSite(origSiteID) {
 			writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有原内容的操作权限"})
+			return
+		}
+		if origSiteID != targetSiteID {
+			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "不能将内容跨站点移动"})
 			return
 		}
 	}
