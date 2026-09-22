@@ -670,7 +670,7 @@ func (s *Server) contentJSON(response http.ResponseWriter, request *http.Request
 		methodNotAllowed(response)
 		return
 	}
-	siteID, err := s.resolveSiteID(request, nil)
+	siteID, err := s.resolvePublicSiteID(request)
 	if err != nil {
 		http.Error(response, err.Error(), http.StatusForbidden)
 		return
@@ -695,7 +695,7 @@ func (s *Server) contentJSONItem(response http.ResponseWriter, request *http.Req
 		http.Error(response, "invalid content id", http.StatusBadRequest)
 		return
 	}
-	siteID, err := s.resolveSiteID(request, nil)
+	siteID, err := s.resolvePublicSiteID(request)
 	if err != nil {
 		http.Error(response, err.Error(), http.StatusForbidden)
 		return

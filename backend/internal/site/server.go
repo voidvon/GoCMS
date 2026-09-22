@@ -328,8 +328,13 @@ func (s *Server) health(response http.ResponseWriter, request *http.Request) {
 		methodNotAllowed(response)
 		return
 	}
+	siteID, err := s.resolvePublicSiteID(request)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	var contentCount int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_content"`).Scan(&contentCount); err != nil {
+	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_content" WHERE "site_id" = ?`, siteID).Scan(&contentCount); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
@@ -345,7 +350,7 @@ func (s *Server) searchJSON(response http.ResponseWriter, request *http.Request)
 		methodNotAllowed(response)
 		return
 	}
-	siteID, _ := s.resolveSiteID(request, nil)
+	siteID, _ := s.resolvePublicSiteID(request)
 
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))

@@ -14,21 +14,21 @@ import (
 )
 
 type FeedbackItem struct {
-	ID          int64          `json:"id"`
-	ClassID     int64          `json:"class_id"`
-	ClassName   string         `json:"class_name,omitempty"`
-	Title       string         `json:"title"`
-	Name        string         `json:"name"`
-	Phone       string         `json:"phone"`
-	Mobile      string         `json:"mobile"`
-	Email       string         `json:"email"`
-	Address     string         `json:"address"`
-	Content     string         `json:"content"`
-	CreatedAt   string         `json:"created_at"`
-	State       int64          `json:"state"`
-	ContentID   int64          `json:"content_id"`
-	IP          string         `json:"ip"`
-	ExtraData   map[string]any `json:"extra_data"`
+	ID        int64          `json:"id"`
+	ClassID   int64          `json:"class_id"`
+	ClassName string         `json:"class_name,omitempty"`
+	Title     string         `json:"title"`
+	Name      string         `json:"name"`
+	Phone     string         `json:"phone"`
+	Mobile    string         `json:"mobile"`
+	Email     string         `json:"email"`
+	Address   string         `json:"address"`
+	Content   string         `json:"content"`
+	CreatedAt string         `json:"created_at"`
+	State     int64          `json:"state"`
+	ContentID int64          `json:"content_id"`
+	IP        string         `json:"ip"`
+	ExtraData map[string]any `json:"extra_data"`
 }
 
 type FeedbackClassItem struct {
@@ -109,6 +109,24 @@ func (s *Server) feedbackSubmit(response http.ResponseWriter, request *http.Requ
 	}
 	contentID := parseIntOrZero(request.FormValue("content_id"))
 
+	siteID, err := s.resolvePublicSiteID(request)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
+	if contentID > 0 {
+		var contentSiteID int64
+		err := s.database.QueryRowContext(request.Context(), `SELECT "site_id" FROM "gocms_content" WHERE "id" = ?`, contentID).Scan(&contentSiteID)
+		if err != nil && err != sql.ErrNoRows {
+			http.Error(response, "database error", http.StatusInternalServerError)
+			return
+		}
+		if err == nil && contentSiteID != siteID {
+			http.Error(response, "content does not belong to this site", http.StatusBadRequest)
+			return
+		}
+	}
+
 	// Collect extra fields
 	standardKeys := map[string]bool{
 		"class_id": true, "bid": true, "title": true, "name": true,
@@ -129,13 +147,6 @@ func (s *Server) feedbackSubmit(response http.ResponseWriter, request *http.Requ
 
 	ip := clientIP(request)
 	now := time.Now().Format("2006-01-02 15:04:05")
-
-	siteID, err := s.resolveSiteID(request, nil)
-	if err != nil {
-		http.Error(response, err.Error(), http.StatusForbidden)
-		return
-	}
-
 
 	_, err = s.database.ExecContext(request.Context(), `
 		INSERT INTO "gocms_message"
@@ -354,6 +365,10 @@ func (s *Server) adminFeedbackClasses(response http.ResponseWriter, request *htt
 		return
 	}
 	user := s.currentAdmin(request)
+	if request.Method != http.MethodGet && (user == nil || !user.IsSuper) {
+		http.Error(response, "只有超级管理员可以修改全局反馈分类", http.StatusForbidden)
+		return
+	}
 	siteID, err := s.resolveSiteID(request, user)
 	if err != nil {
 		http.Error(response, err.Error(), http.StatusForbidden)
@@ -431,6 +446,11 @@ func (s *Server) adminFeedbackClassItem(response http.ResponseWriter, request *h
 	if !s.requireAdmin(response, request) {
 		return
 	}
+	user := s.currentAdmin(request)
+	if user == nil || !user.IsSuper {
+		http.Error(response, "只有超级管理员可以修改全局反馈分类", http.StatusForbidden)
+		return
+	}
 	id, err := strconv.ParseInt(rawID, 10, 64)
 	if err != nil || id < 1 {
 		http.Error(response, "invalid id", http.StatusBadRequest)
@@ -492,6 +512,11 @@ func (s *Server) adminFeedbackClassItem(response http.ResponseWriter, request *h
 
 func (s *Server) adminFeedbackFields(response http.ResponseWriter, request *http.Request) {
 	if !s.requireAdmin(response, request) {
+		return
+	}
+	user := s.currentAdmin(request)
+	if request.Method != http.MethodGet && (user == nil || !user.IsSuper) {
+		http.Error(response, "只有超级管理员可以修改全局反馈字段", http.StatusForbidden)
 		return
 	}
 	switch request.Method {
@@ -556,6 +581,11 @@ func (s *Server) adminFeedbackFields(response http.ResponseWriter, request *http
 
 func (s *Server) adminFeedbackFieldItem(response http.ResponseWriter, request *http.Request, rawID string) {
 	if !s.requireAdmin(response, request) {
+		return
+	}
+	user := s.currentAdmin(request)
+	if user == nil || !user.IsSuper {
+		http.Error(response, "只有超级管理员可以修改全局反馈字段", http.StatusForbidden)
 		return
 	}
 	id, err := strconv.ParseInt(rawID, 10, 64)

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -133,6 +135,25 @@ func ValidateSiteCode(code string) error {
 	code = strings.TrimSpace(strings.ToLower(code))
 	if !siteCodePattern.MatchString(code) {
 		return errors.New("站点标识必须由 2-64 位小写字母、数字、下划线或短横线组成，且以字母或数字开头")
+	}
+	return nil
+}
+
+// ValidateOutputDir keeps generated site output below the configured web root.
+// It is stored as a relative slash-separated path and must never contain a
+// parent traversal or resolve to the current/root directory.
+func ValidateOutputDir(value string) error {
+	value = strings.TrimSpace(value)
+	if filepath.IsAbs(filepath.FromSlash(strings.ReplaceAll(value, `\`, "/"))) {
+		return errors.New("站点输出目录必须是相对路径")
+	}
+	value = strings.Trim(value, "/\\")
+	if value == "" {
+		return nil
+	}
+	clean := path.Clean(strings.ReplaceAll(value, `\`, "/"))
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return errors.New("站点输出目录不能包含父级路径")
 	}
 	return nil
 }
@@ -303,6 +324,9 @@ func CreateSite(ctx context.Context, database *sql.DB, s *Site) (*Site, error) {
 	}
 	s.ThemeID = strings.TrimSpace(s.ThemeID)
 	s.OutputDir = strings.TrimSpace(strings.Trim(s.OutputDir, "/\\"))
+	if err := ValidateOutputDir(s.OutputDir); err != nil {
+		return nil, err
+	}
 	if s.Aliases == nil {
 		s.Aliases = []string{}
 	}
@@ -388,6 +412,9 @@ func UpdateSite(ctx context.Context, database *sql.DB, s *Site) error {
 	}
 	s.ThemeID = strings.TrimSpace(s.ThemeID)
 	s.OutputDir = strings.TrimSpace(strings.Trim(s.OutputDir, "/\\"))
+	if err := ValidateOutputDir(s.OutputDir); err != nil {
+		return err
+	}
 	if s.Aliases == nil {
 		s.Aliases = []string{}
 	}
@@ -652,7 +679,6 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 			}
 		}
 	}
-
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM "`+SiteTable+`" WHERE "id" = ?`, id); err != nil {
 		return fmt.Errorf("delete site: %w", err)

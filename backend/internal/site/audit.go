@@ -38,7 +38,8 @@ func (s *Server) recordOperation(username string, r *http.Request, result *opera
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	siteID, _ := s.resolveSiteID(r, nil)
+	admin, _ := r.Context().Value(contentScopeKey{}).(*AdminUser)
+	siteID, _ := s.resolveSiteID(r, admin)
 	if siteID <= 0 {
 		siteID = 1
 	}

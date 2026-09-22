@@ -5,6 +5,19 @@ import (
 	"testing"
 )
 
+func TestValidateOutputDir(t *testing.T) {
+	for _, value := range []string{"../outside", "a/../../outside", `/absolute/path`, `..\\outside`} {
+		if err := ValidateOutputDir(value); err == nil {
+			t.Errorf("expected output directory %q to be rejected", value)
+		}
+	}
+	for _, value := range []string{"", "site-2", "sites/site-2"} {
+		if err := ValidateOutputDir(value); err != nil {
+			t.Errorf("expected output directory %q to be accepted: %v", value, err)
+		}
+	}
+}
+
 func TestEnsureSitesCreatesDefaultSite(t *testing.T) {
 	database, err := Open(":memory:")
 	if err != nil {
@@ -316,4 +329,3 @@ func TestDefaultSiteSafeguards(t *testing.T) {
 		t.Fatalf("expected updating former default site to succeed, got: %v", err)
 	}
 }
-

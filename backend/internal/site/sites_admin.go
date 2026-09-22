@@ -115,6 +115,20 @@ func (s *Server) resolveSiteID(r *http.Request, user *AdminUser) (int64, error) 
 	return siteID, nil
 }
 
+// resolvePublicSiteID binds public reads and submissions to the request host.
+// Explicit site selectors are accepted only when no configured host matched
+// (for local tooling and backwards-compatible development requests).
+func (s *Server) resolvePublicSiteID(r *http.Request) (int64, error) {
+	if s.database != nil && r != nil {
+		if matched, err := db.GetSiteByHost(r.Context(), s.database, requestHost(r)); err == nil && matched != nil {
+			if matched.Status != "active" {
+				return 0, errors.New("站点已停用")
+			}
+			return matched.ID, nil
+		}
+	}
+	return s.resolveSiteID(r, nil)
+}
 
 func (s *Server) adminSites(w http.ResponseWriter, r *http.Request) {
 	user := s.currentAdmin(r)
@@ -249,8 +263,6 @@ func (s *Server) adminSiteItem(w http.ResponseWriter, r *http.Request, idStr str
 			_ = os.RemoveAll(filepath.Join(s.assetsRoot, strconv.FormatInt(id, 10)))
 		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-
-
 	default:
 		methodNotAllowed(w)
 	}
@@ -290,7 +302,6 @@ func (s *Server) adminSiteSettings(w http.ResponseWriter, r *http.Request) {
 		}
 		s.invalidateSitePublication(siteID)
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-
 	default:
 		methodNotAllowed(w)
 	}

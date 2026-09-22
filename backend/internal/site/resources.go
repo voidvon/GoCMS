@@ -13,7 +13,7 @@ import (
 
 func (s *Server) resourceRoots(r *http.Request) ([]string, string, bool) {
 	themeRoot, _ := s.themePaths()
-	siteID, _ := s.resolveSiteID(r, nil)
+	siteID, _ := s.resolvePublicSiteID(r)
 	var themeID string
 	if s.database != nil && r != nil {
 		if targetSite, err := db.GetSiteByID(r.Context(), s.database, siteID); err == nil && targetSite != nil {
