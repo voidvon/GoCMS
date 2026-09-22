@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -174,11 +176,25 @@ func (s *Server) adminSiteItem(w http.ResponseWriter, r *http.Request, idStr str
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "只有超级管理员可以删除站点"})
 			return
 		}
+		existing, err := db.GetSiteByID(r.Context(), s.database, id)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "站点不存在"})
+			return
+		}
 		if err := db.DeleteSite(r.Context(), s.database, id); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		s.invalidateSitePublication(id)
+		if existing.OutputDir != "" && s.siteRoot != "" {
+			targetDir := filepath.Join(s.siteRoot, existing.OutputDir)
+			if targetDir != s.siteRoot {
+				_ = os.RemoveAll(targetDir)
+			}
+		}
+		if s.assetsRoot != "" && id > 1 {
+			_ = os.RemoveAll(filepath.Join(s.assetsRoot, strconv.FormatInt(id, 10)))
+		}
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 
 

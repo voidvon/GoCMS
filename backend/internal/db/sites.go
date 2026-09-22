@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -434,15 +435,35 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 	defer tx.Rollback()
 
 	// Cascade delete dependent sub-records first
-	dependentDeletes := []string{
-		`DELETE FROM "gocms_media_ref" WHERE "content_id" IN (SELECT "id" FROM "gocms_content" WHERE "site_id" = ?) OR "media_id" IN (SELECT "id" FROM "gocms_media" WHERE "site_id" = ?)`,
-		`DELETE FROM "gocms_content_translation" WHERE "content_id" IN (SELECT "id" FROM "gocms_content" WHERE "site_id" = ?)`,
-		`DELETE FROM "gocms_category_translation" WHERE "category_id" IN (SELECT "id" FROM "gocms_category" WHERE "site_id" = ?)`,
-		`DELETE FROM "gocms_user_group_member" WHERE "group_id" IN (SELECT "id" FROM "gocms_user_group" WHERE "site_id" = ?) OR "user_id" IN (SELECT "id" FROM "gocms_user" WHERE "site_id" = ?)`,
-		`DELETE FROM "gocms_user_session" WHERE "user_id" IN (SELECT "id" FROM "gocms_user" WHERE "site_id" = ?)`,
+	dependentDeletes := []struct {
+		stmt string
+		args []any
+	}{
+		{
+			stmt: `DELETE FROM "gocms_media_ref" WHERE "content_id" IN (SELECT "id" FROM "gocms_content" WHERE "site_id" = ?) OR "media_id" IN (SELECT "id" FROM "gocms_media" WHERE "site_id" = ?)`,
+			args: []any{id, id},
+		},
+		{
+			stmt: `DELETE FROM "gocms_content_translation" WHERE "content_id" IN (SELECT "id" FROM "gocms_content" WHERE "site_id" = ?)`,
+			args: []any{id},
+		},
+		{
+			stmt: `DELETE FROM "gocms_category_translation" WHERE "category_id" IN (SELECT "id" FROM "gocms_category" WHERE "site_id" = ?)`,
+			args: []any{id},
+		},
+		{
+			stmt: `DELETE FROM "gocms_user_group_member" WHERE "group_id" IN (SELECT "id" FROM "gocms_user_group" WHERE "site_id" = ?) OR "user_id" IN (SELECT "id" FROM "gocms_user" WHERE "site_id" = ?)`,
+			args: []any{id, id},
+		},
+		{
+			stmt: `DELETE FROM "gocms_user_session" WHERE "user_id" IN (SELECT "id" FROM "gocms_user" WHERE "site_id" = ?)`,
+			args: []any{id},
+		},
 	}
-	for _, sqlStmt := range dependentDeletes {
-		_, _ = tx.ExecContext(ctx, sqlStmt, id)
+	for _, item := range dependentDeletes {
+		if _, err := tx.ExecContext(ctx, item.stmt, item.args...); err != nil {
+			return fmt.Errorf("delete site dependent records: %w", err)
+		}
 	}
 
 	// Cascade delete direct site-scoped tables
@@ -462,7 +483,77 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 		var count int
 		_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, t).Scan(&count)
 		if count > 0 {
-			_, _ = tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM "%s" WHERE "site_id" = ?`, t), id)
+			if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM "%s" WHERE "site_id" = ?`, t), id); err != nil {
+				return fmt.Errorf("delete site records from %s: %w", t, err)
+			}
+		}
+	}
+
+	// Clean up admin groups referring to the deleted site
+	var grpTableCount int
+	_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'gocms_admin_group'`).Scan(&grpTableCount)
+	if grpTableCount > 0 {
+		rows, err := tx.QueryContext(ctx, `SELECT id, site_ids, site_permissions FROM gocms_admin_group WHERE site_ids IS NOT NULL OR site_permissions IS NOT NULL`)
+		if err == nil {
+			type grpUp struct {
+				gid       int64
+				siteIDs   *string
+				sitePerms string
+				hasIDs    bool
+			}
+			var toUpdate []grpUp
+			for rows.Next() {
+				var gid int64
+				var sIDs, sPerms sql.NullString
+				if err := rows.Scan(&gid, &sIDs, &sPerms); err == nil {
+					changed := false
+					var newSIDs *string
+					hasIDs := false
+					if sIDs.Valid && sIDs.String != "" {
+						var ids []int64
+						if json.Unmarshal([]byte(sIDs.String), &ids) == nil {
+							hasIDs = true
+							filtered := make([]int64, 0, len(ids))
+							for _, sid := range ids {
+								if sid != id {
+									filtered = append(filtered, sid)
+								} else {
+									changed = true
+								}
+							}
+							if changed {
+								b, _ := json.Marshal(filtered)
+								str := string(b)
+								newSIDs = &str
+							}
+						}
+					}
+					newSPerms := sPerms.String
+					if sPerms.Valid && sPerms.String != "" {
+						var permsMap map[string][]string
+						if json.Unmarshal([]byte(sPerms.String), &permsMap) == nil {
+							key := strconv.FormatInt(id, 10)
+							if _, exists := permsMap[key]; exists {
+								delete(permsMap, key)
+								changed = true
+								b, _ := json.Marshal(permsMap)
+								newSPerms = string(b)
+							}
+						}
+					}
+					if changed {
+						toUpdate = append(toUpdate, grpUp{gid, newSIDs, newSPerms, hasIDs})
+					}
+				}
+			}
+			rows.Close()
+			for _, u := range toUpdate {
+				if u.hasIDs && u.siteIDs != nil {
+					_, _ = tx.ExecContext(ctx, `UPDATE gocms_admin_group SET site_ids = ?, site_permissions = ? WHERE id = ?`, *u.siteIDs, u.sitePerms, u.gid)
+				} else {
+					_, _ = tx.ExecContext(ctx, `UPDATE gocms_admin_group SET site_permissions = ? WHERE id = ?`, u.sitePerms, u.gid)
+				}
+			}
 		}
 	}
 

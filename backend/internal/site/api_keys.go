@@ -14,6 +14,10 @@ func (s *Server) adminApiKeys(response http.ResponseWriter, request *http.Reques
 	if !ok {
 		return
 	}
+	if !user.IsSuper {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "只有超级管理员可以管理 API Key"})
+		return
+	}
 
 	switch request.Method {
 	case http.MethodGet:
@@ -67,6 +71,10 @@ func (s *Server) adminApiKeys(response http.ResponseWriter, request *http.Reques
 func (s *Server) adminApiKeyRoute(response http.ResponseWriter, request *http.Request, subpath string) {
 	user, ok := s.requireAdminSession(response, request)
 	if !ok {
+		return
+	}
+	if !user.IsSuper {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "只有超级管理员可以管理 API Key"})
 		return
 	}
 

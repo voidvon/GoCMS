@@ -63,6 +63,17 @@ func TestApiKeyEndpointsAndAuth(t *testing.T) {
 		t.Fatalf("expected 401 Unauthorized without session, got %d", recNoAuth.Code)
 	}
 
+	// 1b. Non-superadmin request fails with 403 Forbidden
+	_, _ = server.database.Exec(`INSERT INTO "gocms_admin_user" ("username", "password_hash", "is_super") VALUES ('subadmin', 'pass', 0)`)
+	subToken, _ := server.createSession("subadmin")
+	reqSub := httptest.NewRequest(http.MethodGet, "/api/admin/api-keys", nil)
+	reqSub.AddCookie(&http.Cookie{Name: "gocms_admin", Value: subToken})
+	recSub := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recSub, reqSub)
+	if recSub.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 Forbidden for non-superadmin, got %d", recSub.Code)
+	}
+
 	// 2. Create API key with session
 	createBody := []byte(`{"name":"Automated Sync Service"}`)
 	reqCreate := httptest.NewRequest(http.MethodPost, "/api/admin/api-keys", bytes.NewReader(createBody))
