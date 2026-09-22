@@ -424,6 +424,8 @@ func writeTestTheme(t *testing.T, themesRoot, id, name string) themepkg.Definiti
 	for path, content := range map[string]string{
 		filepath.Join(root, "theme.json"):                `{"id":"` + id + `","name":"` + name + `"}`,
 		filepath.Join(root, "templates", "index.html"):   "<main>" + id + "</main>",
+		filepath.Join(root, "templates", "msg.html"):     "<main>msg</main>",
+		filepath.Join(root, "templates", "search.html"):  "<main>search</main>",
 		filepath.Join(root, "assets", "css", "site.css"): "body { color: red; }",
 	} {
 		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {

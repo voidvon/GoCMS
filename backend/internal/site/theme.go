@@ -395,16 +395,17 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 		return
 	}
 
+	if err := s.validateThemeTemplates(definition, siteID); err != nil {
+		http.Error(response, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	pub := s.publication
 	if siteID > 1 {
 		pub = s.publicationForSite(request.Context(), siteID)
 	}
 
 	if pub != nil {
-		if err := s.validateThemeTemplates(definition, siteID); err != nil {
-			http.Error(response, err.Error(), http.StatusBadRequest)
-			return
-		}
 		pub.mu.Lock()
 		if pub.report.State == "running" {
 			pub.mu.Unlock()

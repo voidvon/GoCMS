@@ -215,9 +215,14 @@ func (s *Server) adminSiteItem(w http.ResponseWriter, r *http.Request, idStr str
 			return
 		}
 		s.invalidateSitePublication(id)
-		if existing.OutputDir != "" && s.siteRoot != "" {
-			targetDir := filepath.Join(s.siteRoot, existing.OutputDir)
-			if targetDir != s.siteRoot {
+		if s.siteRoot != "" && id > 1 {
+			targetDir := ""
+			if existing.OutputDir != "" {
+				targetDir = filepath.Join(s.siteRoot, existing.OutputDir)
+			} else {
+				targetDir = filepath.Join(s.siteRoot, strconv.FormatInt(id, 10))
+			}
+			if targetDir != "" && targetDir != s.siteRoot {
 				_ = os.RemoveAll(targetDir)
 			}
 		}

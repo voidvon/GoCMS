@@ -101,9 +101,10 @@ func (s *Server) memberAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	service := member.Service{DB: s.database}
 	cookie, _ := r.Cookie("gocms_user")
+	siteID, _ := s.resolveSiteID(r, nil)
 	switch {
 	case p == "/api/v1/me" && r.Method == http.MethodGet:
-		data, err := service.Profile(r.Context(), u.ID)
+		data, err := service.Profile(r.Context(), u.ID, siteID)
 		memberResult(w, data, err)
 	case p == "/api/v1/me" && r.Method == http.MethodPatch:
 		var in struct {
@@ -114,11 +115,11 @@ func (s *Server) memberAPI(w http.ResponseWriter, r *http.Request) {
 			memberResult(w, nil, member.ErrInvalid)
 			return
 		}
-		if err := service.UpdateProfile(r.Context(), u.ID, in.DisplayName, in.AvatarURL); err != nil {
+		if err := service.UpdateProfile(r.Context(), u.ID, in.DisplayName, in.AvatarURL, siteID); err != nil {
 			memberResult(w, nil, err)
 			return
 		}
-		data, err := service.Profile(r.Context(), u.ID)
+		data, err := service.Profile(r.Context(), u.ID, siteID)
 		memberResult(w, data, err)
 	case p == "/api/v1/me/password" && r.Method == http.MethodPut:
 		var in struct {

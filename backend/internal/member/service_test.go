@@ -111,4 +111,25 @@ func TestAuthenticateMultiSiteScoping(t *testing.T) {
 	if err != nil || auth1After.ID != p.ID {
 		t.Fatalf("expected auth on site 1 to still succeed, got %v", err)
 	}
+
+	// 8. Re-enable Site 2 and test Profile & UpdateProfile site-scoping
+	if _, err := database.Exec("UPDATE gocms_site_member SET status='active' WHERE site_id=2 AND user_id=?", p.ID); err != nil {
+		t.Fatal(err)
+	}
+	profS2, err := svc.Profile(ctx, p.ID, 2)
+	if err != nil || profS2.DisplayName != "AliceSub" {
+		t.Fatalf("expected profile on site 2 to return 'AliceSub', got %q, err: %v", profS2.DisplayName, err)
+	}
+	newName := "AliceSubUpdated"
+	if err := svc.UpdateProfile(ctx, p.ID, &newName, nil, 2); err != nil {
+		t.Fatalf("update profile on site 2 failed: %v", err)
+	}
+	profS2Updated, err := svc.Profile(ctx, p.ID, 2)
+	if err != nil || profS2Updated.DisplayName != "AliceSubUpdated" {
+		t.Fatalf("expected updated profile on site 2 to return 'AliceSubUpdated', got %q", profS2Updated.DisplayName)
+	}
+	authS2Updated, err := svc.Authenticate(ctx, token, 2)
+	if err != nil || authS2Updated.DisplayName != "AliceSubUpdated" {
+		t.Fatalf("expected authenticate on site 2 to return 'AliceSubUpdated', got %q", authS2Updated.DisplayName)
+	}
 }

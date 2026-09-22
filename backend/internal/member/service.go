@@ -43,12 +43,21 @@ func ParseTime(value string) (time.Time, error) {
 	}
 	return time.Time{}, ErrInvalid
 }
-func (s Service) Profile(ctx context.Context, id int64) (Profile, error) {
+func (s Service) Profile(ctx context.Context, id int64, siteIDOpt ...int64) (Profile, error) {
 	var p Profile
-	err := s.DB.QueryRowContext(ctx, "SELECT id,username,email,display_name,avatar_url FROM gocms_user WHERE id=? AND status='active'", id).Scan(&p.ID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL)
+	query := "SELECT id,username,email,display_name,avatar_url FROM gocms_user WHERE id=? AND status='active'"
+	args := []any{id}
+	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
+		query = `SELECT u.id, u.username, u.email, COALESCE(sm.display_name, u.display_name), u.avatar_url
+		         FROM gocms_user u
+		         LEFT JOIN gocms_site_member sm ON sm.user_id = u.id AND sm.site_id = ?
+		         WHERE u.id = ? AND u.status = 'active'`
+		args = []any{siteIDOpt[0], id}
+	}
+	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&p.ID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL)
 	return p, err
 }
-func (s Service) UpdateProfile(ctx context.Context, id int64, name, avatar *string) error {
+func (s Service) UpdateProfile(ctx context.Context, id int64, name, avatar *string, siteIDOpt ...int64) error {
 	if name == nil && avatar == nil {
 		return ErrInvalid
 	}
@@ -62,7 +71,13 @@ func (s Service) UpdateProfile(ctx context.Context, id int64, name, avatar *stri
 		}
 	}
 	_, err := s.DB.ExecContext(ctx, "UPDATE gocms_user SET display_name=COALESCE(?,display_name),avatar_url=COALESCE(?,avatar_url),updated_at=CURRENT_TIMESTAMP WHERE id=?", name, avatar, id)
-	return err
+	if err != nil {
+		return err
+	}
+	if name != nil && len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
+		_, _ = s.DB.ExecContext(ctx, "UPDATE gocms_site_member SET display_name=? WHERE user_id=? AND site_id=?", strings.TrimSpace(*name), id, siteIDOpt[0])
+	}
+	return nil
 }
 func (s Service) ChangePassword(ctx context.Context, id int64, old, next string) error {
 	if len(old) > 1024 || len(next) < 8 || len(next) > 1024 {

@@ -360,6 +360,15 @@ func CreateSite(ctx context.Context, database *sql.DB, s *Site) (*Site, error) {
 		}
 	}
 
+	var tplCount int
+	_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'gocms_template_assignment'`).Scan(&tplCount)
+	if tplCount > 0 {
+		_, _ = tx.ExecContext(ctx, `
+			INSERT INTO "gocms_template_assignment" ("site_id", "key", "template_path")
+			VALUES (?, 'message', 'msg.html'), (?, 'search', 'search.html')
+			ON CONFLICT ("site_id", "key") DO NOTHING`, siteID, siteID)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}

@@ -6,18 +6,14 @@ import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { InlineAlert } from "@/components/app/app-ui"
 import { showSuccess } from "@/components/app/admin-notifications"
-
-const publicOrigin = import.meta.env.DEV ? "http://127.0.0.1:18080" : ""
-
-function publicURL(path: string) {
-  return `${publicOrigin}${path}`
-}
+import { useSite } from "@/lib/site-context"
 
 function SitemapRow({
   format,
   title,
   description,
   path,
+  href,
   generating,
   disabled,
   onGenerate,
@@ -26,6 +22,7 @@ function SitemapRow({
   title: string
   description: string
   path: string
+  href: string
   generating: boolean
   disabled: boolean
   onGenerate: () => void
@@ -43,7 +40,7 @@ function SitemapRow({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 sm:pl-4">
-        <Button size="sm" variant="outline" nativeButton={false} render={<a href={publicURL(path)} target="_blank" rel="noreferrer" />}>
+        <Button size="sm" variant="outline" nativeButton={false} render={<a href={href} target="_blank" rel="noreferrer" />}>
           <ExternalLink />
           查看
         </Button>
@@ -57,6 +54,7 @@ function SitemapRow({
 }
 
 export function PublishPage() {
+  const { activeSite } = useSite()
   const [report, setReport] = useState<Publication | null>(null)
   const [error, setError] = useState("")
   const [sitemapError, setSitemapError] = useState("")
@@ -141,6 +139,20 @@ export function PublishPage() {
   const running = starting || report?.state === "running"
   const sitemapBusy = running || sitemapGenerating !== null
 
+  const getSiteURL = (path: string = "/") => {
+    const normPath = path.startsWith("/") ? path : `/${path}`
+    if (import.meta.env.DEV) {
+      if (activeSite?.domain && !activeSite.is_default) {
+        return `http://${activeSite.domain}:18080${normPath}`
+      }
+      return `http://127.0.0.1:18080${normPath}`
+    }
+    if (activeSite?.domain) {
+      return `https://${activeSite.domain}${normPath}`
+    }
+    return normPath
+  }
+
   return (
     <div className="space-y-4">
       {error && <InlineAlert>{error}</InlineAlert>}
@@ -156,7 +168,7 @@ export function PublishPage() {
               size="sm"
               variant="outline"
               nativeButton={false}
-              render={<a href={import.meta.env.DEV ? "http://127.0.0.1:18080/" : "/"} target="_blank" rel="noreferrer" />}
+              render={<a href={getSiteURL("/")} target="_blank" rel="noreferrer" />}
             >
               <Globe />
               查看网站
@@ -188,6 +200,7 @@ export function PublishPage() {
                 title="网站地图"
                 description="HTML 页面索引"
                 path="/sitemap.html"
+                href={getSiteURL("/sitemap.html")}
                 generating={sitemapGenerating === "html"}
                 disabled={sitemapBusy}
                 onGenerate={() => void generate("html")}
@@ -197,6 +210,7 @@ export function PublishPage() {
                 title="Sitemap XML"
                 description="提交给搜索引擎的 XML 索引"
                 path="/Sitemap.xml"
+                href={getSiteURL("/Sitemap.xml")}
                 generating={sitemapGenerating === "xml"}
                 disabled={sitemapBusy}
                 onGenerate={() => void generate("xml")}
@@ -206,6 +220,7 @@ export function PublishPage() {
                 title="llms.txt"
                 description="供 AI 阅读的页面标题、简介和来源链接"
                 path="/llms.txt"
+                href={getSiteURL("/llms.txt")}
                 generating={sitemapGenerating === "llms"}
                 disabled={sitemapBusy}
                 onGenerate={() => void generate("llms")}

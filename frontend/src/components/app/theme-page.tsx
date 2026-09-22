@@ -31,6 +31,7 @@ import { TemplateLabelsPanel } from "@/components/app/template-labels-panel"
 import { TemplateVariablesPanel } from "@/components/app/template-variables-panel"
 import { HeaderActions } from "@/components/app/header-actions"
 import { showSuccess } from "@/components/app/admin-notifications"
+import { useSite } from "@/lib/site-context"
 import { cn } from "@/lib/utils"
 
 type TemplateGroupKey = "home" | "cover" | "list" | "content" | "public"
@@ -612,6 +613,7 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
 }
 
 export function ThemePage() {
+  const { refreshSites } = useSite()
   const [files, setFiles] = useState<ThemeFiles | null>(null)
   const [section, setSection] = useState<TemplateSection>("home")
   const [selectedPath, setSelectedPath] = useState("")
@@ -653,6 +655,7 @@ export function ThemePage() {
       const result = await activateTheme(id)
       showSuccess(result.publish_started ? `已切换到模板组${result.theme.name}，网站正在重新生成。` : `已切换到模板组${result.theme.name}。`)
       await loadFiles()
+      void refreshSites()
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "模板组切换失败")
     } finally {

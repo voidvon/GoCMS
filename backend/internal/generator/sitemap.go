@@ -94,6 +94,9 @@ func (p Publisher) generateIndex(ctx context.Context, format string) (string, er
 	if err := atomicWrite(filepath.Join(web, filename), body); err != nil {
 		return "", err
 	}
+	if format == SitemapXML {
+		_ = atomicWrite(filepath.Join(web, "sitemap.xml"), body)
+	}
 	return filename, nil
 }
 

@@ -109,8 +109,12 @@ const platformNavItems: NavigationItem[] = [
 
 function canView(user: AdminUser, view: AdminView, activeSiteId?: number) {
   if (view === "sites" || view === "users") return user.is_super
-  if (view === "logs") return user.is_super || user.permissions.includes("logs") || user.permissions.includes("login_logs")
-  if (user.is_super || view === "overview") return true
+  if (user.is_super) return true
+  if (activeSiteId && user.site_ids && user.site_ids.length > 0 && !user.site_ids.includes(activeSiteId)) {
+    return false
+  }
+  if (view === "logs") return user.permissions.includes("logs") || user.permissions.includes("login_logs")
+  if (view === "overview") return true
   if (activeSiteId && user.site_permissions && user.site_permissions[activeSiteId]) {
     const sitePerms = user.site_permissions[activeSiteId]
     return sitePerms.includes(view) || sitePerms.includes("*")
