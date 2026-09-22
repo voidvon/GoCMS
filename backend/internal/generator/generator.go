@@ -730,6 +730,14 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		_ = tx.Rollback()
 		return report, err
 	}
+	if strings.TrimSpace(c.settings["site_url"]) == "" && siteID > 0 {
+		var domain string
+		_ = tx.QueryRowContext(ctx, `SELECT "domain" FROM "`+db.SiteTable+`" WHERE "id" = ?`, siteID).Scan(&domain)
+		domain = db.NormalizeDomain(domain)
+		if domain != "" {
+			c.settings["site_url"] = "https://" + domain
+		}
+	}
 	c.assignments, err = templateconfig.LoadForSite(ctx, tx, siteID)
 	if err != nil {
 		_ = tx.Rollback()
@@ -892,7 +900,14 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		return report, err
 	}
 	c.pages["sitemap.html"] = renderSitemapHTML(urls)
-	c.pages["Sitemap.xml"] = renderSitemapXML(strings.TrimRight(c.settings["site_url"], "/"), urls)
+	xmlMap := renderSitemapXML(strings.TrimRight(c.settings["site_url"], "/"), urls)
+	c.pages["sitemap.xml"] = xmlMap
+	c.pages["Sitemap.xml"] = xmlMap
+
+	if c.pages["robots.txt"] == nil && c.settings["site_url"] != "" {
+		siteURL := strings.TrimRight(c.settings["site_url"], "/")
+		c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", siteURL))
+	}
 
 	for _, row := range baseContents {
 		if row.n("visible") == 1 {

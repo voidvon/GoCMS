@@ -46,3 +46,69 @@ func TestMembershipTimeSemantics(t *testing.T) {
 		}
 	}
 }
+
+func TestAuthenticateMultiSiteScoping(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := Service{DB: database}
+	p, err := svc.Register(ctx, "alice", "alice@example.com", "password123", 1)
+	if err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	_, token, err := svc.Login(ctx, "alice", "password123", "127.0.0.1", "agent", "", 1)
+	if err != nil {
+		t.Fatalf("login failed: %v", err)
+	}
+
+	// 1. Authenticate on Site 1 should succeed
+	auth1, err := svc.Authenticate(ctx, token, 1)
+	if err != nil || auth1.ID != p.ID {
+		t.Fatalf("expected auth on site 1 to succeed, got %v", err)
+	}
+
+	// 2. Authenticate on Site 2 should fail (not a member of site 2)
+	_, err = svc.Authenticate(ctx, token, 2)
+	if err != ErrUnauthorized {
+		t.Fatalf("expected ErrUnauthorized on site 2, got %v", err)
+	}
+
+	// 3. Add to Site 2
+	if _, err := database.Exec("INSERT INTO gocms_site_member(site_id, user_id, display_name, status) VALUES(2, ?, 'AliceSub', 'active')", p.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Authenticate on Site 2 should now succeed with Site 2 display name
+	auth2, err := svc.Authenticate(ctx, token, 2)
+	if err != nil || auth2.ID != p.ID {
+		t.Fatalf("expected auth on site 2 to succeed, got %v", err)
+	}
+	if auth2.DisplayName != "AliceSub" {
+		t.Fatalf("expected display name 'AliceSub', got %q", auth2.DisplayName)
+	}
+
+	// 5. Ban/disable member on Site 2
+	if _, err := database.Exec("UPDATE gocms_site_member SET status='disabled' WHERE site_id=2 AND user_id=?", p.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// 6. Authenticate on Site 2 should fail
+	_, err = svc.Authenticate(ctx, token, 2)
+	if err != ErrUnauthorized {
+		t.Fatalf("expected ErrUnauthorized on site 2 after ban, got %v", err)
+	}
+
+	// 7. Authenticate on Site 1 should still succeed
+	auth1After, err := svc.Authenticate(ctx, token, 1)
+	if err != nil || auth1After.ID != p.ID {
+		t.Fatalf("expected auth on site 1 to still succeed, got %v", err)
+	}
+}

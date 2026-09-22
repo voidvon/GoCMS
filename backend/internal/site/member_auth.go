@@ -137,24 +137,10 @@ func (s *Server) currentSiteUser(r *http.Request) (siteUser, bool) {
 	if e != nil {
 		return siteUser{}, false
 	}
-	p, err := (member.Service{DB: s.database}).Authenticate(r.Context(), c.Value)
+	siteID, _ := s.resolveSiteID(r, nil)
+	p, err := (member.Service{DB: s.database}).Authenticate(r.Context(), c.Value, siteID)
 	if err != nil {
 		return siteUser{}, false
-	}
-	siteID, _ := s.resolveSiteID(r, nil)
-	if siteID > 0 && s.database != nil {
-		var memberCount int
-		_ = s.database.QueryRowContext(r.Context(), `
-			SELECT COUNT(*)
-			FROM gocms_user u
-			LEFT JOIN gocms_site_member sm ON sm.user_id = u.id AND sm.site_id = ?
-			WHERE u.id = ? AND u.status = 'active'
-			  AND (u.site_id = ? OR sm.site_id = ?)
-			  AND COALESCE(sm.status, u.status) = 'active'`,
-			siteID, p.ID, siteID, siteID).Scan(&memberCount)
-		if memberCount == 0 {
-			return siteUser{}, false
-		}
 	}
 	u := siteUser{ID: p.ID, Username: p.Username, Email: p.Email, DisplayName: p.DisplayName, AvatarURL: p.AvatarURL}
 	s.attachMemberGroups(r, &u)

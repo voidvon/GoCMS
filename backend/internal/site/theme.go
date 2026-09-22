@@ -385,9 +385,6 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 	}
 
 	_, dataRoot, currentActive := s.themeState()
-	if s.database != nil {
-		_, _ = s.database.ExecContext(request.Context(), `UPDATE "gocms_site" SET "theme_id" = ?, "updated_at" = CURRENT_TIMESTAMP WHERE "id" = ?`, definition.Manifest.ID, siteID)
-	}
 
 	if siteID == 1 && currentActive.Manifest.ID != "" && currentActive.Manifest.ID == definition.Manifest.ID {
 		writeJSON(response, http.StatusOK, map[string]any{
@@ -414,6 +411,9 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 			http.Error(response, "网站正在发布，请稍后切换主题", http.StatusConflict)
 			return
 		}
+		if s.database != nil {
+			_, _ = s.database.ExecContext(request.Context(), `UPDATE "gocms_site" SET "theme_id" = ?, "updated_at" = CURRENT_TIMESTAMP WHERE "id" = ?`, definition.Manifest.ID, siteID)
+		}
 		if siteID == 1 {
 			if err := themepkg.SaveActive(dataRoot, definition.Manifest.ID); err != nil {
 				pub.mu.Unlock()
@@ -434,7 +434,12 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 			"publish_started": publishStarted,
 		})
 		return
-	} else if siteID == 1 {
+	}
+
+	if s.database != nil {
+		_, _ = s.database.ExecContext(request.Context(), `UPDATE "gocms_site" SET "theme_id" = ?, "updated_at" = CURRENT_TIMESTAMP WHERE "id" = ?`, definition.Manifest.ID, siteID)
+	}
+	if siteID == 1 {
 		_ = themepkg.SaveActive(dataRoot, definition.Manifest.ID)
 		s.setActiveTheme(definition)
 	}

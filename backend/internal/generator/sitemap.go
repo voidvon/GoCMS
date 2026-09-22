@@ -161,7 +161,17 @@ func configuredSiteURL(ctx context.Context, database *sql.DB, siteID int64) (str
 	if err != nil {
 		return "", fmt.Errorf("读取网站地址失败: %w", err)
 	}
-	return strings.TrimRight(strings.TrimSpace(settings["site_url"]), "/"), nil
+	siteURL := strings.TrimRight(strings.TrimSpace(settings["site_url"]), "/")
+	if siteURL != "" {
+		return siteURL, nil
+	}
+	var domain string
+	_ = database.QueryRowContext(ctx, `SELECT "domain" FROM "`+db.SiteTable+`" WHERE "id" = ?`, siteID).Scan(&domain)
+	domain = db.NormalizeDomain(domain)
+	if domain != "" {
+		return "https://" + domain, nil
+	}
+	return "", nil
 }
 
 func renderSitemapHTML(urls []string) []byte {

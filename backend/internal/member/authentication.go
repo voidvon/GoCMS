@@ -147,13 +147,36 @@ func (s Service) Login(ctx context.Context, identifier, password, ip, agent stri
 	return profile, token, err
 }
 
-func (s Service) Authenticate(ctx context.Context, token string) (Profile, error) {
+func (s Service) Authenticate(ctx context.Context, token string, siteIDOpt ...int64) (Profile, error) {
 	var p Profile
-	err := s.DB.QueryRowContext(ctx, "SELECT u.id,u.username,u.email,u.display_name,u.avatar_url FROM gocms_user u JOIN gocms_user_session s ON s.user_id=u.id WHERE s.token_hash=? AND s.expires_at>? AND u.status='active'", TokenHash(token), time.Now().Unix()).Scan(&p.ID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL)
+	var status, siteStatus string
+	query := `SELECT u.id, u.username, u.email, u.display_name, u.avatar_url, u.status, u.status
+	          FROM gocms_user u
+	          JOIN gocms_user_session s ON s.user_id=u.id
+	          WHERE s.token_hash=? AND s.expires_at>?`
+	args := []any{TokenHash(token), time.Now().Unix()}
+
+	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
+		sid := siteIDOpt[0]
+		query = `SELECT u.id, u.username, u.email, COALESCE(sm.display_name, u.display_name), u.avatar_url, u.status, COALESCE(sm.status, u.status)
+		         FROM gocms_user u
+		         JOIN gocms_user_session s ON s.user_id=u.id
+		         LEFT JOIN gocms_site_member sm ON sm.user_id=u.id AND sm.site_id=?
+		         WHERE s.token_hash=? AND s.expires_at>?
+		           AND (u.site_id=? OR sm.site_id=?)`
+		args = []any{sid, TokenHash(token), time.Now().Unix(), sid, sid}
+	}
+	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&p.ID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL, &status, &siteStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return p, ErrUnauthorized
 	}
-	return p, err
+	if err != nil {
+		return p, err
+	}
+	if status != "active" || siteStatus != "active" {
+		return p, ErrUnauthorized
+	}
+	return p, nil
 }
 func (s Service) Logout(ctx context.Context, token string) error {
 	_, err := s.DB.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE token_hash=?", TokenHash(token))
