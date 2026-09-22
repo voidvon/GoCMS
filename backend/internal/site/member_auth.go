@@ -75,7 +75,7 @@ func (s *Server) userLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	u := siteUser{ID: p.ID, Username: p.Username, Email: p.Email, DisplayName: p.DisplayName, AvatarURL: p.AvatarURL}
 	s.attachMemberGroups(r, &u)
-	http.SetCookie(w, userCookie(token, 30*24*60*60, r.TLS != nil))
+	http.SetCookie(w, userCookie(token, 30*24*60*60, requestScheme(r) == "https"))
 	writeJSON(w, 200, map[string]any{"user": u})
 
 }
@@ -128,7 +128,7 @@ func (s *Server) userLogout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.SetCookie(w, userCookie("", -1, r.TLS != nil))
+	http.SetCookie(w, userCookie("", -1, requestScheme(r) == "https"))
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

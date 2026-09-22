@@ -135,3 +135,66 @@ func TestMemberSessionLimitAPI(t *testing.T) {
 		t.Fatal("revocation did not release slot")
 	}
 }
+
+func TestMemberProxyHeaders(t *testing.T) {
+	s, _, _ := newCategoryTestServer(t)
+
+	// Register user
+	regReq := httptest.NewRequest("POST", "/api/v1/auth/register", strings.NewReader(`{"username":"proxyuser","password":"password123"}`))
+	regReq.Header.Set("Content-Type", "application/json")
+	regRec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(regRec, regReq)
+	if regRec.Code != 201 {
+		t.Fatalf("register failed: %d %s", regRec.Code, regRec.Body.String())
+	}
+
+	// Login behind HTTPS reverse proxy: X-Forwarded-Proto: https, X-Forwarded-Host: example.com
+	loginReq := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(`{"username":"proxyuser","password":"password123"}`))
+	loginReq.Host = "127.0.0.1:8080"
+	loginReq.Header.Set("X-Forwarded-Proto", "https")
+	loginReq.Header.Set("X-Forwarded-Host", "example.com")
+	loginReq.Header.Set("Origin", "https://example.com")
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != 200 {
+		t.Fatalf("login behind proxy failed: %d %s", loginRec.Code, loginRec.Body.String())
+	}
+
+	cookies := loginRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("expected session cookie")
+	}
+	cookie := cookies[0]
+	if !cookie.Secure {
+		t.Fatal("expected Secure cookie flag when X-Forwarded-Proto is https")
+	}
+
+	// Mutation request with matching Origin and proxy headers
+	patchReq := httptest.NewRequest("PATCH", "/api/v1/me", strings.NewReader(`{"display_name":"Proxy User"}`))
+	patchReq.Host = "127.0.0.1:8080"
+	patchReq.Header.Set("X-Forwarded-Proto", "https")
+	patchReq.Header.Set("X-Forwarded-Host", "example.com")
+	patchReq.Header.Set("Origin", "https://example.com")
+	patchReq.Header.Set("Content-Type", "application/json")
+	patchReq.AddCookie(cookie)
+	patchRec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(patchRec, patchReq)
+	if patchRec.Code != 200 {
+		t.Fatalf("mutation with proxy headers failed: %d %s", patchRec.Code, patchRec.Body.String())
+	}
+
+	// Mutation request with mismatched protocol (http origin while X-Forwarded-Proto is https)
+	badOriginReq := httptest.NewRequest("PATCH", "/api/v1/me", strings.NewReader(`{"display_name":"Hacker"}`))
+	badOriginReq.Host = "127.0.0.1:8080"
+	badOriginReq.Header.Set("X-Forwarded-Proto", "https")
+	badOriginReq.Header.Set("X-Forwarded-Host", "example.com")
+	badOriginReq.Header.Set("Origin", "http://example.com")
+	badOriginReq.Header.Set("Content-Type", "application/json")
+	badOriginReq.AddCookie(cookie)
+	badOriginRec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(badOriginRec, badOriginReq)
+	if badOriginRec.Code != 403 {
+		t.Fatalf("expected 403 for mismatched scheme, got %d", badOriginRec.Code)
+	}
+}

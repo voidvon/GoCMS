@@ -23,12 +23,49 @@ func (s *Server) currentAdmin(r *http.Request) *AdminUser {
 	return nil
 }
 
+func requestHost(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host != "" {
+		if comma := strings.Index(host, ","); comma != -1 {
+			host = strings.TrimSpace(host[:comma])
+		}
+	}
+	if host == "" {
+		host = r.Host
+	}
+	return host
+}
+
+func requestScheme(r *http.Request) string {
+	if r == nil {
+		return "http"
+	}
+	if r.TLS != nil {
+		return "https"
+	}
+	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
+		if comma := strings.Index(proto, ","); comma != -1 {
+			proto = strings.TrimSpace(proto[:comma])
+		}
+		if strings.EqualFold(proto, "https") {
+			return "https"
+		}
+	}
+	return "http"
+}
+
 func (s *Server) resolveSiteID(r *http.Request, user *AdminUser) (int64, error) {
 	siteIDStr := ""
 	if r != nil {
 		siteIDStr = strings.TrimSpace(r.URL.Query().Get("site_id"))
 		if siteIDStr == "" {
 			siteIDStr = strings.TrimSpace(r.Header.Get("X-Site-Id"))
+		}
+		if siteIDStr == "" && r.Form != nil {
+			siteIDStr = strings.TrimSpace(r.Form.Get("site_id"))
 		}
 	}
 	var siteID int64
@@ -42,15 +79,7 @@ func (s *Server) resolveSiteID(r *http.Request, user *AdminUser) (int64, error) 
 		if user != nil && !user.IsSuper && len(user.SiteIDs) > 0 {
 			siteID = user.SiteIDs[0]
 		} else if s.database != nil && r != nil {
-			host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
-			if host != "" {
-				if comma := strings.Index(host, ","); comma != -1 {
-					host = strings.TrimSpace(host[:comma])
-				}
-			}
-			if host == "" {
-				host = r.Host
-			}
+			host := requestHost(r)
 			if matched, err := db.GetSiteByHost(r.Context(), s.database, host); err == nil && matched != nil {
 				siteID = matched.ID
 			} else if def, err := db.GetDefaultSite(r.Context(), s.database); err == nil && def != nil {

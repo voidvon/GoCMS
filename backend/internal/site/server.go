@@ -382,7 +382,7 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 	}
 
 	if s.database != nil {
-		matched, err := db.GetSiteByHost(request.Context(), s.database, request.Host)
+		matched, err := db.GetSiteByHost(request.Context(), s.database, requestHost(request))
 		if err != nil || matched == nil {
 			matched, _ = db.GetDefaultSite(request.Context(), s.database)
 		}

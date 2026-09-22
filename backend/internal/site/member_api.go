@@ -25,11 +25,9 @@ func memberRequest(w http.ResponseWriter, r *http.Request) bool {
 	}
 	if origin := r.Header.Get("Origin"); origin != "" {
 		u, err := url.Parse(origin)
-		scheme := "http"
-		if r.TLS != nil {
-			scheme = "https"
-		}
-		if err != nil || u.Host != r.Host || u.Scheme != scheme {
+		scheme := requestScheme(r)
+		expectedHost := requestHost(r)
+		if err != nil || !strings.EqualFold(u.Host, expectedHost) || !strings.EqualFold(u.Scheme, scheme) {
 			memberError(w, 403, "origin_not_allowed", "Origin rejected")
 			return false
 		}
@@ -136,7 +134,7 @@ func (s *Server) memberAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		err := service.ChangePassword(r.Context(), u.ID, in.Old, in.New)
 		if err == nil {
-			http.SetCookie(w, userCookie("", -1, r.TLS != nil))
+			http.SetCookie(w, userCookie("", -1, requestScheme(r) == "https"))
 		}
 		memberResult(w, map[string]bool{"reauthenticate": true}, err)
 	case p == "/api/v1/me/memberships" && r.Method == http.MethodGet:
@@ -150,7 +148,7 @@ func (s *Server) memberAPI(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(p, "/api/v1/me/sessions/")
 		err := service.Revoke(r.Context(), u.ID, id)
 		if err == nil && id == member.SessionID(hashToken(cookie.Value)) {
-			http.SetCookie(w, userCookie("", -1, r.TLS != nil))
+			http.SetCookie(w, userCookie("", -1, requestScheme(r) == "https"))
 		}
 		memberResult(w, map[string]bool{"ok": true}, err)
 	default:

@@ -241,4 +241,14 @@ func TestMultiSiteHostRouting(t *testing.T) {
 	if rec2.Code != http.StatusOK || rec2.Body.String() != "Hello Site 2 Blog" {
 		t.Fatalf("expected Site 2, got %d: %s", rec2.Code, rec2.Body.String())
 	}
+
+	// Request behind reverse proxy with X-Forwarded-Host -> Site 2
+	req3 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req3.Host = "127.0.0.1:8080"
+	req3.Header.Set("X-Forwarded-Host", "blog.example.com")
+	rec3 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK || rec3.Body.String() != "Hello Site 2 Blog" {
+		t.Fatalf("expected Site 2 via X-Forwarded-Host, got %d: %s", rec3.Code, rec3.Body.String())
+	}
 }
