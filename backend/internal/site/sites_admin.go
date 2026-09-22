@@ -22,9 +22,12 @@ func (s *Server) currentAdmin(r *http.Request) *AdminUser {
 }
 
 func (s *Server) resolveSiteID(r *http.Request, user *AdminUser) (int64, error) {
-	siteIDStr := strings.TrimSpace(r.URL.Query().Get("site_id"))
-	if siteIDStr == "" {
-		siteIDStr = strings.TrimSpace(r.Header.Get("X-Site-Id"))
+	siteIDStr := ""
+	if r != nil {
+		siteIDStr = strings.TrimSpace(r.URL.Query().Get("site_id"))
+		if siteIDStr == "" {
+			siteIDStr = strings.TrimSpace(r.Header.Get("X-Site-Id"))
+		}
 	}
 	var siteID int64
 	if siteIDStr != "" {
@@ -36,15 +39,23 @@ func (s *Server) resolveSiteID(r *http.Request, user *AdminUser) (int64, error) 
 	if siteID <= 0 {
 		if user != nil && !user.IsSuper && len(user.SiteIDs) > 0 {
 			siteID = user.SiteIDs[0]
-		} else {
-			siteID = 1
+		} else if s.database != nil && r != nil {
+			if matched, err := db.GetSiteByHost(r.Context(), s.database, r.Host); err == nil && matched != nil {
+				siteID = matched.ID
+			} else if def, err := db.GetDefaultSite(r.Context(), s.database); err == nil && def != nil {
+				siteID = def.ID
+			}
 		}
+	}
+	if siteID <= 0 {
+		siteID = 1
 	}
 	if user != nil && !user.CanManageSite(siteID) {
 		return 0, errors.New("无权访问该站点")
 	}
 	return siteID, nil
 }
+
 
 func (s *Server) adminSites(w http.ResponseWriter, r *http.Request) {
 	user := s.currentAdmin(r)
@@ -146,6 +157,7 @@ func (s *Server) adminSiteItem(w http.ResponseWriter, r *http.Request, idStr str
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		s.invalidateSitePublication(id)
 		writeJSON(w, http.StatusOK, payload)
 
 	case http.MethodDelete:
@@ -157,7 +169,9 @@ func (s *Server) adminSiteItem(w http.ResponseWriter, r *http.Request, idStr str
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
+		s.invalidateSitePublication(id)
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+
 
 	default:
 		methodNotAllowed(w)

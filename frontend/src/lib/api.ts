@@ -795,8 +795,9 @@ export function importTheme(file: File) {
 }
 
 export function themeExportURL(id?: string) {
-  return endpoint(`/api/admin/templates/export${query({ id })}`)
+  return endpoint(`/api/admin/templates/export${query({ id, site_id: getActiveSiteId() })}`)
 }
+
 
 export function getThemeFile(kind: ThemeFileKind, filePath: string) {
   const params = new URLSearchParams({ kind, path: filePath })

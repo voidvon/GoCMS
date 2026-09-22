@@ -168,6 +168,64 @@ func (s *Server) siteThemePaths(ctx context.Context, siteID int64) (themeRoot, t
 	return tRoot, tplRoot, name, targetThemeID, nil
 }
 
+func copyDirectory(src, dst string) error {
+	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		srcFile, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+		defer srcFile.Close()
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+		dstFile, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+		if err != nil {
+			return err
+		}
+		defer dstFile.Close()
+		_, err = io.Copy(dstFile, srcFile)
+		return err
+	})
+}
+
+func (s *Server) ensureSiteThemeLocal(ctx context.Context, siteID int64) (themeRoot, templateRoot string, err error) {
+	themeRoot, templateRoot, _, themeID, err := s.siteThemePaths(ctx, siteID)
+	if err != nil {
+		return "", "", err
+	}
+	if siteID <= 1 || s.assetsRoot == "" || themeID == "" {
+		return themeRoot, templateRoot, nil
+	}
+	siteDir := filepath.Join(s.siteThemeBase(siteID), themeID)
+	if stat, err := os.Stat(siteDir); err == nil && stat.IsDir() {
+		return filepath.Join(siteDir, "assets"), filepath.Join(siteDir, "templates"), nil
+	}
+	inheritedRoot := filepath.Dir(strings.TrimSuffix(templateRoot, string(filepath.Separator)))
+	if stat, err := os.Stat(inheritedRoot); err == nil && stat.IsDir() {
+		if err := copyDirectory(inheritedRoot, siteDir); err != nil {
+			return "", "", fmt.Errorf("复制站点主题副本失败: %w", err)
+		}
+		s.invalidateSitePublication(siteID)
+		return filepath.Join(siteDir, "assets"), filepath.Join(siteDir, "templates"), nil
+	}
+	return themeRoot, templateRoot, nil
+}
+
+
 func (s *Server) adminTheme(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
 		methodNotAllowed(response)
@@ -600,8 +658,16 @@ func (s *Server) uploadThemeFile(response http.ResponseWriter, request *http.Req
 		return
 	}
 	user := s.currentAdmin(request)
-	siteID, _ := s.resolveSiteID(request, user)
-	themeRoot, templateRoot, _, _, _ := s.siteThemePaths(request.Context(), siteID)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
+	themeRoot, templateRoot, err := s.ensureSiteThemeLocal(request.Context(), siteID)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	root, _, ok := s.themeFileSpecForRoots("css", themeRoot, templateRoot)
 	if !ok || root == "" {
@@ -697,7 +763,11 @@ func (s *Server) updateThemeFile(response http.ResponseWriter, request *http.Req
 		http.Error(response, err.Error(), http.StatusForbidden)
 		return
 	}
-	themeRoot, templateRoot, _, _, _ := s.siteThemePaths(request.Context(), siteID)
+	themeRoot, templateRoot, err := s.ensureSiteThemeLocal(request.Context(), siteID)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	item, err := s.saveCustomThemeFileForRoots(kind, payload.Path, []byte(payload.Content), themeRoot, templateRoot)
 	if err != nil {
@@ -720,7 +790,12 @@ func (s *Server) deleteThemeFile(response http.ResponseWriter, request *http.Req
 		http.Error(response, err.Error(), http.StatusForbidden)
 		return
 	}
-	themeRoot, templateRoot, _, _, _ := s.siteThemePaths(request.Context(), siteID)
+	themeRoot, templateRoot, err := s.ensureSiteThemeLocal(request.Context(), siteID)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 
 	root, _, ok := s.themeFileSpecForRoots(kind, themeRoot, templateRoot)
 	if !ok || root == "" {

@@ -49,12 +49,19 @@ func (p Publisher) generateIndex(ctx context.Context, format string) (string, er
 	defer unlock()
 
 	targetWeb := p.TargetWeb()
-	if _, err := os.Stat(targetWeb); os.IsNotExist(err) && p.Web != "" {
-		if _, errWeb := os.Stat(p.Web); errWeb == nil {
-			targetWeb = p.Web
+	if p.SiteID <= 1 {
+		if _, err := os.Stat(targetWeb); os.IsNotExist(err) && p.Web != "" {
+			if _, errWeb := os.Stat(p.Web); errWeb == nil {
+				targetWeb = p.Web
+			}
 		}
 	}
+	if targetWeb == "" {
+		targetWeb = p.Web
+	}
 	web, err := filepath.Abs(targetWeb)
+
+
 	if err != nil {
 		return "", err
 	}

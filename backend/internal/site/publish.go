@@ -127,7 +127,16 @@ func (s *Server) publicationForSite(ctx context.Context, siteID int64) *publicat
 	return pub
 }
 
+func (s *Server) invalidateSitePublication(siteID int64) {
+	s.sitePubMu.Lock()
+	defer s.sitePubMu.Unlock()
+	if s.sitePublications != nil {
+		delete(s.sitePublications, siteID)
+	}
+}
+
 func (s *Server) startPublish(queue bool) (generator.Report, bool) {
+
 	return s.startPublishPub(s.publication, queue)
 }
 

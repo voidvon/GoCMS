@@ -130,12 +130,8 @@ func (s *Server) feedbackSubmit(response http.ResponseWriter, request *http.Requ
 	ip := clientIP(request)
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	var siteID int64 = 1
-	if s.database != nil {
-		if matched, err := db.GetSiteByHost(request.Context(), s.database, request.Host); err == nil && matched != nil {
-			siteID = matched.ID
-		}
-	}
+	siteID, _ := s.resolveSiteID(request, nil)
+
 
 	_, err = s.database.ExecContext(request.Context(), `
 		INSERT INTO "gocms_message"

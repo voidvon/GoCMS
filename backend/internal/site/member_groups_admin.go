@@ -113,11 +113,12 @@ func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var validCount int
-		err := s.database.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_user u, gocms_user_group g WHERE u.id=? AND u.site_id=? AND g.id=? AND g.site_id=?`, in.UserID, siteID, in.GroupID, siteID).Scan(&validCount)
+		err := s.database.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_user u, gocms_user_group g WHERE u.id=? AND (u.site_id=? OR u.id IN (SELECT user_id FROM gocms_site_member WHERE site_id=?)) AND g.id=? AND g.site_id=?`, in.UserID, siteID, siteID, in.GroupID, siteID).Scan(&validCount)
 		if err != nil || validCount == 0 {
 			http.Error(w, "用户或会员组不存在，或不属于当前站点", 400)
 			return
 		}
+
 		if in.ExpiresAt != nil && *in.ExpiresAt != "" {
 			end, err := member.ParseTime(*in.ExpiresAt)
 			if err != nil {
@@ -174,7 +175,8 @@ func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listMemberGroupMembers(w http.ResponseWriter, r *http.Request, siteID int64) {
 	groupID := r.URL.Query().Get("group_id")
-	rows, err := s.database.QueryContext(r.Context(), `SELECT u.id,u.username,u.email,u.display_name,m.status,m.expires_at FROM gocms_user_group_member m JOIN gocms_user_group g ON g.id=m.group_id JOIN gocms_user u ON u.id=m.user_id WHERE m.group_id=? AND g.site_id=? AND u.site_id=? ORDER BY u.id DESC`, groupID, siteID, siteID)
+	rows, err := s.database.QueryContext(r.Context(), `SELECT u.id,u.username,u.email,u.display_name,m.status,m.expires_at FROM gocms_user_group_member m JOIN gocms_user_group g ON g.id=m.group_id JOIN gocms_user u ON u.id=m.user_id WHERE m.group_id=? AND g.site_id=? AND (u.site_id=? OR u.id IN (SELECT user_id FROM gocms_site_member WHERE site_id=?)) ORDER BY u.id DESC`, groupID, siteID, siteID, siteID)
+
 	if err != nil {
 		accountError(w, err)
 		return

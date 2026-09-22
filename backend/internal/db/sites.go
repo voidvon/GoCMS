@@ -395,10 +395,23 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 	}
 	defer tx.Rollback()
 
-	// Cascade delete site-scoped data
+	// Cascade delete dependent sub-records first
+	dependentDeletes := []string{
+		`DELETE FROM "gocms_media_ref" WHERE "content_id" IN (SELECT "id" FROM "gocms_content" WHERE "site_id" = ?) OR "media_id" IN (SELECT "id" FROM "gocms_media" WHERE "site_id" = ?)`,
+		`DELETE FROM "gocms_content_translation" WHERE "content_id" IN (SELECT "id" FROM "gocms_content" WHERE "site_id" = ?)`,
+		`DELETE FROM "gocms_category_translation" WHERE "category_id" IN (SELECT "id" FROM "gocms_category" WHERE "site_id" = ?)`,
+		`DELETE FROM "gocms_user_group_member" WHERE "group_id" IN (SELECT "id" FROM "gocms_user_group" WHERE "site_id" = ?) OR "user_id" IN (SELECT "id" FROM "gocms_user" WHERE "site_id" = ?)`,
+		`DELETE FROM "gocms_user_session" WHERE "user_id" IN (SELECT "id" FROM "gocms_user" WHERE "site_id" = ?)`,
+	}
+	for _, sqlStmt := range dependentDeletes {
+		_, _ = tx.ExecContext(ctx, sqlStmt, id)
+	}
+
+	// Cascade delete direct site-scoped tables
 	tables := []string{
 		"gocms_category",
 		"gocms_content",
+		"gocms_media",
 		"gocms_message",
 		"gocms_site_setting",
 		"gocms_template_assignment",
@@ -414,6 +427,7 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 			_, _ = tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM "%s" WHERE "site_id" = ?`, t), id)
 		}
 	}
+
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM "`+SiteTable+`" WHERE "id" = ?`, id); err != nil {
 		return fmt.Errorf("delete site: %w", err)

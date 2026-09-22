@@ -134,11 +134,27 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 		http.Error(response, "invalid content id", http.StatusBadRequest)
 		return
 	}
+	var category int64
+	var contentSiteID int64
+	if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id", "category_id" FROM "gocms_content" WHERE "id" = ?`, id).Scan(&contentSiteID, &category); err != nil {
+		http.NotFound(response, request)
+		return
+	}
+	user := s.currentAdmin(request)
+	if user == nil {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+		return
+	}
+
 	if request.Method == http.MethodGet {
+		if !user.CanManageSite(contentSiteID) || !user.canManageCategory(category) {
+			http.NotFound(response, request)
+			return
+		}
 		lang := strings.TrimSpace(request.URL.Query().Get("lang"))
 		item, err := s.readContent(request.Context(), id, lang, false)
 		if err == sql.ErrNoRows {
-			http.Error(response, "content not found", http.StatusNotFound)
+			http.NotFound(response, request)
 			return
 		}
 		if err != nil {
@@ -148,18 +164,14 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 		writeJSON(response, http.StatusOK, item)
 		return
 	}
+
+	if !user.canManageCategory(category) || !user.CanManageSite(contentSiteID) {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有该内容的操作权限"})
+		return
+	}
+
 	if request.Method == http.MethodDelete {
-		var category int64
-		var contentSiteID int64
-		if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id", "category_id" FROM "gocms_content" WHERE "id" = ?`, id).Scan(&contentSiteID, &category); err != nil {
-			http.NotFound(response, request)
-			return
-		}
-		user, _, _ := s.authenticateRequest(request)
-		if user == nil || !user.canManageCategory(category) || !user.CanManageSite(contentSiteID) {
-			writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有该内容的操作权限"})
-			return
-		}
+
 		result, err := s.database.ExecContext(request.Context(), `DELETE FROM "gocms_content" WHERE "id" = ?`, id)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
@@ -180,6 +192,7 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 	}
 	s.saveContent(response, request, id)
 }
+
 
 func (s *Server) saveContent(response http.ResponseWriter, request *http.Request, id int64) {
 	var payload contentPayload
@@ -657,12 +670,7 @@ func (s *Server) contentJSON(response http.ResponseWriter, request *http.Request
 		methodNotAllowed(response)
 		return
 	}
-	var siteID int64 = 1
-	if s.database != nil {
-		if matched, err := db.GetSiteByHost(request.Context(), s.database, request.Host); err == nil && matched != nil {
-			siteID = matched.ID
-		}
-	}
+	siteID, _ := s.resolveSiteID(request, nil)
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
 	result, err := s.queryContent(request.Context(), siteID, query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
@@ -683,6 +691,20 @@ func (s *Server) contentJSONItem(response http.ResponseWriter, request *http.Req
 		http.Error(response, "invalid content id", http.StatusBadRequest)
 		return
 	}
+	siteID, _ := s.resolveSiteID(request, nil)
+	var contentSiteID int64
+	if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id" FROM "gocms_content" WHERE "id" = ?`, id).Scan(&contentSiteID); err != nil {
+		if err == sql.ErrNoRows {
+			http.NotFound(response, request)
+		} else {
+			http.Error(response, "database error", http.StatusInternalServerError)
+		}
+		return
+	}
+	if siteID > 0 && contentSiteID != siteID {
+		http.NotFound(response, request)
+		return
+	}
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
 	item, err := s.readContent(request.Context(), id, lang, true)
 	if err == sql.ErrNoRows {
@@ -695,6 +717,7 @@ func (s *Server) contentJSONItem(response http.ResponseWriter, request *http.Req
 	}
 	writeJSON(response, http.StatusOK, item)
 }
+
 
 func (s *Server) contentDetailURL(ctx context.Context, categoryID int64, routeKey string) (string, error) {
 	directory := routing.DefaultDetailPath

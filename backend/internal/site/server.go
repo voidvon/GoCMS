@@ -339,12 +339,8 @@ func (s *Server) searchJSON(response http.ResponseWriter, request *http.Request)
 		methodNotAllowed(response)
 		return
 	}
-	var siteID int64 = 1
-	if s.database != nil {
-		if matched, err := db.GetSiteByHost(request.Context(), s.database, request.Host); err == nil && matched != nil {
-			siteID = matched.ID
-		}
-	}
+	siteID, _ := s.resolveSiteID(request, nil)
+
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
 	result, err := s.queryContent(request.Context(), siteID, query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)

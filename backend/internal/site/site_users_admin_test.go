@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"gocms/internal/apikey"
 	"gocms/internal/auth"
+	"gocms/internal/db"
 )
+
 
 func TestSiteUserManagementBoundaryAndRevocation(t *testing.T) {
 	s, database, root := newCategoryTestServer(t)
@@ -339,4 +343,249 @@ func TestMultiSiteSecurityAndIsolation(t *testing.T) {
 		t.Fatalf("expected 200 when site 1 member logs into site 1, got %d: %s", wLoginS1.Code, wLoginS1.Body.String())
 	}
 }
+
+func TestMultiSiteRound2AuditFixes(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := db.CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	assetsDir := filepath.Join(root, "assets")
+	_ = os.MkdirAll(assetsDir, 0755)
+
+	s, err := New(database, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.assetsRoot = assetsDir
+	dataDir := filepath.Join(root, "data")
+	_ = os.MkdirAll(dataDir, 0755)
+	s.ConfigurePublishing("", dataDir, "", assetsDir, "")
+
+	// 1. Create Site 2 with domain "sub.example.com"
+	resSite2, err := db.CreateSite(context.Background(), database, &db.Site{
+		Name:      "分站二",
+		Code:      "sub2",
+		Domain:    "sub.example.com",
+		Status:    "active",
+		OutputDir: "sub2",
+	})
+	if err != nil {
+		t.Fatalf("create site 2 failed: %v", err)
+	}
+	site2ID := resSite2.ID
+
+	// Insert content into Site 1
+	resC1, err := database.Exec(`INSERT INTO gocms_content(site_id, category_id, title, visible) VALUES(1, 0, 'Site 1 Article', 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1ID, _ := resC1.LastInsertId()
+
+	// Insert content into Site 2
+	resC2, err := database.Exec(`INSERT INTO gocms_content(site_id, category_id, title, visible) VALUES(?, 0, 'Site 2 Article', 1)`, site2ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2ID, _ := resC2.LastInsertId()
+
+	// Test 1: Public content item isolation
+	// Requesting Site 1 content through Site 2's host -> should return 404
+	reqC1FromS2 := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/content/%d", c1ID), nil)
+	reqC1FromS2.Host = "sub.example.com"
+	wC1S2 := httptest.NewRecorder()
+	s.Handler().ServeHTTP(wC1S2, reqC1FromS2)
+	if wC1S2.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when accessing site 1 content from site 2 domain, got %d: %s", wC1S2.Code, wC1S2.Body.String())
+	}
+
+	// Requesting Site 2 content through Site 2's host -> should return 200
+	reqC2FromS2 := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/content/%d", c2ID), nil)
+	reqC2FromS2.Host = "sub.example.com"
+	wC2S2 := httptest.NewRecorder()
+	s.Handler().ServeHTTP(wC2S2, reqC2FromS2)
+	if wC2S2.Code != http.StatusOK {
+		t.Fatalf("expected 200 when accessing site 2 content from site 2 domain, got %d: %s", wC2S2.Code, wC2S2.Body.String())
+	}
+
+	// Test 2: Admin content item GET IDOR
+	// Admin with permission ONLY for Site 2
+	_, _ = database.Exec(`INSERT INTO gocms_admin_group(name, permissions, site_permissions) VALUES('Site 2 Content Admin', '["content"]', ?)`, fmt.Sprintf(`{"%d":["content"]}`, site2ID))
+	var grp2ID int64
+	_ = database.QueryRow(`SELECT id FROM gocms_admin_group WHERE name='Site 2 Content Admin'`).Scan(&grp2ID)
+	_, _ = database.Exec(`INSERT INTO gocms_admin_user(username, group_id) VALUES('site2_content_admin', ?)`, grp2ID)
+	s2AdminToken, err := s.createSession("site2_content_admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Site 2 admin requests Site 1 content -> should return 404 (concealing out-of-scope content)
+	wAdminC1 := categoryRequest(t, s, s2AdminToken, "GET", fmt.Sprintf("/api/admin/content/%d", c1ID), "")
+	if wAdminC1.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when Site 2 admin reads Site 1 content, got %d: %s", wAdminC1.Code, wAdminC1.Body.String())
+	}
+
+	// Site 2 admin requests Site 2 content -> should return 200
+	wAdminC2 := categoryRequest(t, s, s2AdminToken, "GET", fmt.Sprintf("/api/admin/content/%d", c2ID), "")
+	if wAdminC2.Code != http.StatusOK {
+		t.Fatalf("expected 200 when Site 2 admin reads Site 2 content, got %d: %s", wAdminC2.Code, wAdminC2.Body.String())
+	}
+
+	// Test 3: Shared cross-site members in site member list and member groups
+	// User registered on Site 1
+	hash, _ := auth.HashPassword("password123")
+	resUser, err := database.Exec(`INSERT INTO gocms_user(site_id, username, password_hash, display_name, status) VALUES(1, 'shared_user', ?, 'Shared User', 'active')`, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharedUserID, _ := resUser.LastInsertId()
+
+	// Add user to Site 2 via gocms_site_member
+	_, err = database.Exec(`INSERT INTO gocms_site_member(site_id, user_id, display_name, status) VALUES(?, ?, 'Shared User S2', 'active')`, site2ID, sharedUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Superadmin session
+	seedTestAdmin(t, s)
+	superToken, _ := s.createSession("gocms")
+
+	// List site users for Site 2 -> shared user must appear!
+	wListUsers := categoryRequest(t, s, superToken, "GET", fmt.Sprintf("/api/admin/site-users?site_id=%d", site2ID), "")
+	if wListUsers.Code != 200 || !strings.Contains(wListUsers.Body.String(), "shared_user") {
+		t.Fatalf("shared_user should appear in site 2 user list: %s", wListUsers.Body.String())
+	}
+
+	// Create a user group for Site 2
+	resGrp, err := database.Exec(`INSERT INTO gocms_user_group(site_id, name, slug) VALUES(?, 'VIP Group', 'vip')`, site2ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2UserGroupID, _ := resGrp.LastInsertId()
+
+	// Assign shared_user to Site 2's group
+	wAssignGrp := categoryRequest(t, s, superToken, "POST", fmt.Sprintf("/api/admin/member-groups?site_id=%d", site2ID), fmt.Sprintf(`{"user_id":%d,"group_id":%d}`, sharedUserID, s2UserGroupID))
+	if wAssignGrp.Code != 200 {
+		t.Fatalf("failed to assign shared user to site 2 group: %d %s", wAssignGrp.Code, wAssignGrp.Body.String())
+	}
+
+	// List group members -> shared user must appear!
+	wListGrpMembers := categoryRequest(t, s, superToken, "GET", fmt.Sprintf("/api/admin/member-groups?site_id=%d&group_id=%d", site2ID, s2UserGroupID), "")
+	if wListGrpMembers.Code != 200 || !strings.Contains(wListGrpMembers.Body.String(), "shared_user") {
+		t.Fatalf("shared user should appear in group members list: %s", wListGrpMembers.Body.String())
+	}
+
+	// Test 4: DeleteSite Cascade Cleanup
+	// Create Site 3 with all types of child records
+	resSite3, err := db.CreateSite(context.Background(), database, &db.Site{
+		Name:      "待删站点三",
+		Code:      "site3",
+		Status:    "active",
+		OutputDir: "site3",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	site3ID := resSite3.ID
+
+	// Insert media and media ref for Site 3
+	_ = db.EnsureMedia(context.Background(), database)
+	resM3, err := database.Exec(`INSERT INTO gocms_media(site_id, kind, storage_path, public_path, status) VALUES(?, 'image', '3/img.png', '/assets/3/img.png', 'active')`, site3ID)
+	if err != nil {
+		t.Fatalf("insert media 3 failed: %v", err)
+	}
+	m3ID, _ := resM3.LastInsertId()
+	resC3, _ := database.Exec(`INSERT INTO gocms_content(site_id, title) VALUES(?, 'Site 3 Content')`, site3ID)
+	c3ID, _ := resC3.LastInsertId()
+	_, _ = database.Exec(`INSERT INTO gocms_media_ref(media_id, content_id, field_name) VALUES(?, ?, 'cover')`, m3ID, c3ID)
+	_, _ = database.Exec(`INSERT INTO gocms_content_translation(content_id, lang, title) VALUES(?, 'en', 'Site 3 En')`, c3ID)
+	resU3, _ := database.Exec(`INSERT INTO gocms_user(site_id, username, password_hash) VALUES(?, 'user_site3', 'hash')`, site3ID)
+	u3ID, _ := resU3.LastInsertId()
+	_, _ = database.Exec(`INSERT INTO gocms_user_session(token_hash, user_id, expires_at) VALUES('token3', ?, 9999999999)`, u3ID)
+
+
+	// Delete Site 3
+	wDelSite := categoryRequest(t, s, superToken, "DELETE", fmt.Sprintf("/api/admin/sites/%d", site3ID), "")
+	if wDelSite.Code != 200 {
+		t.Fatalf("delete site 3 failed: %d %s", wDelSite.Code, wDelSite.Body.String())
+	}
+
+	// Verify all child tables were cleaned up
+	var count int
+	_ = database.QueryRow(`SELECT COUNT(*) FROM gocms_media WHERE site_id = ?`, site3ID).Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected 0 media records after site deletion, got %d", count)
+	}
+	_ = database.QueryRow(`SELECT COUNT(*) FROM gocms_media_ref WHERE content_id = ?`, c3ID).Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected 0 media_ref records after site deletion, got %d", count)
+	}
+	_ = database.QueryRow(`SELECT COUNT(*) FROM gocms_content_translation WHERE content_id = ?`, c3ID).Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected 0 content_translation records after site deletion, got %d", count)
+	}
+	_ = database.QueryRow(`SELECT COUNT(*) FROM gocms_user_session WHERE user_id = ?`, u3ID).Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected 0 user_session records after site deletion, got %d", count)
+	}
+	_ = database.QueryRow(`SELECT COUNT(*) FROM gocms_user WHERE id = ?`, u3ID).Scan(&count)
+	if count != 0 {
+		t.Fatalf("expected 0 user records after site deletion, got %d", count)
+	}
+
+	// Test 5: Theme Copy-on-Write isolation
+	// Site 1 has a theme "mytheme"
+	s1ThemeDir := filepath.Join(assetsDir, "1", "themes", "mytheme")
+	_ = os.MkdirAll(filepath.Join(s1ThemeDir, "templates"), 0755)
+	_ = os.MkdirAll(filepath.Join(s1ThemeDir, "assets", "css"), 0755)
+	_ = os.WriteFile(filepath.Join(s1ThemeDir, "theme.json"), []byte(`{"id":"mytheme","name":"My Theme"}`), 0644)
+	s1Index := filepath.Join(s1ThemeDir, "templates", "index.html")
+	_ = os.WriteFile(s1Index, []byte("<h1>Site 1 Theme Original</h1>"), 0644)
+
+	// Set Site 2 theme to "mytheme"
+	_, _ = database.Exec(`UPDATE gocms_site SET theme_id = 'mytheme' WHERE id = ?`, site2ID)
+
+	// Site 2 admin updates index.html
+	wSaveTheme := categoryRequest(t, s, superToken, "PUT", fmt.Sprintf("/api/admin/theme/files?site_id=%d", site2ID), `{"kind":"template","path":"index.html","content":"<h1>Site 2 Customized Theme</h1>"}`)
+	if wSaveTheme.Code != 200 {
+		t.Fatalf("save theme file for site 2 failed: %d %s", wSaveTheme.Code, wSaveTheme.Body.String())
+	}
+
+	// Verify Site 1 theme file is untouched
+	bS1, _ := os.ReadFile(s1Index)
+	if string(bS1) != "<h1>Site 1 Theme Original</h1>" {
+		t.Fatalf("Site 1 theme was modified by Site 2 COW! Content: %s", string(bS1))
+	}
+
+	// Verify Site 2 has its own isolated theme file
+	s2Index := filepath.Join(assetsDir, fmt.Sprint(site2ID), "themes", "mytheme", "templates", "index.html")
+	bS2, err := os.ReadFile(s2Index)
+	if err != nil || string(bS2) != "<h1>Site 2 Customized Theme</h1>" {
+		t.Fatalf("Site 2 theme file was not created via COW: %v, content: %s", err, string(bS2))
+	}
+
+	// Test 6: Publication Cache Invalidation on Site Update
+	pubS2 := s.publicationForSite(context.Background(), site2ID)
+	if pubS2 == nil || pubS2.publisher.OutputDir != "sub2" {
+		t.Fatalf("expected initial pub output dir sub2, got: %+v", pubS2)
+	}
+
+	// Update Site 2 OutputDir to "new-sub2-dir" via admin API
+	wUpdateSite := categoryRequest(t, s, superToken, "PUT", fmt.Sprintf("/api/admin/sites/%d", site2ID), `{"name":"分站二","code":"sub2","output_dir":"new-sub2-dir","domain":"sub.example.com","status":"active"}`)
+	if wUpdateSite.Code != 200 {
+		t.Fatalf("update site 2 failed: %d %s", wUpdateSite.Code, wUpdateSite.Body.String())
+	}
+
+	// Verify publication was invalidated and newly fetched publication reflects "new-sub2-dir"
+	pubS2New := s.publicationForSite(context.Background(), site2ID)
+	if pubS2New == nil || pubS2New.publisher.OutputDir != "new-sub2-dir" {
+		t.Fatalf("expected updated publication output dir 'new-sub2-dir', got: %s", pubS2New.publisher.OutputDir)
+	}
+}
+
+
 

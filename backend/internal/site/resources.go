@@ -13,15 +13,15 @@ import (
 
 func (s *Server) resourceRoots(r *http.Request) ([]string, string, bool) {
 	themeRoot, _ := s.themePaths()
-	var siteID int64 = 1
+	siteID, _ := s.resolveSiteID(r, nil)
 	var themeID string
 	if s.database != nil && r != nil {
-		if matched, err := db.GetSiteByHost(r.Context(), s.database, r.Host); err == nil && matched != nil {
-			siteID = matched.ID
-			themeID = matched.ThemeID
+		if targetSite, err := db.GetSiteByID(r.Context(), s.database, siteID); err == nil && targetSite != nil {
+			themeID = targetSite.ThemeID
 		}
 	}
 	siteIDStr := strconv.FormatInt(siteID, 10)
+
 
 	if themeID != "" && s.assetsRoot != "" {
 		siteThemeAssets := filepath.Join(s.assetsRoot, siteIDStr, "themes", themeID, "assets")
