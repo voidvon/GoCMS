@@ -470,6 +470,7 @@ export function SiteUsersPage() {
                         description: "",
                         sort_order: 0,
                         status: "active",
+                        is_default: false,
                       })
                     }}
                   >
@@ -502,7 +503,16 @@ export function SiteUsersPage() {
                     ) : (
                       groups.map((item) => (
                         <tr key={item.id} className="border-t hover:bg-muted/10 transition-colors">
-                          <td className="p-3 font-medium">{item.name}</td>
+                          <td className="p-3 font-medium">
+                            <div className="flex items-center gap-1.5">
+                              <span>{item.name}</span>
+                              {item.is_default ? (
+                                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-primary/10 text-primary hover:bg-primary/10 font-normal">
+                                  默认
+                                </Badge>
+                              ) : null}
+                            </div>
+                          </td>
                           <td className="p-3">
                             <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{item.slug}</code>
                           </td>
@@ -681,6 +691,7 @@ export function SiteUsersPage() {
                     description: "",
                     sort_order: 0,
                     status: "active",
+                    is_default: false,
                   })
                 }}
               >
@@ -832,6 +843,22 @@ export function SiteUsersPage() {
                   <option value="disabled">停用</option>
                 </select>
               </label>
+              <label className="flex items-center gap-2 pt-1 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  disabled={busy}
+                  checked={Boolean(groupForm.is_default)}
+                  onChange={(e) =>
+                    setGroupForm({
+                      ...groupForm,
+                      is_default: e.target.checked,
+                    })
+                  }
+                  className="h-4 w-4 rounded border-border text-primary focus:ring-ring"
+                />
+                <span className="font-medium">设为注册默认组</span>
+              </label>
+              <p className="text-xs text-muted-foreground -mt-2">勾选后，新用户注册该站点时将自动归入此会员组。</p>
               <DialogFooter className="pt-2">
                 {groupForm.id && (
                   <Button

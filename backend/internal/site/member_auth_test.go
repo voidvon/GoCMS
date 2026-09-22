@@ -94,3 +94,172 @@ func requestWithCookie(s *Server, method, path, body, token string) *httptest.Re
 	s.Handler().ServeHTTP(w, r)
 	return w
 }
+
+func TestDefaultMemberGroupRegistration(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := db.CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(database, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO gocms_admin_user(username,is_super) VALUES('super',1)`); err != nil {
+		t.Fatal(err)
+	}
+	adminToken, err := s.createSession("super")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	request := func(method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		if cookie != nil {
+			r.AddCookie(cookie)
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+
+	// 1. Without default group: bob registers
+	reg1 := request(http.MethodPost, "/api/auth/register", `{"username":"bob","password":"password123"}`, nil)
+	if reg1.Code != http.StatusCreated {
+		t.Fatalf("bob register failed: %d %s", reg1.Code, reg1.Body.String())
+	}
+	var res1 struct {
+		User siteUser `json:"user"`
+	}
+	if err := json.Unmarshal(reg1.Body.Bytes(), &res1); err != nil {
+		t.Fatal(err)
+	}
+	if len(res1.User.Groups) != 0 {
+		t.Fatalf("expected bob to have 0 groups, got: %v", res1.User.Groups)
+	}
+
+	// 2. Admin creates standard group with is_default = true
+	g1 := requestWithCookie(s, http.MethodPost, "/api/admin/member-groups", `{"name":"Standard","slug":"standard","is_default":true}`, adminToken)
+	if g1.Code != http.StatusCreated {
+		t.Fatalf("create standard group failed: %d %s", g1.Code, g1.Body.String())
+	}
+
+	// 3. Admin creates vip group with is_default = false
+	g2 := requestWithCookie(s, http.MethodPost, "/api/admin/member-groups", `{"name":"VIP","slug":"vip","is_default":false}`, adminToken)
+	if g2.Code != http.StatusCreated {
+		t.Fatalf("create vip group failed: %d %s", g2.Code, g2.Body.String())
+	}
+
+	// 4. Verify list groups has correct is_default flags
+	listG := requestWithCookie(s, http.MethodGet, "/api/admin/member-groups", "", adminToken)
+	if listG.Code != http.StatusOK {
+		t.Fatalf("list groups failed: %d %s", listG.Code, listG.Body.String())
+	}
+	var groupList struct {
+		Items []memberGroup `json:"items"`
+	}
+	if err := json.Unmarshal(listG.Body.Bytes(), &groupList); err != nil {
+		t.Fatal(err)
+	}
+	var standardID, vipID int64
+	for _, it := range groupList.Items {
+		if it.Slug == "standard" {
+			standardID = it.ID
+			if !it.IsDefault {
+				t.Fatalf("expected standard group to be default")
+			}
+		}
+		if it.Slug == "vip" {
+			vipID = it.ID
+			if it.IsDefault {
+				t.Fatalf("expected vip group NOT to be default")
+			}
+		}
+	}
+
+	// 5. Charlie registers -> should automatically get standard group
+	reg2 := request(http.MethodPost, "/api/auth/register", `{"username":"charlie","password":"password123"}`, nil)
+	if reg2.Code != http.StatusCreated {
+		t.Fatalf("charlie register failed: %d %s", reg2.Code, reg2.Body.String())
+	}
+	var res2 struct {
+		User siteUser `json:"user"`
+	}
+	if err := json.Unmarshal(reg2.Body.Bytes(), &res2); err != nil {
+		t.Fatal(err)
+	}
+	if len(res2.User.Groups) != 1 || res2.User.Groups[0] != "standard" {
+		t.Fatalf("expected charlie to have [standard], got: %v", res2.User.Groups)
+	}
+
+	// Login charlie -> user.groups contains standard
+	login2 := request(http.MethodPost, "/api/auth/login", `{"identifier":"charlie","password":"password123"}`, nil)
+	if login2.Code != http.StatusOK {
+		t.Fatalf("charlie login failed: %d %s", login2.Code, login2.Body.String())
+	}
+	var loginRes2 struct {
+		User siteUser `json:"user"`
+	}
+	_ = json.Unmarshal(login2.Body.Bytes(), &loginRes2)
+	if len(loginRes2.User.Groups) != 1 || loginRes2.User.Groups[0] != "standard" {
+		t.Fatalf("expected charlie login to have [standard], got: %v", loginRes2.User.Groups)
+	}
+
+	// 6. Admin updates vip group to is_default = true via PATCH
+	patchVIP := requestWithCookie(s, http.MethodPatch, "/api/admin/member-groups", fmt.Sprintf(`{"id":%d,"name":"VIP","slug":"vip","is_default":true}`, vipID), adminToken)
+	if patchVIP.Code != http.StatusCreated {
+		t.Fatalf("patch vip failed: %d %s", patchVIP.Code, patchVIP.Body.String())
+	}
+
+	// Verify standard is no longer default, vip is now default
+	listG2 := requestWithCookie(s, http.MethodGet, "/api/admin/member-groups", "", adminToken)
+	var groupList2 struct {
+		Items []memberGroup `json:"items"`
+	}
+	_ = json.Unmarshal(listG2.Body.Bytes(), &groupList2)
+	for _, it := range groupList2.Items {
+		if it.Slug == "standard" && it.IsDefault {
+			t.Fatalf("standard group should no longer be default")
+		}
+		if it.Slug == "vip" && !it.IsDefault {
+			t.Fatalf("vip group should now be default")
+		}
+	}
+
+	// 7. David registers -> should get vip group
+	reg3 := request(http.MethodPost, "/api/auth/register", `{"username":"david","password":"password123"}`, nil)
+	if reg3.Code != http.StatusCreated {
+		t.Fatalf("david register failed: %d %s", reg3.Code, reg3.Body.String())
+	}
+	var res3 struct {
+		User siteUser `json:"user"`
+	}
+	_ = json.Unmarshal(reg3.Body.Bytes(), &res3)
+	if len(res3.User.Groups) != 1 || res3.User.Groups[0] != "vip" {
+		t.Fatalf("expected david to have [vip], got: %v", res3.User.Groups)
+	}
+
+	// 8. Admin disables vip group -> eve registers -> no default group assigned because it's disabled
+	patchVIPDisable := requestWithCookie(s, http.MethodPatch, "/api/admin/member-groups", fmt.Sprintf(`{"id":%d,"name":"VIP","slug":"vip","status":"disabled","is_default":true}`, vipID), adminToken)
+	if patchVIPDisable.Code != http.StatusCreated {
+		t.Fatalf("patch vip disable failed: %d %s", patchVIPDisable.Code, patchVIPDisable.Body.String())
+	}
+	reg4 := request(http.MethodPost, "/api/auth/register", `{"username":"eve","password":"password123"}`, nil)
+	if reg4.Code != http.StatusCreated {
+		t.Fatalf("eve register failed: %d %s", reg4.Code, reg4.Body.String())
+	}
+	var res4 struct {
+		User siteUser `json:"user"`
+	}
+	_ = json.Unmarshal(reg4.Body.Bytes(), &res4)
+	if len(res4.User.Groups) != 0 {
+		t.Fatalf("expected eve to have no groups since vip is disabled, got: %v", res4.User.Groups)
+	}
+
+	_ = standardID
+}
+

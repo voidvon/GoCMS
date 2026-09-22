@@ -129,3 +129,54 @@ func TestAuthenticateMultiSiteScoping(t *testing.T) {
 		t.Fatalf("expected authenticate on site 2 to return 'AliceGlobal', got %q", authS2Updated.DisplayName)
 	}
 }
+
+func TestRegisterWithDefaultGroup(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert default groups for site 1 and site 2
+	if _, err := database.Exec(`INSERT INTO gocms_user_group(site_id, name, slug, is_default, status) VALUES(1, 'Site1 Default', 'basic', 1, 'active')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO gocms_user_group(site_id, name, slug, is_default, status) VALUES(2, 'Site2 Default', 'site2-basic', 1, 'active')`); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := Service{DB: database}
+
+	// 1. Register on site 1
+	p, err := svc.Register(ctx, "member1", "m1@example.com", "password123", 1)
+	if err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	memsSite1, err := svc.Memberships(ctx, p.ID, 1)
+	if err != nil {
+		t.Fatalf("memberships site 1 failed: %v", err)
+	}
+	if len(memsSite1) != 1 || memsSite1[0].Slug != "basic" {
+		t.Fatalf("expected membership in 'basic', got: %+v", memsSite1)
+	}
+
+	// 2. Login specifying site 2 -> auto-joins site 2 and joins site 2 default group
+	_, _, err = svc.Login(ctx, "member1", "password123", "127.0.0.1", "test-agent", "", 2)
+	if err != nil {
+		t.Fatalf("login on site 2 failed: %v", err)
+	}
+
+	memsSite2, err := svc.Memberships(ctx, p.ID, 2)
+	if err != nil {
+		t.Fatalf("memberships site 2 failed: %v", err)
+	}
+	if len(memsSite2) != 1 || memsSite2[0].Slug != "site2-basic" {
+		t.Fatalf("expected membership in 'site2-basic', got: %+v", memsSite2)
+	}
+}
+

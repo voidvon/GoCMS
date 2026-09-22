@@ -57,6 +57,10 @@ func (s Service) Register(ctx context.Context, username, email, password string,
 	if err != nil {
 		return Profile{}, err
 	}
+	var defaultGroupID int64
+	if err := s.DB.QueryRowContext(ctx, "SELECT id FROM gocms_user_group WHERE site_id=? AND is_default=1 AND status='active' LIMIT 1", sid).Scan(&defaultGroupID); err == nil && defaultGroupID > 0 {
+		_, _ = s.DB.ExecContext(ctx, "INSERT OR IGNORE INTO gocms_user_group_member(user_id,group_id,status) VALUES(?,?,'active')", id, defaultGroupID)
+	}
 	return s.Profile(ctx, id)
 }
 func (s Service) Login(ctx context.Context, identifier, password, ip, agent string, currentToken string, siteIDOpt ...int64) (Profile, string, error) {
@@ -101,6 +105,10 @@ func (s Service) Login(ctx context.Context, identifier, password, ip, agent stri
 		if !hasTarget {
 			sids = append(sids, targetSiteID)
 			needsUpdate = true
+			var defaultGroupID int64
+			if err := s.DB.QueryRowContext(ctx, "SELECT id FROM gocms_user_group WHERE site_id=? AND is_default=1 AND status='active' LIMIT 1", targetSiteID).Scan(&defaultGroupID); err == nil && defaultGroupID > 0 {
+				_, _ = s.DB.ExecContext(ctx, "INSERT OR IGNORE INTO gocms_user_group_member(user_id,group_id,status) VALUES(?,?,'active')", id, defaultGroupID)
+			}
 		}
 		if needsUpdate {
 			newJSON, _ := json.Marshal(sids)

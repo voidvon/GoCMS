@@ -46,6 +46,7 @@ func (s *Server) userRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u := siteUser{ID: p.ID, Username: p.Username, Email: p.Email, DisplayName: p.DisplayName, AvatarURL: p.AvatarURL}
+	s.attachMemberGroups(r, &u)
 	writeJSON(w, 201, map[string]any{"user": u})
 
 }

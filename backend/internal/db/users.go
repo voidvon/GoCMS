@@ -82,7 +82,7 @@ func EnsureSiteUsers(ctx context.Context, database *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS gocms_user_session (token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL, expires_at INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, ip TEXT NOT NULL DEFAULT '', user_agent TEXT NOT NULL DEFAULT '', FOREIGN KEY(user_id) REFERENCES gocms_user(id) ON DELETE CASCADE)`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_user_session_expiry ON gocms_user_session(expires_at)`,
 		`CREATE TABLE IF NOT EXISTS gocms_user_login (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, identifier TEXT NOT NULL, success INTEGER NOT NULL DEFAULT 0, ip TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
-		`CREATE TABLE IF NOT EXISTS gocms_user_group (id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL DEFAULT 1, name TEXT NOT NULL, slug TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active')`,
+		`CREATE TABLE IF NOT EXISTS gocms_user_group (id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL DEFAULT 1, name TEXT NOT NULL, slug TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active', is_default INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS gocms_user_group_member (user_id INTEGER NOT NULL, group_id INTEGER NOT NULL, started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TEXT, status TEXT NOT NULL DEFAULT 'active', PRIMARY KEY(user_id, group_id), FOREIGN KEY(user_id) REFERENCES gocms_user(id) ON DELETE CASCADE, FOREIGN KEY(group_id) REFERENCES gocms_user_group(id) ON DELETE CASCADE)`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_user_group_member_expiry ON gocms_user_group_member(user_id, expires_at)`,
 	}
@@ -128,9 +128,18 @@ func EnsureSiteUsers(ctx context.Context, database *sql.DB) error {
 			return err
 		}
 	}
+	if err := database.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('gocms_user_group') WHERE name='is_default'").Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		if _, err := database.ExecContext(ctx, "ALTER TABLE gocms_user_group ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
 	_, _ = database.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_gocms_user_group_site ON gocms_user_group(site_id, sort_order, id)")
 	_, _ = database.ExecContext(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS idx_gocms_user_group_site_slug ON gocms_user_group(site_id, slug)")
 	_, _ = database.ExecContext(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS idx_gocms_user_group_site_name ON gocms_user_group(site_id, name)")
+	_, _ = database.ExecContext(ctx, "CREATE UNIQUE INDEX IF NOT EXISTS idx_gocms_user_group_site_default ON gocms_user_group(site_id) WHERE is_default = 1")
 
 	if _, err := database.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS idx_user_session_owner ON gocms_user_session(user_id,expires_at)"); err != nil {
 		return err

@@ -992,7 +992,7 @@ export const setSiteUserStatus = (id: number, status: SiteUser["status"]) =>
   request("/api/admin/site-users", { method: "PATCH", body: JSON.stringify({ id, status }) })
 export const deleteSiteUser = (id: number) =>
   request("/api/admin/site-users", { method: "DELETE", body: JSON.stringify({ id }) })
-export type MemberGroup = { id: number; name: string; slug: string; description: string; sort_order: number; status: "active" | "disabled" }
+export type MemberGroup = { id: number; name: string; slug: string; description: string; sort_order: number; status: "active" | "disabled"; is_default?: boolean }
 export type MemberGroupMember = { id: number; username: string; email: string; display_name: string; status: string; expires_at?: string }
 export const getMemberGroups = (siteId?: number) =>
   request<{ items: MemberGroup[] }>(`/api/admin/member-groups${siteId ? `?site_id=${siteId}` : ""}`)

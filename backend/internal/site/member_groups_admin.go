@@ -15,6 +15,7 @@ type memberGroup struct {
 	Description string `json:"description"`
 	SortOrder   int    `json:"sort_order"`
 	Status      string `json:"status"`
+	IsDefault   bool   `json:"is_default"`
 }
 
 func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +39,7 @@ func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
 			s.listMemberGroupMembers(w, r, siteID)
 			return
 		}
-		rows, err := s.database.QueryContext(r.Context(), `SELECT id,name,slug,description,sort_order,status FROM gocms_user_group WHERE site_id=? ORDER BY sort_order,id`, siteID)
+		rows, err := s.database.QueryContext(r.Context(), `SELECT id,name,slug,description,sort_order,status,is_default FROM gocms_user_group WHERE site_id=? ORDER BY sort_order,id`, siteID)
 		if err != nil {
 			accountError(w, err)
 			return
@@ -47,10 +48,12 @@ func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
 		out := []memberGroup{}
 		for rows.Next() {
 			var g memberGroup
-			if err := rows.Scan(&g.ID, &g.Name, &g.Slug, &g.Description, &g.SortOrder, &g.Status); err != nil {
+			var isDef int
+			if err := rows.Scan(&g.ID, &g.Name, &g.Slug, &g.Description, &g.SortOrder, &g.Status, &isDef); err != nil {
 				accountError(w, err)
 				return
 			}
+			g.IsDefault = isDef == 1
 			out = append(out, g)
 		}
 		writeJSON(w, 200, map[string]any{"items": out})
@@ -69,6 +72,7 @@ func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
 		Description string  `json:"description"`
 		SortOrder   int     `json:"sort_order"`
 		Status      string  `json:"status"`
+		IsDefault   *bool   `json:"is_default"`
 		ExpiresAt   *string `json:"expires_at"`
 	}
 	if json.NewDecoder(r.Body).Decode(&in) != nil {
@@ -148,12 +152,35 @@ func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
 	if in.Status == "disabled" {
 		status = "disabled"
 	}
+	tx, err := s.database.BeginTx(r.Context(), nil)
+	if err != nil {
+		accountError(w, err)
+		return
+	}
+	defer tx.Rollback()
+
 	if r.Method == http.MethodPatch {
 		if in.ID <= 0 {
 			http.Error(w, "invalid id", 400)
 			return
 		}
-		res, err := s.database.ExecContext(r.Context(), `UPDATE gocms_user_group SET name=?,slug=?,description=?,sort_order=?,status=? WHERE id=? AND site_id=?`, in.Name, in.Slug, in.Description, in.SortOrder, status, in.ID, siteID)
+		var defVal int
+		if in.IsDefault != nil {
+			if *in.IsDefault {
+				defVal = 1
+			} else {
+				defVal = 0
+			}
+		} else {
+			_ = tx.QueryRowContext(r.Context(), `SELECT is_default FROM gocms_user_group WHERE id=? AND site_id=?`, in.ID, siteID).Scan(&defVal)
+		}
+		if defVal == 1 {
+			if _, err := tx.ExecContext(r.Context(), `UPDATE gocms_user_group SET is_default=0 WHERE site_id=? AND id!=?`, siteID, in.ID); err != nil {
+				accountError(w, err)
+				return
+			}
+		}
+		res, err := tx.ExecContext(r.Context(), `UPDATE gocms_user_group SET name=?,slug=?,description=?,sort_order=?,status=?,is_default=? WHERE id=? AND site_id=?`, in.Name, in.Slug, in.Description, in.SortOrder, status, defVal, in.ID, siteID)
 		if err != nil {
 			http.Error(w, "group already exists or update failed", 409)
 			return
@@ -164,11 +191,26 @@ func (s *Server) adminMemberGroups(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		_, err = s.database.ExecContext(r.Context(), `INSERT INTO gocms_user_group(site_id,name,slug,description,sort_order,status) VALUES(?,?,?,?,?,?)`, siteID, in.Name, in.Slug, in.Description, in.SortOrder, status)
+		isDefault := in.IsDefault != nil && *in.IsDefault
+		if isDefault {
+			if _, err := tx.ExecContext(r.Context(), `UPDATE gocms_user_group SET is_default=0 WHERE site_id=?`, siteID); err != nil {
+				accountError(w, err)
+				return
+			}
+		}
+		defVal := 0
+		if isDefault {
+			defVal = 1
+		}
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO gocms_user_group(site_id,name,slug,description,sort_order,status,is_default) VALUES(?,?,?,?,?,?,?)`, siteID, in.Name, in.Slug, in.Description, in.SortOrder, status, defVal)
 		if err != nil {
 			http.Error(w, "group already exists", 409)
 			return
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		accountError(w, err)
+		return
 	}
 	writeJSON(w, 201, map[string]bool{"ok": true})
 }
