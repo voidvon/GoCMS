@@ -103,8 +103,15 @@ func (s Service) ChangePassword(ctx context.Context, id int64, old, next string)
 	}
 	return tx.Commit()
 }
-func (s Service) Memberships(ctx context.Context, id int64) ([]Membership, error) {
-	rows, err := s.DB.QueryContext(ctx, "SELECT g.id,g.name,g.slug,m.started_at,m.expires_at,m.status,g.status FROM gocms_user_group_member m JOIN gocms_user_group g ON g.id=m.group_id WHERE m.user_id=? ORDER BY g.sort_order,g.id", id)
+func (s Service) Memberships(ctx context.Context, id int64, siteIDOpt ...int64) ([]Membership, error) {
+	query := "SELECT g.id,g.name,g.slug,m.started_at,m.expires_at,m.status,g.status FROM gocms_user_group_member m JOIN gocms_user_group g ON g.id=m.group_id WHERE m.user_id=?"
+	args := []any{id}
+	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
+		query += " AND g.site_id=?"
+		args = append(args, siteIDOpt[0])
+	}
+	query += " ORDER BY g.sort_order,g.id"
+	rows, err := s.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}

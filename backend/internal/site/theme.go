@@ -1107,7 +1107,7 @@ func (s *Server) themeTemplateGroups(files []ThemeFile, siteIDOpt ...int64) []Th
 	assignments, _ := templateconfig.ListForSite(context.Background(), s.database, siteID)
 	labelCount := int64(0)
 	if s.database != nil {
-		labelCount, _ = templatelabel.Count(context.Background(), s.database)
+		labelCount, _ = templatelabel.CountForSite(context.Background(), s.database, siteID)
 	}
 	order := themepkg.TemplateGroupKeys()
 	groups := make(map[string]*ThemeTemplateGroup, len(order))
@@ -1185,6 +1185,16 @@ func (s *Server) adminThemeAssignment(response http.ResponseWriter, request *htt
 	if !s.requireAdmin(response, request) {
 		return
 	}
+	user := s.currentAdmin(request)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
+	if !user.CanManageSite(siteID) {
+		http.Error(response, "无权管理该站点", http.StatusForbidden)
+		return
+	}
 	key, err := url.PathUnescape(rawKey)
 	if err != nil || strings.TrimSpace(key) == "" {
 		http.Error(response, "invalid template assignment", http.StatusBadRequest)
@@ -1206,7 +1216,10 @@ func (s *Server) adminThemeAssignment(response http.ResponseWriter, request *htt
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
-	_, templateRoot := s.themePaths()
+	_, templateRoot, _, _, _ := s.siteThemePaths(request.Context(), siteID)
+	if templateRoot == "" {
+		_, templateRoot = s.themePaths()
+	}
 	if templateRoot == "" {
 		http.Error(response, "publishing is not configured", http.StatusServiceUnavailable)
 		return
@@ -1219,10 +1232,11 @@ func (s *Server) adminThemeAssignment(response http.ResponseWriter, request *htt
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := templateconfig.Update(request.Context(), s.database, key, templatePath); err != nil {
+	if err := templateconfig.UpdateForSite(request.Context(), s.database, siteID, key, templatePath); err != nil {
 		http.Error(response, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.invalidateSitePublication(siteID)
 	writeJSON(response, http.StatusOK, map[string]any{"ok": true, "key": key, "template_path": templatePath})
 }
 

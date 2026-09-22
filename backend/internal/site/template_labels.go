@@ -28,6 +28,16 @@ func (s *Server) adminThemeLabelTemplates(response http.ResponseWriter, request 
 	if !s.requireAdmin(response, request) {
 		return
 	}
+	user := s.currentAdmin(request)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
+	if !user.CanManageSite(siteID) {
+		http.Error(response, "无权管理该站点", http.StatusForbidden)
+		return
+	}
 	if request.Method == http.MethodPost {
 		var input templatelabel.Input
 		if err := decodeRequest(request, &input); err != nil {
@@ -38,19 +48,19 @@ func (s *Server) adminThemeLabelTemplates(response http.ResponseWriter, request 
 			http.Error(response, err.Error(), http.StatusBadRequest)
 			return
 		}
-		item, err := templatelabel.Create(request.Context(), s.database, input)
+		item, err := templatelabel.CreateForSite(request.Context(), s.database, siteID, input)
 		if err != nil {
 			http.Error(response, err.Error(), http.StatusBadRequest)
 			return
 		}
-		s.templateLabelSaved(response, request, item)
+		s.templateLabelSaved(response, request, siteID, item)
 		return
 	}
 
 	page := positiveInt(request.URL.Query().Get("page"), 1)
 	pageSize := positiveInt(request.URL.Query().Get("page_size"), 20)
 	categoryID := parseIntOrZero(request.URL.Query().Get("category_id"))
-	result, err := templatelabel.List(request.Context(), s.database, request.URL.Query().Get("q"), categoryID, page, pageSize)
+	result, err := templatelabel.ListForSite(request.Context(), s.database, siteID, request.URL.Query().Get("q"), categoryID, page, pageSize)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -75,9 +85,19 @@ func (s *Server) adminThemeLabelTemplate(response http.ResponseWriter, request *
 	if !s.requireAdmin(response, request) {
 		return
 	}
+	user := s.currentAdmin(request)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
+	if !user.CanManageSite(siteID) {
+		http.Error(response, "无权管理该站点", http.StatusForbidden)
+		return
+	}
 	switch request.Method {
 	case http.MethodGet:
-		item, err := templatelabel.Get(request.Context(), s.database, id)
+		item, err := templatelabel.GetForSite(request.Context(), s.database, siteID, id)
 		if err == sql.ErrNoRows {
 			http.Error(response, "标签模板不存在", http.StatusNotFound)
 			return
@@ -97,7 +117,7 @@ func (s *Server) adminThemeLabelTemplate(response http.ResponseWriter, request *
 			http.Error(response, err.Error(), http.StatusBadRequest)
 			return
 		}
-		item, err := templatelabel.Update(request.Context(), s.database, id, input)
+		item, err := templatelabel.UpdateForSite(request.Context(), s.database, siteID, id, input)
 		if err != nil {
 			status := http.StatusBadRequest
 			if strings.Contains(err.Error(), "不存在") {
@@ -106,9 +126,9 @@ func (s *Server) adminThemeLabelTemplate(response http.ResponseWriter, request *
 			http.Error(response, err.Error(), status)
 			return
 		}
-		s.templateLabelSaved(response, request, item)
+		s.templateLabelSaved(response, request, siteID, item)
 	case http.MethodDelete:
-		if err := templatelabel.Delete(request.Context(), s.database, id); err != nil {
+		if err := templatelabel.DeleteForSite(request.Context(), s.database, siteID, id); err != nil {
 			status := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "不存在") {
 				status = http.StatusNotFound
@@ -116,7 +136,7 @@ func (s *Server) adminThemeLabelTemplate(response http.ResponseWriter, request *
 			http.Error(response, err.Error(), status)
 			return
 		}
-		s.templateLabelDeleted(response, request)
+		s.templateLabelDeleted(response, request, siteID)
 	default:
 		methodNotAllowed(response)
 	}
@@ -221,18 +241,28 @@ func (s *Server) validateTemplateLabelCategory(request *http.Request, categoryID
 	return nil
 }
 
-func (s *Server) templateLabelSaved(response http.ResponseWriter, request *http.Request, item templatelabel.Label) {
-	if request.URL.Query().Get("publish") == "1" && s.publication != nil {
-		report, started := s.startPublish(true)
+func (s *Server) templateLabelSaved(response http.ResponseWriter, request *http.Request, siteID int64, item templatelabel.Label) {
+	s.invalidateSitePublication(siteID)
+	pub := s.publication
+	if siteID > 1 {
+		pub = s.publicationForSite(request.Context(), siteID)
+	}
+	if request.URL.Query().Get("publish") == "1" && pub != nil {
+		report, started := s.startPublishPub(pub, true)
 		writeJSON(response, http.StatusOK, map[string]any{"ok": true, "item": item, "publication": report, "publish_started": started})
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"ok": true, "item": item})
 }
 
-func (s *Server) templateLabelDeleted(response http.ResponseWriter, request *http.Request) {
-	if request.URL.Query().Get("publish") == "1" && s.publication != nil {
-		report, started := s.startPublish(true)
+func (s *Server) templateLabelDeleted(response http.ResponseWriter, request *http.Request, siteID int64) {
+	s.invalidateSitePublication(siteID)
+	pub := s.publication
+	if siteID > 1 {
+		pub = s.publicationForSite(request.Context(), siteID)
+	}
+	if request.URL.Query().Get("publish") == "1" && pub != nil {
+		report, started := s.startPublishPub(pub, true)
 		writeJSON(response, http.StatusOK, map[string]any{"ok": true, "publication": report, "publish_started": started})
 		return
 	}

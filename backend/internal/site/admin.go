@@ -481,10 +481,6 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 	if payload.ModelID < 1 {
 		payload.ModelID = 1
 	}
-	if err := s.normalizeCategoryRoutes(request.Context(), id, &payload); err != nil {
-		http.Error(response, err.Error(), http.StatusBadRequest)
-		return
-	}
 	user := s.currentAdmin(request)
 	siteID, err := s.resolveSiteID(request, user)
 	if err != nil {
@@ -508,6 +504,11 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			return
 		}
 		targetSiteID = existingSiteID
+	}
+
+	if err := s.normalizeCategoryRoutes(request.Context(), targetSiteID, id, &payload); err != nil {
+		http.Error(response, err.Error(), http.StatusBadRequest)
+		return
 	}
 
 	if err := s.validateCategoryParent(request.Context(), targetSiteID, id, payload.ParentID); err != nil {
@@ -605,7 +606,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 	s.contentSaved(response, request)
 }
 
-func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload *categoryPayload) error {
+func (s *Server) normalizeCategoryRoutes(ctx context.Context, siteID, id int64, payload *categoryPayload) error {
 	var current categoryPayload
 	if id > 0 {
 		err := s.database.QueryRowContext(ctx, `
@@ -698,7 +699,7 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 		payload.ListPath = routing.DefaultListPath()
 		if payload.ParentID > 0 {
 			var parentPath string
-			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("list_path", '') FROM "gocms_category" WHERE "id" = ?`, payload.ParentID).Scan(&parentPath); err == nil && parentPath != "" {
+			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("list_path", '') FROM "gocms_category" WHERE "id" = ? AND "site_id" = ?`, payload.ParentID, siteID).Scan(&parentPath); err == nil && parentPath != "" {
 				payload.ListPath = parentPath
 			}
 		}
@@ -715,7 +716,7 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	if payload.DetailPath == "" {
 		if payload.ParentID > 0 {
 			var parentPath string
-			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("detail_path", '') FROM "gocms_category" WHERE "id" = ?`, payload.ParentID).Scan(&parentPath); err == nil && parentPath != "" {
+			if err := s.database.QueryRowContext(ctx, `SELECT COALESCE("detail_path", '') FROM "gocms_category" WHERE "id" = ? AND "site_id" = ?`, payload.ParentID, siteID).Scan(&parentPath); err == nil && parentPath != "" {
 				payload.DetailPath = parentPath
 			}
 		}
@@ -766,7 +767,10 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, id int64, payload 
 	if payload.PageType == routing.PageTypeCover && payload.CoverTemplate == "" {
 		return fmt.Errorf("封面模板不能为空")
 	}
-	_, templateRoot := s.themePaths()
+	_, templateRoot, _, _, _ := s.siteThemePaths(ctx, siteID)
+	if templateRoot == "" {
+		_, templateRoot = s.themePaths()
+	}
 	if templateRoot != "" {
 		templates := map[string]string{"详情": payload.DetailTemplate}
 		if payload.PageType == routing.PageTypeCover {

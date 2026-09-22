@@ -349,13 +349,19 @@ func (s *Server) adminFeedbackClasses(response http.ResponseWriter, request *htt
 	if !s.requireAdmin(response, request) {
 		return
 	}
+	user := s.currentAdmin(request)
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	switch request.Method {
 	case http.MethodGet:
 		rows, err := s.database.QueryContext(request.Context(), `
 			SELECT c."id", c."name", c."description", c."fields_config", c."must_fields", c."sort_order", c."created_at",
-			       (SELECT COUNT(*) FROM "gocms_message" m WHERE m."class_id" = c."id") as item_count
+			       (SELECT COUNT(*) FROM "gocms_message" m WHERE m."class_id" = c."id" AND m."site_id" = ?) as item_count
 			FROM "`+db.FeedbackClassTable+`" c
-			ORDER BY c."sort_order" ASC, c."id" ASC`)
+			ORDER BY c."sort_order" ASC, c."id" ASC`, siteID)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return

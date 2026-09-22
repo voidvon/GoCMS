@@ -67,46 +67,80 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	query := "UPDATE gocms_user SET status=COALESCE(NULLIF(?,''),status), max_sessions=COALESCE(?,max_sessions), updated_at=CURRENT_TIMESTAMP WHERE id=? AND (site_id=? OR id IN (SELECT user_id FROM gocms_site_member WHERE site_id=?))"
-	args := []any{status, in.MaxSessions, in.ID, siteID, siteID}
-	if r.Method == http.MethodDelete {
-		var userOriginSite int64
-		if err := tx.QueryRowContext(r.Context(), `SELECT site_id FROM gocms_user WHERE id=?`, in.ID).Scan(&userOriginSite); err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		if userOriginSite == siteID {
-			query = "DELETE FROM gocms_user WHERE id=?"
-			args = []any{in.ID}
-		} else {
-			query = "DELETE FROM gocms_site_member WHERE user_id=? AND site_id=?"
-			args = []any{in.ID, siteID}
-		}
-	}
-	result, err := tx.ExecContext(r.Context(), query, args...)
+
+	var userOriginSite int64
+	var currentStatus string
+	err = tx.QueryRowContext(r.Context(), `
+		SELECT u.site_id, u.status
+		FROM gocms_user u
+		LEFT JOIN gocms_site_member sm ON sm.user_id = u.id AND sm.site_id = ?
+		WHERE u.id = ? AND (u.site_id = ? OR sm.site_id = ?)`,
+		siteID, in.ID, siteID, siteID,
+	).Scan(&userOriginSite, &currentStatus)
 	if err != nil {
-		accountError(w, err)
-		return
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		accountError(w, err)
-		return
-	}
-	if n == 0 {
 		http.NotFound(w, r)
 		return
 	}
+
 	if r.Method == http.MethodDelete {
-		_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_site_member WHERE user_id=? AND site_id=?", in.ID, siteID)
-		_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_user_group_member WHERE user_id=? AND group_id IN (SELECT id FROM gocms_user_group WHERE site_id=?)", in.ID, siteID)
-		_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_user_session WHERE user_id=?", in.ID)
-	} else if (status != "" && status != "active") || in.RevokeSessions {
-		if _, err := tx.ExecContext(r.Context(), "DELETE FROM gocms_user_session WHERE user_id=? AND user_id IN (SELECT id FROM gocms_user WHERE id=? AND site_id=?)", in.ID, in.ID, siteID); err != nil {
-			accountError(w, err)
-			return
+		if userOriginSite == siteID {
+			if _, err := tx.ExecContext(r.Context(), "DELETE FROM gocms_user WHERE id = ?", in.ID); err != nil {
+				accountError(w, err)
+				return
+			}
+			_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_site_member WHERE user_id = ?", in.ID)
+			_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_user_group_member WHERE user_id = ?", in.ID)
+			_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_user_session WHERE user_id = ?", in.ID)
+		} else {
+			if _, err := tx.ExecContext(r.Context(), "DELETE FROM gocms_site_member WHERE user_id = ? AND site_id = ?", in.ID, siteID); err != nil {
+				accountError(w, err)
+				return
+			}
+			_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_user_group_member WHERE user_id = ? AND group_id IN (SELECT id FROM gocms_user_group WHERE site_id = ?)", in.ID, siteID)
+		}
+	} else {
+		if status != "" {
+			_, err = tx.ExecContext(r.Context(), `
+				INSERT OR IGNORE INTO gocms_site_member (site_id, user_id, display_name, status)
+				SELECT ?, id, display_name, ? FROM gocms_user WHERE id = ?`,
+				siteID, status, in.ID,
+			)
+			if err != nil {
+				accountError(w, err)
+				return
+			}
+			_, err = tx.ExecContext(r.Context(), "UPDATE gocms_site_member SET status = ? WHERE site_id = ? AND user_id = ?", status, siteID, in.ID)
+			if err != nil {
+				accountError(w, err)
+				return
+			}
+			if userOriginSite == siteID {
+				_, err = tx.ExecContext(r.Context(), "UPDATE gocms_user SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", status, in.ID)
+				if err != nil {
+					accountError(w, err)
+					return
+				}
+			}
+		}
+
+		if in.MaxSessions != nil {
+			_, err = tx.ExecContext(r.Context(), "UPDATE gocms_user SET max_sessions = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", *in.MaxSessions, in.ID)
+			if err != nil {
+				accountError(w, err)
+				return
+			}
+		}
+
+		if (status != "" && status != "active") || in.RevokeSessions {
+			if userOriginSite == siteID {
+				if _, err := tx.ExecContext(r.Context(), "DELETE FROM gocms_user_session WHERE user_id = ?", in.ID); err != nil {
+					accountError(w, err)
+					return
+				}
+			}
 		}
 	}
+
 	if err := tx.Commit(); err != nil {
 		accountError(w, err)
 		return
@@ -130,12 +164,26 @@ func (s *Server) listSiteUsers(w http.ResponseWriter, r *http.Request, siteID in
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	like := "%" + q + "%"
 	var total int64
-	if err := s.database.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_user WHERE (site_id=? OR id IN (SELECT user_id FROM gocms_site_member WHERE site_id=?)) AND (?='' OR username LIKE ? OR email LIKE ? OR display_name LIKE ?)`, siteID, siteID, q, like, like, like).Scan(&total); err != nil {
+	countQuery := `
+		SELECT COUNT(DISTINCT u.id)
+		FROM gocms_user u
+		LEFT JOIN gocms_site_member sm ON sm.user_id = u.id AND sm.site_id = ?
+		WHERE (u.site_id = ? OR sm.site_id = ?)
+		  AND (? = '' OR u.username LIKE ? OR u.email LIKE ? OR u.display_name LIKE ?)`
+	if err := s.database.QueryRowContext(r.Context(), countQuery, siteID, siteID, siteID, q, like, like, like).Scan(&total); err != nil {
 		http.Error(w, "database error", 500)
 		return
 	}
-	rows, err := s.database.QueryContext(r.Context(), `SELECT id,username,email,display_name,status,max_sessions,created_at,COALESCE(last_login_at,'') FROM gocms_user WHERE (site_id=? OR id IN (SELECT user_id FROM gocms_site_member WHERE site_id=?)) AND (?='' OR username LIKE ? OR email LIKE ? OR display_name LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?`, siteID, siteID, q, like, like, like, size, (page-1)*size)
-
+	selectQuery := `
+		SELECT u.id, u.username, u.email, u.display_name,
+		       CASE WHEN u.status != 'active' THEN u.status WHEN sm.status IS NOT NULL THEN sm.status ELSE u.status END AS effective_status,
+		       u.max_sessions, u.created_at, COALESCE(u.last_login_at, '')
+		FROM gocms_user u
+		LEFT JOIN gocms_site_member sm ON sm.user_id = u.id AND sm.site_id = ?
+		WHERE (u.site_id = ? OR sm.site_id = ?)
+		  AND (? = '' OR u.username LIKE ? OR u.email LIKE ? OR u.display_name LIKE ?)
+		ORDER BY u.id DESC LIMIT ? OFFSET ?`
+	rows, err := s.database.QueryContext(r.Context(), selectQuery, siteID, siteID, siteID, q, like, like, like, size, (page-1)*size)
 	if err != nil {
 		http.Error(w, "database error", 500)
 		return

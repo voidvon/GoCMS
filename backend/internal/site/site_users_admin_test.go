@@ -587,5 +587,199 @@ func TestMultiSiteRound2AuditFixes(t *testing.T) {
 	}
 }
 
+func TestMultiSiteRound3AuditFixes(t *testing.T) {
+	s, database, token := newCategoryTestServer(t)
+	root := t.TempDir()
+	assetsDir := filepath.Join(root, "assets")
+	dataDir := filepath.Join(root, "data")
+	_ = os.MkdirAll(dataDir, 0755)
+	_ = os.MkdirAll(assetsDir, 0755)
+	s.ConfigurePublishing("", dataDir, "", assetsDir, "")
+
+	// Create Site 2
+	site2, err := db.CreateSite(context.Background(), database, &db.Site{
+		Name:      "分站二",
+		Code:      "sub2",
+		Domain:    "*.example.org",
+		Aliases:   []string{"*.custom.net"},
+		Status:    "active",
+		OutputDir: "sub2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	site2ID := site2.ID
+
+	// 1. Wildcard Host and X-Forwarded-Host Matching
+	sMatch, err := db.GetSiteByHost(context.Background(), database, "blog.example.org")
+	if err != nil || sMatch == nil || sMatch.ID != site2ID {
+		t.Fatalf("expected blog.example.org to match site 2, got: %v, err: %v", sMatch, err)
+	}
+	sMatch2, err := db.GetSiteByHost(context.Background(), database, "shop.custom.net")
+	if err != nil || sMatch2 == nil || sMatch2.ID != site2ID {
+		t.Fatalf("expected shop.custom.net to match site 2, got: %v, err: %v", sMatch2, err)
+	}
+	_, errNonMatch := db.GetSiteByHost(context.Background(), database, "example.org")
+	if errNonMatch == nil {
+		t.Fatalf("exact root example.org should not match *.example.org without domain alias")
+	}
+
+	reqForwarded := httptest.NewRequest("GET", "/api/admin/site-users", nil)
+	reqForwarded.Header.Set("X-Forwarded-Host", "blog.example.org, 10.0.0.1")
+	resolvedSiteID, err := s.resolveSiteID(reqForwarded, nil)
+	if err != nil || resolvedSiteID != site2ID {
+		t.Fatalf("expected X-Forwarded-Host to resolve to site2ID (%d), got: %d, err: %v", site2ID, resolvedSiteID, err)
+	}
+
+	// 2. Member Status & Deletion Isolation
+	pwdHash, _ := auth.HashPassword("pass123")
+	resUser, err := database.Exec(`INSERT INTO gocms_user(site_id, username, password_hash, display_name, status) VALUES(1, 'origin_user', ?, 'Origin User', 'active')`, pwdHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID, _ := resUser.LastInsertId()
+
+	_, err = database.Exec(`INSERT INTO gocms_site_member(site_id, user_id, display_name, status) VALUES(?, ?, 'Origin User S2', 'active')`, site2ID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Disable user in Site 2
+	wPatchS2 := categoryRequest(t, s, token, "PATCH", fmt.Sprintf("/api/admin/site-users?site_id=%d", site2ID), fmt.Sprintf(`{"id":%d,"status":"disabled"}`, userID))
+	if wPatchS2.Code != 200 {
+		t.Fatalf("patch user in site 2 failed: %d %s", wPatchS2.Code, wPatchS2.Body.String())
+	}
+
+	// Verify Site 2 user list shows status="disabled"
+	wListS2 := categoryRequest(t, s, token, "GET", fmt.Sprintf("/api/admin/site-users?site_id=%d", site2ID), "")
+	if !strings.Contains(wListS2.Body.String(), `"status":"disabled"`) {
+		t.Fatalf("expected site 2 user status disabled, got: %s", wListS2.Body.String())
+	}
+
+	// Verify Site 1 user list still shows status="active"
+	wListS1 := categoryRequest(t, s, token, "GET", "/api/admin/site-users?site_id=1", "")
+	if !strings.Contains(wListS1.Body.String(), `"status":"active"`) {
+		t.Fatalf("expected site 1 user status active, got: %s", wListS1.Body.String())
+	}
+
+	// Verify gocms_user.status in DB is still active!
+	var globalStatus string
+	_ = database.QueryRow(`SELECT status FROM gocms_user WHERE id = ?`, userID).Scan(&globalStatus)
+	if globalStatus != "active" {
+		t.Fatalf("expected gocms_user global status to remain active, got: %s", globalStatus)
+	}
+
+	// Subsite DELETE should only detach user from Site 2
+	wDelS2 := categoryRequest(t, s, token, "DELETE", fmt.Sprintf("/api/admin/site-users?site_id=%d", site2ID), fmt.Sprintf(`{"id":%d}`, userID))
+	if wDelS2.Code != 200 {
+		t.Fatalf("delete user from site 2 failed: %d %s", wDelS2.Code, wDelS2.Body.String())
+	}
+
+	// User should no longer be in Site 2
+	wListS2After := categoryRequest(t, s, token, "GET", fmt.Sprintf("/api/admin/site-users?site_id=%d", site2ID), "")
+	if strings.Contains(wListS2After.Body.String(), "origin_user") {
+		t.Fatalf("user should not appear in site 2 after detach")
+	}
+
+	// User must still exist in Site 1 and gocms_user
+	var userStillExists int
+	_ = database.QueryRow(`SELECT COUNT(*) FROM gocms_user WHERE id = ?`, userID).Scan(&userStillExists)
+	if userStillExists != 1 {
+		t.Fatalf("user should still exist in gocms_user after detach from subsite")
+	}
+
+	// Origin site DELETE should completely delete user
+	wDelS1 := categoryRequest(t, s, token, "DELETE", "/api/admin/site-users?site_id=1", fmt.Sprintf(`{"id":%d}`, userID))
+	if wDelS1.Code != 200 {
+		t.Fatalf("delete user from origin site failed: %d %s", wDelS1.Code, wDelS1.Body.String())
+	}
+	_ = database.QueryRow(`SELECT COUNT(*) FROM gocms_user WHERE id = ?`, userID).Scan(&userStillExists)
+	if userStillExists != 0 {
+		t.Fatalf("user should be completely deleted after deletion from origin site")
+	}
+
+	// 3. Feedback Class Item Count Site Scope
+	_ = db.EnsureMessages(context.Background(), database)
+	var classID int64
+	_ = database.QueryRow(`SELECT id FROM "`+db.FeedbackClassTable+`" LIMIT 1`).Scan(&classID)
+	if classID > 0 {
+		_, _ = database.Exec(`INSERT INTO "gocms_message"(site_id, class_id, title, content) VALUES(1, ?, 'S1 msg', 'test')`, classID)
+		_, _ = database.Exec(`INSERT INTO "gocms_message"(site_id, class_id, title, content) VALUES(?, ?, 'S2 msg 1', 'test')`, site2ID, classID)
+		_, _ = database.Exec(`INSERT INTO "gocms_message"(site_id, class_id, title, content) VALUES(?, ?, 'S2 msg 2', 'test')`, site2ID, classID)
+
+		wFC1 := categoryRequest(t, s, token, "GET", "/api/admin/feedback-classes?site_id=1", "")
+		if !strings.Contains(wFC1.Body.String(), `"item_count":1`) {
+			t.Fatalf("expected site 1 feedback class item_count=1, got: %s", wFC1.Body.String())
+		}
+		wFC2 := categoryRequest(t, s, token, "GET", fmt.Sprintf("/api/admin/feedback-classes?site_id=%d", site2ID), "")
+		if !strings.Contains(wFC2.Body.String(), `"item_count":2`) {
+			t.Fatalf("expected site 2 feedback class item_count=2, got: %s", wFC2.Body.String())
+		}
+	}
+
+	// 4. Site Settings Publication Cache Invalidation
+	pubS2Init := s.publicationForSite(context.Background(), site2ID)
+	if pubS2Init == nil {
+		t.Fatalf("expected publicationForSite to return site 2 pub")
+	}
+	wSettings := categoryRequest(t, s, token, "POST", fmt.Sprintf("/api/admin/site-settings?site_id=%d", site2ID), `{"site_name":"New Site 2 Title"}`)
+	if wSettings.Code != 200 {
+		t.Fatalf("save site settings failed: %d %s", wSettings.Code, wSettings.Body.String())
+	}
+	s.sitePubMu.Lock()
+	_, stillCached := s.sitePublications[site2ID]
+	s.sitePubMu.Unlock()
+	if stillCached {
+		t.Fatalf("publication cache for site 2 should be invalidated after saving site settings")
+	}
+
+	// 5. Global Template Assignment Site Isolation
+	s2ThemeDir := filepath.Join(assetsDir, fmt.Sprint(site2ID), "themes", "site2_theme")
+	_ = os.MkdirAll(filepath.Join(s2ThemeDir, "templates"), 0755)
+	_ = os.WriteFile(filepath.Join(s2ThemeDir, "theme.json"), []byte(`{"id":"site2_theme","name":"Site 2 Theme"}`), 0644)
+	_ = os.WriteFile(filepath.Join(s2ThemeDir, "templates", "search_site2.html"), []byte(`<h1>Site 2 Search</h1>`), 0644)
+	_ = os.WriteFile(filepath.Join(s2ThemeDir, "templates", "list_site2.html"), []byte(`<h1>Site 2 List</h1>`), 0644)
+	_ = os.WriteFile(filepath.Join(s2ThemeDir, "templates", "detail_site2.html"), []byte(`<h1>Site 2 Detail</h1>`), 0644)
+	_, _ = database.Exec(`UPDATE gocms_site SET theme_id = 'site2_theme' WHERE id = ?`, site2ID)
+
+	// Attempt assignment with nonexistent template -> should fail
+	wAssignFail := categoryRequest(t, s, token, "PUT", fmt.Sprintf("/api/admin/theme/assignments/search?site_id=%d", site2ID), `{"template_path":"nonexistent.html"}`)
+	if wAssignFail.Code != 400 {
+		t.Fatalf("expected 400 for nonexistent template in theme assignment, got %d: %s", wAssignFail.Code, wAssignFail.Body.String())
+	}
+
+	// Assignment with valid template in Site 2's theme -> should succeed
+	wAssignOK := categoryRequest(t, s, token, "PUT", fmt.Sprintf("/api/admin/theme/assignments/search?site_id=%d", site2ID), `{"template_path":"search_site2.html"}`)
+	if wAssignOK.Code != 200 {
+		t.Fatalf("expected 200 for valid site 2 template assignment, got %d: %s", wAssignOK.Code, wAssignOK.Body.String())
+	}
+
+	// 6. Category Route Validation with Target Site Theme
+	s1ThemeDir := filepath.Join(assetsDir, "1", "themes", "site1_theme")
+	_ = os.MkdirAll(filepath.Join(s1ThemeDir, "templates"), 0755)
+	_ = os.WriteFile(filepath.Join(s1ThemeDir, "theme.json"), []byte(`{"id":"site1_theme","name":"Site 1 Theme"}`), 0644)
+	_ = os.WriteFile(filepath.Join(s1ThemeDir, "templates", "list_site1.html"), []byte(`<h1>Site 1 List</h1>`), 0644)
+	_ = os.WriteFile(filepath.Join(s1ThemeDir, "templates", "detail_site1.html"), []byte(`<h1>Site 1 Detail</h1>`), 0644)
+	_, _ = database.Exec(`UPDATE gocms_site SET theme_id = 'site1_theme' WHERE id = 1`)
+
+	// Site 2 category with list_site2.html and detail_site2.html -> should succeed
+	wCatS2 := categoryRequest(t, s, token, "POST", fmt.Sprintf("/api/admin/categories?site_id=%d", site2ID), `{"name":"S2 Cat","list_template":"list_site2.html","detail_template":"detail_site2.html"}`)
+	if wCatS2.Code != 200 {
+		t.Fatalf("expected 200 creating category on site 2 with site 2 template, got %d: %s", wCatS2.Code, wCatS2.Body.String())
+	}
+
+	// Site 1 category with list_site2.html -> should fail with 400 because Site 1 theme does not have list_site2.html
+	wCatS1 := categoryRequest(t, s, token, "POST", "/api/admin/categories?site_id=1", `{"name":"S1 Cat","list_template":"list_site2.html","detail_template":"detail_site2.html"}`)
+	if wCatS1.Code != 400 {
+		t.Fatalf("expected 400 creating category on site 1 with site 2 template, got %d: %s", wCatS1.Code, wCatS1.Body.String())
+	}
+
+	// Site 1 category with list_site1.html and detail_site1.html -> should succeed
+	wCatS1Valid := categoryRequest(t, s, token, "POST", "/api/admin/categories?site_id=1", `{"name":"S1 Cat","list_template":"list_site1.html","detail_template":"detail_site1.html"}`)
+	if wCatS1Valid.Code != 200 {
+		t.Fatalf("expected 200 creating category on site 1 with site 1 template, got %d: %s", wCatS1Valid.Code, wCatS1Valid.Body.String())
+	}
+}
+
 
 

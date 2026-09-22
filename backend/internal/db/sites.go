@@ -94,17 +94,38 @@ func NormalizeDomain(value string) string {
 	if value == "" {
 		return ""
 	}
+	prefix := ""
+	if strings.HasPrefix(value, "*.") {
+		prefix = "*."
+		value = value[2:]
+	}
 	if strings.Contains(value, "://") {
 		if parsed, err := url.Parse(value); err == nil && parsed.Hostname() != "" {
-			return parsed.Hostname()
+			return prefix + parsed.Hostname()
 		}
 	}
 	if parsed, err := url.Parse("//" + value); err == nil && parsed.Hostname() != "" {
-		return parsed.Hostname()
+		return prefix + parsed.Hostname()
 	}
 	host := strings.Split(value, "/")[0]
 	host = strings.Split(host, ":")[0]
-	return strings.TrimSpace(host)
+	return prefix + strings.TrimSpace(host)
+}
+
+func matchHostPattern(pattern, host string) bool {
+	pattern = strings.ToLower(strings.TrimSpace(pattern))
+	host = strings.ToLower(strings.TrimSpace(host))
+	if pattern == "" || host == "" {
+		return false
+	}
+	if pattern == host {
+		return true
+	}
+	if strings.HasPrefix(pattern, "*.") {
+		suffix := pattern[1:] // e.g. ".example.com"
+		return strings.HasSuffix(host, suffix) && len(host) > len(suffix)
+	}
+	return false
 }
 
 func ValidateSiteCode(code string) error {
@@ -214,7 +235,7 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 		}
 	}
 
-	// 2. Scan all active sites to check aliases
+	// 2. Scan all active sites to check aliases (exact match)
 	sites, err := ListSites(ctx, query)
 	if err != nil {
 		return nil, err
@@ -225,6 +246,23 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 		}
 		for _, alias := range s.Aliases {
 			if NormalizeDomain(alias) == host {
+				match := s
+				return &match, nil
+			}
+		}
+	}
+
+	// 3. Scan wildcard domain or aliases (*.domain.com)
+	for _, s := range sites {
+		if s.Status != "active" {
+			continue
+		}
+		if matchHostPattern(s.Domain, host) {
+			match := s
+			return &match, nil
+		}
+		for _, alias := range s.Aliases {
+			if matchHostPattern(alias, host) {
 				match := s
 				return &match, nil
 			}

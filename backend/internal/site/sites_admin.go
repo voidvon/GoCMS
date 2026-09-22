@@ -40,7 +40,16 @@ func (s *Server) resolveSiteID(r *http.Request, user *AdminUser) (int64, error) 
 		if user != nil && !user.IsSuper && len(user.SiteIDs) > 0 {
 			siteID = user.SiteIDs[0]
 		} else if s.database != nil && r != nil {
-			if matched, err := db.GetSiteByHost(r.Context(), s.database, r.Host); err == nil && matched != nil {
+			host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+			if host != "" {
+				if comma := strings.Index(host, ","); comma != -1 {
+					host = strings.TrimSpace(host[:comma])
+				}
+			}
+			if host == "" {
+				host = r.Host
+			}
+			if matched, err := db.GetSiteByHost(r.Context(), s.database, host); err == nil && matched != nil {
 				siteID = matched.ID
 			} else if def, err := db.GetDefaultSite(r.Context(), s.database); err == nil && def != nil {
 				siteID = def.ID
@@ -210,6 +219,7 @@ func (s *Server) adminSiteSettings(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.invalidateSitePublication(siteID)
 		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 
 	default:

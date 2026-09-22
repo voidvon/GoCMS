@@ -140,7 +140,8 @@ func (s *Server) memberAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		memberResult(w, map[string]bool{"reauthenticate": true}, err)
 	case p == "/api/v1/me/memberships" && r.Method == http.MethodGet:
-		data, err := service.Memberships(r.Context(), u.ID)
+		siteID, _ := s.resolveSiteID(r, nil)
+		data, err := service.Memberships(r.Context(), u.ID, siteID)
 		memberResult(w, data, err)
 	case p == "/api/v1/me/sessions" && r.Method == http.MethodGet:
 		data, err := service.Sessions(r.Context(), u.ID, hashToken(cookie.Value))

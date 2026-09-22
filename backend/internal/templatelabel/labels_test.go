@@ -124,6 +124,66 @@ func TestTwoBlockTemplateLabel(t *testing.T) {
 	}
 }
 
+func TestTemplateLabelMultiSiteIsolation(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := templatelabel.Ensure(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create label "header" for Site 1
+	item1, err := templatelabel.CreateForSite(ctx, database, 1, templatelabel.Input{
+		Key:      "header",
+		Name:     "Site 1 Header",
+		Temptext: "<header>Site 1 Header</header>",
+		Listvar:  "<span>var</span>",
+	})
+	if err != nil {
+		t.Fatalf("create label for site 1 failed: %v", err)
+	}
+
+	// Create label "header" for Site 2 with SAME key
+	item2, err := templatelabel.CreateForSite(ctx, database, 2, templatelabel.Input{
+		Key:      "header",
+		Name:     "Site 2 Header",
+		Temptext: "<header>Site 2 Header</header>",
+		Listvar:  "<span>var</span>",
+	})
+	if err != nil {
+		t.Fatalf("create label for site 2 with same key failed: %v", err)
+	}
+
+	if item1.ID == item2.ID {
+		t.Fatalf("item1 and item2 must have distinct IDs")
+	}
+
+	// Load for Site 1
+	loaded1, err := templatelabel.LoadForSite(ctx, database, 1)
+	if err != nil || len(loaded1) != 1 || loaded1[0].Content != "<header>Site 1 Header</header>" {
+		t.Fatalf("expected site 1 header content, got: %+v, err: %v", loaded1, err)
+	}
+
+	// Load for Site 2
+	loaded2, err := templatelabel.LoadForSite(ctx, database, 2)
+	if err != nil || len(loaded2) != 1 || loaded2[0].Content != "<header>Site 2 Header</header>" {
+		t.Fatalf("expected site 2 header content, got: %+v, err: %v", loaded2, err)
+	}
+
+	// Count for Site 1 and Site 2
+	c1, err := templatelabel.CountForSite(ctx, database, 1)
+	if err != nil || c1 != 1 {
+		t.Fatalf("expected site 1 count 1, got %d, err: %v", c1, err)
+	}
+	c2, err := templatelabel.CountForSite(ctx, database, 2)
+	if err != nil || c2 != 1 {
+		t.Fatalf("expected site 2 count 1, got %d, err: %v", c2, err)
+	}
+}
+
 func testingContains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || (len(substr) > 0 && len(s) > 0 && indexOfString(s, substr) >= 0))
 }

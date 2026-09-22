@@ -31,6 +31,7 @@ type Category struct {
 
 type Label struct {
 	ID           int64  `json:"id"`
+	SiteID       int64  `json:"site_id"`
 	Key          string `json:"key"`
 	Name         string `json:"name"`
 	CategoryID   int64  `json:"category_id"`
@@ -85,10 +86,44 @@ func Ensure(ctx context.Context, database *sql.DB) error {
 		)`); err != nil {
 		return fmt.Errorf("create template label category table: %w", err)
 	}
+
+	// Check if existing label table needs migration from table-wide key UNIQUE to (site_id, key) UNIQUE
+	var sqlDef string
+	_ = database.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name='`+labelTable+`'`).Scan(&sqlDef)
+	if strings.Contains(sqlDef, `"key" TEXT NOT NULL UNIQUE`) {
+		_, _ = database.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS "`+labelTable+`_v2" (
+				"id" INTEGER PRIMARY KEY AUTOINCREMENT,
+				"site_id" INTEGER NOT NULL DEFAULT 1,
+				"key" TEXT NOT NULL,
+				"name" TEXT NOT NULL,
+				"category_id" INTEGER NOT NULL DEFAULT 0,
+				"context" TEXT NOT NULL DEFAULT 'any',
+				"description" TEXT NOT NULL DEFAULT '',
+				"content" TEXT NOT NULL DEFAULT '',
+				"temptext" TEXT NOT NULL DEFAULT '',
+				"listvar" TEXT NOT NULL DEFAULT '',
+				"rownum" INTEGER NOT NULL DEFAULT 1,
+				"subnews" INTEGER NOT NULL DEFAULT 0,
+				"showdate" TEXT NOT NULL DEFAULT 'Y-m-d H:i:s',
+				"sort_order" INTEGER NOT NULL DEFAULT 0,
+				"created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				"updated_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				UNIQUE ("site_id", "key")
+			);
+			INSERT INTO "`+labelTable+`_v2" ("id", "site_id", "key", "name", "category_id", "context", "description", "content", "temptext", "listvar", "rownum", "subnews", "showdate", "sort_order", "created_at", "updated_at")
+			SELECT "id", COALESCE("site_id", 1), "key", "name", "category_id", "context", "description", "content", "temptext", "listvar", "rownum", "subnews", "showdate", "sort_order", "created_at", "updated_at"
+			FROM "`+labelTable+`";
+			DROP TABLE "`+labelTable+`";
+			ALTER TABLE "`+labelTable+`_v2" RENAME TO "`+labelTable+`";
+		`)
+	}
+
 	if _, err := database.ExecContext(ctx, `
 		CREATE TABLE IF NOT EXISTS "`+labelTable+`" (
 			"id" INTEGER PRIMARY KEY AUTOINCREMENT,
-			"key" TEXT NOT NULL UNIQUE,
+			"site_id" INTEGER NOT NULL DEFAULT 1,
+			"key" TEXT NOT NULL,
 			"name" TEXT NOT NULL,
 			"category_id" INTEGER NOT NULL DEFAULT 0,
 			"context" TEXT NOT NULL DEFAULT 'any',
@@ -101,25 +136,20 @@ func Ensure(ctx context.Context, database *sql.DB) error {
 			"showdate" TEXT NOT NULL DEFAULT 'Y-m-d H:i:s',
 			"sort_order" INTEGER NOT NULL DEFAULT 0,
 			"created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			"updated_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+			"updated_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE ("site_id", "key")
 		)`); err != nil {
 		return fmt.Errorf("create template label table: %w", err)
 	}
 	for _, statement := range []string{
-		`CREATE INDEX IF NOT EXISTS idx_gocms_template_label_category ON "gocms_template_label" ("category_id", "sort_order", "id")`,
-		`CREATE INDEX IF NOT EXISTS idx_gocms_template_label_context ON "gocms_template_label" ("context", "id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_template_label_category ON "` + labelTable + `" ("category_id", "sort_order", "id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_template_label_context ON "` + labelTable + `" ("context", "id")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_template_label_site ON "` + labelTable + `" ("site_id", "category_id", "sort_order", "id")`,
 	} {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create template label index: %w", err)
 		}
 	}
-	var hasSiteID int
-	_ = database.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('`+labelTable+`') WHERE name = 'site_id'`).Scan(&hasSiteID)
-	if hasSiteID == 0 {
-		_, _ = database.ExecContext(ctx, `ALTER TABLE "`+labelTable+`" ADD COLUMN "site_id" INTEGER NOT NULL DEFAULT 1`)
-	}
-	_, _ = database.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_gocms_template_label_site ON "`+labelTable+`" ("site_id", "category_id", "sort_order", "id")`)
-	_, _ = database.ExecContext(ctx, `UPDATE "`+labelTable+`" SET "site_id" = 1 WHERE "site_id" <= 0 OR "site_id" IS NULL`)
 	return nil
 }
 
@@ -311,22 +341,36 @@ func Categories(ctx context.Context, database *sql.DB) ([]Category, error) {
 }
 
 func Count(ctx context.Context, database *sql.DB) (int64, error) {
+	return CountForSite(ctx, database, 1)
+}
+
+func CountForSite(ctx context.Context, database *sql.DB, siteID int64) (int64, error) {
+	if siteID <= 0 {
+		siteID = 1
+	}
 	var total int64
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "gocms_template_label"`).Scan(&total); err != nil {
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "gocms_template_label" WHERE "site_id" = ?`, siteID).Scan(&total); err != nil {
 		return 0, fmt.Errorf("count template labels: %w", err)
 	}
 	return total, nil
 }
 
 func List(ctx context.Context, database *sql.DB, query string, categoryID int64, page, pageSize int) (Page, error) {
+	return ListForSite(ctx, database, 1, query, categoryID, page, pageSize)
+}
+
+func ListForSite(ctx context.Context, database *sql.DB, siteID int64, query string, categoryID int64, page, pageSize int) (Page, error) {
+	if siteID <= 0 {
+		siteID = 1
+	}
 	page = positive(page, 1)
 	pageSize = positive(pageSize, 20)
 	if pageSize > 100 {
 		pageSize = 100
 	}
 	query = strings.TrimSpace(query)
-	where := `1 = 1`
-	args := make([]any, 0, 4)
+	where := `l."site_id" = ?`
+	args := []any{siteID}
 	if query != "" {
 		where += ` AND (l."key" LIKE ? OR l."name" LIKE ? OR l."description" LIKE ?)`
 		pattern := "%" + query + "%"
@@ -342,7 +386,7 @@ func List(ctx context.Context, database *sql.DB, query string, categoryID int64,
 	}
 	args = append(args, pageSize, (page-1)*pageSize)
 	rows, err := database.QueryContext(ctx, `
-		SELECT l."id", l."key", l."name", l."category_id", COALESCE(c."name", ''), l."context",
+		SELECT l."id", l."site_id", l."key", l."name", l."category_id", COALESCE(c."name", ''), l."context",
 		       l."description", l."content", l."temptext", l."listvar", l."rownum", l."subnews", l."showdate",
 		       l."sort_order", l."created_at", l."updated_at"
 		FROM "gocms_template_label" l
@@ -369,7 +413,7 @@ func LoadForSite(ctx context.Context, query queryer, siteID int64) ([]Label, err
 		siteID = 1
 	}
 	rows, err := query.QueryContext(ctx, `
-		SELECT l."id", l."key", l."name", l."category_id", COALESCE(c."name", ''), l."context",
+		SELECT l."id", l."site_id", l."key", l."name", l."category_id", COALESCE(c."name", ''), l."context",
 		       l."description", l."content", l."temptext", l."listvar", l."rownum", l."subnews", l."showdate",
 		       l."sort_order", l."created_at", l."updated_at"
 		FROM "gocms_template_label" l
@@ -407,7 +451,7 @@ func scanLabels(rows *sql.Rows, capacity int) ([]Label, error) {
 
 func scanLabel(source scanner, item *Label) error {
 	if err := source.Scan(
-		&item.ID, &item.Key, &item.Name, &item.CategoryID, &item.CategoryName, &item.Context,
+		&item.ID, &item.SiteID, &item.Key, &item.Name, &item.CategoryID, &item.CategoryName, &item.Context,
 		&item.Description, &item.Content, &item.Temptext, &item.Listvar, &item.Rownum, &item.Subnews, &item.Showdate,
 		&item.SortOrder, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
@@ -417,15 +461,25 @@ func scanLabel(source scanner, item *Label) error {
 }
 
 func Get(ctx context.Context, database *sql.DB, id int64) (Label, error) {
+	return GetForSite(ctx, database, 0, id)
+}
+
+func GetForSite(ctx context.Context, database *sql.DB, siteID, id int64) (Label, error) {
+	where := `WHERE l."id" = ?`
+	args := []any{id}
+	if siteID > 0 {
+		where += ` AND l."site_id" = ?`
+		args = append(args, siteID)
+	}
 	var item Label
 	err := database.QueryRowContext(ctx, `
-		SELECT l."id", l."key", l."name", l."category_id", COALESCE(c."name", ''), l."context",
+		SELECT l."id", l."site_id", l."key", l."name", l."category_id", COALESCE(c."name", ''), l."context",
 		       l."description", l."content", l."temptext", l."listvar", l."rownum", l."subnews", l."showdate",
 		       l."sort_order", l."created_at", l."updated_at"
 		FROM "gocms_template_label" l
 		LEFT JOIN "gocms_template_label_category" c ON c."id" = l."category_id"
-		WHERE l."id" = ?`, id).Scan(
-		&item.ID, &item.Key, &item.Name, &item.CategoryID, &item.CategoryName, &item.Context,
+		`+where, args...).Scan(
+		&item.ID, &item.SiteID, &item.Key, &item.Name, &item.CategoryID, &item.CategoryName, &item.Context,
 		&item.Description, &item.Content, &item.Temptext, &item.Listvar, &item.Rownum, &item.Subnews, &item.Showdate,
 		&item.SortOrder, &item.CreatedAt, &item.UpdatedAt,
 	)
@@ -436,6 +490,13 @@ func Get(ctx context.Context, database *sql.DB, id int64) (Label, error) {
 }
 
 func Create(ctx context.Context, database *sql.DB, input Input) (Label, error) {
+	return CreateForSite(ctx, database, 1, input)
+}
+
+func CreateForSite(ctx context.Context, database *sql.DB, siteID int64, input Input) (Label, error) {
+	if siteID <= 0 {
+		siteID = 1
+	}
 	input, err := NormalizeInput(input)
 	if err != nil {
 		return Label{}, err
@@ -447,8 +508,8 @@ func Create(ctx context.Context, database *sql.DB, input Input) (Label, error) {
 		return Label{}, err
 	}
 	result, err := database.ExecContext(ctx, `
-		INSERT INTO "gocms_template_label" ("key", "name", "category_id", "context", "description", "content", "temptext", "listvar", "rownum", "subnews", "showdate", "sort_order")
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, input.Key, input.Name, input.CategoryID, input.Context, input.Description, input.Content, input.Temptext, input.Listvar, input.Rownum, input.Subnews, input.Showdate, input.SortOrder)
+		INSERT INTO "gocms_template_label" ("site_id", "key", "name", "category_id", "context", "description", "content", "temptext", "listvar", "rownum", "subnews", "showdate", "sort_order")
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, siteID, input.Key, input.Name, input.CategoryID, input.Context, input.Description, input.Content, input.Temptext, input.Listvar, input.Rownum, input.Subnews, input.Showdate, input.SortOrder)
 	if err != nil {
 		return Label{}, normalizeDatabaseError(err)
 	}
@@ -456,10 +517,14 @@ func Create(ctx context.Context, database *sql.DB, input Input) (Label, error) {
 	if err != nil {
 		return Label{}, fmt.Errorf("read template label id: %w", err)
 	}
-	return Get(ctx, database, id)
+	return GetForSite(ctx, database, siteID, id)
 }
 
 func Update(ctx context.Context, database *sql.DB, id int64, input Input) (Label, error) {
+	return UpdateForSite(ctx, database, 0, id, input)
+}
+
+func UpdateForSite(ctx context.Context, database *sql.DB, siteID, id int64, input Input) (Label, error) {
 	if id < 1 {
 		return Label{}, fmt.Errorf("标签模板编号无效")
 	}
@@ -473,10 +538,16 @@ func Update(ctx context.Context, database *sql.DB, id int64, input Input) (Label
 	if err := validateCategory(ctx, database, input.CategoryID); err != nil {
 		return Label{}, err
 	}
+	where := `WHERE "id" = ?`
+	args := []any{input.Key, input.Name, input.CategoryID, input.Context, input.Description, input.Content, input.Temptext, input.Listvar, input.Rownum, input.Subnews, input.Showdate, input.SortOrder, id}
+	if siteID > 0 {
+		where += ` AND "site_id" = ?`
+		args = append(args, siteID)
+	}
 	result, err := database.ExecContext(ctx, `
 		UPDATE "gocms_template_label"
 		SET "key" = ?, "name" = ?, "category_id" = ?, "context" = ?, "description" = ?, "content" = ?, "temptext" = ?, "listvar" = ?, "rownum" = ?, "subnews" = ?, "showdate" = ?, "sort_order" = ?, "updated_at" = CURRENT_TIMESTAMP
-		WHERE "id" = ?`, input.Key, input.Name, input.CategoryID, input.Context, input.Description, input.Content, input.Temptext, input.Listvar, input.Rownum, input.Subnews, input.Showdate, input.SortOrder, id)
+		`+where, args...)
 	if err != nil {
 		return Label{}, normalizeDatabaseError(err)
 	}
@@ -485,18 +556,28 @@ func Update(ctx context.Context, database *sql.DB, id int64, input Input) (Label
 		return Label{}, fmt.Errorf("check template label update: %w", err)
 	}
 	if affected == 0 {
-		if _, err := Get(ctx, database, id); err == sql.ErrNoRows {
+		if _, err := GetForSite(ctx, database, siteID, id); err == sql.ErrNoRows {
 			return Label{}, fmt.Errorf("标签模板不存在")
 		}
 	}
-	return Get(ctx, database, id)
+	return GetForSite(ctx, database, siteID, id)
 }
 
 func Delete(ctx context.Context, database *sql.DB, id int64) error {
+	return DeleteForSite(ctx, database, 0, id)
+}
+
+func DeleteForSite(ctx context.Context, database *sql.DB, siteID, id int64) error {
 	if id < 1 {
 		return fmt.Errorf("标签模板编号无效")
 	}
-	result, err := database.ExecContext(ctx, `DELETE FROM "gocms_template_label" WHERE "id" = ?`, id)
+	where := `WHERE "id" = ?`
+	args := []any{id}
+	if siteID > 0 {
+		where += ` AND "site_id" = ?`
+		args = append(args, siteID)
+	}
+	result, err := database.ExecContext(ctx, `DELETE FROM "gocms_template_label" `+where, args...)
 	if err != nil {
 		return fmt.Errorf("delete template label: %w", err)
 	}

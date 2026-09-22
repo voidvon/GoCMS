@@ -62,18 +62,22 @@ func (s Service) Login(ctx context.Context, identifier, password, ip, agent stri
 		return Profile{}, "", ErrInvalid
 	}
 	var id int64
-	var encoded, status string
-	query := "SELECT id,password_hash,status FROM gocms_user WHERE (username=? OR (email<>'' AND email=?))"
+	var encoded, status, siteStatus string
+	query := "SELECT u.id, u.password_hash, u.status, u.status FROM gocms_user u WHERE (u.username=? OR (u.email<>'' AND u.email=?))"
 	args := []any{identifier, strings.ToLower(identifier)}
 	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
-		query += " AND (site_id=? OR id IN (SELECT user_id FROM gocms_site_member WHERE site_id=?))"
-		args = append(args, siteIDOpt[0], siteIDOpt[0])
+		query = `SELECT u.id, u.password_hash, u.status, COALESCE(sm.status, u.status)
+		         FROM gocms_user u
+		         LEFT JOIN gocms_site_member sm ON sm.user_id = u.id AND sm.site_id = ?
+		         WHERE (u.username=? OR (u.email<>'' AND u.email=?))
+		           AND (u.site_id=? OR sm.site_id=?)`
+		args = []any{siteIDOpt[0], identifier, strings.ToLower(identifier), siteIDOpt[0], siteIDOpt[0]}
 	}
-	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&id, &encoded, &status)
+	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&id, &encoded, &status, &siteStatus)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return Profile{}, "", err
 	}
-	if err != nil || status != "active" || !auth.ComparePassword(password, encoded) {
+	if err != nil || status != "active" || siteStatus != "active" || !auth.ComparePassword(password, encoded) {
 		if _, e := s.DB.ExecContext(ctx, "INSERT INTO gocms_user_login(identifier,success,ip) VALUES(?,0,?)", identifier, ip); e != nil {
 			return Profile{}, "", e
 		}

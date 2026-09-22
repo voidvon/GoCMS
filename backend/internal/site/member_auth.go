@@ -144,7 +144,14 @@ func (s *Server) currentSiteUser(r *http.Request) (siteUser, bool) {
 	siteID, _ := s.resolveSiteID(r, nil)
 	if siteID > 0 && s.database != nil {
 		var memberCount int
-		_ = s.database.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_user WHERE id=? AND (site_id=? OR id IN (SELECT user_id FROM gocms_site_member WHERE site_id=?))`, p.ID, siteID, siteID).Scan(&memberCount)
+		_ = s.database.QueryRowContext(r.Context(), `
+			SELECT COUNT(*)
+			FROM gocms_user u
+			LEFT JOIN gocms_site_member sm ON sm.user_id = u.id AND sm.site_id = ?
+			WHERE u.id = ? AND u.status = 'active'
+			  AND (u.site_id = ? OR sm.site_id = ?)
+			  AND COALESCE(sm.status, u.status) = 'active'`,
+			siteID, p.ID, siteID, siteID).Scan(&memberCount)
 		if memberCount == 0 {
 			return siteUser{}, false
 		}
