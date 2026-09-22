@@ -54,8 +54,8 @@ func (s Service) Register(ctx context.Context, username, email, password string,
 	if err != nil {
 		return Profile{}, err
 	}
-	_, _ = s.DB.ExecContext(ctx, "INSERT OR IGNORE INTO gocms_site_member(site_id,user_id,display_name,status) VALUES(?,?,?,?)", sid, id, username, "active")
-	return s.Profile(ctx, id, sid)
+	_, _ = s.DB.ExecContext(ctx, "INSERT OR IGNORE INTO gocms_site_member(site_id,user_id,status) VALUES(?,?,?)", sid, id, "active")
+	return s.Profile(ctx, id)
 }
 func (s Service) Login(ctx context.Context, identifier, password, ip, agent string, currentToken string, siteIDOpt ...int64) (Profile, string, error) {
 	if len(identifier) > 254 || len(password) > 1024 {
@@ -143,7 +143,7 @@ func (s Service) Login(ctx context.Context, identifier, password, ip, agent stri
 	if err = tx.Commit(); err != nil {
 		return Profile{}, "", err
 	}
-	profile, err := s.Profile(ctx, id, siteIDOpt...)
+	profile, err := s.Profile(ctx, id)
 	return profile, token, err
 }
 
@@ -158,7 +158,7 @@ func (s Service) Authenticate(ctx context.Context, token string, siteIDOpt ...in
 
 	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
 		sid := siteIDOpt[0]
-		query = `SELECT u.id, u.username, u.email, COALESCE(sm.display_name, u.display_name), u.avatar_url, u.status, COALESCE(sm.status, u.status)
+		query = `SELECT u.id, u.username, u.email, u.display_name, u.avatar_url, u.status, COALESCE(sm.status, u.status)
 		         FROM gocms_user u
 		         JOIN gocms_user_session s ON s.user_id=u.id
 		         LEFT JOIN gocms_site_member sm ON sm.user_id=u.id AND sm.site_id=?

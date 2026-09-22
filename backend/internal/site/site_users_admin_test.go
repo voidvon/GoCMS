@@ -445,7 +445,7 @@ func TestMultiSiteRound2AuditFixes(t *testing.T) {
 	sharedUserID, _ := resUser.LastInsertId()
 
 	// Add user to Site 2 via gocms_site_member
-	_, err = database.Exec(`INSERT INTO gocms_site_member(site_id, user_id, display_name, status) VALUES(?, ?, 'Shared User S2', 'active')`, site2ID, sharedUserID)
+	_, err = database.Exec(`INSERT INTO gocms_site_member(site_id, user_id, status) VALUES(?, ?, 'active')`, site2ID, sharedUserID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +665,7 @@ func TestMultiSiteRound3AuditFixes(t *testing.T) {
 	}
 	userID, _ := resUser.LastInsertId()
 
-	_, err = database.Exec(`INSERT INTO gocms_site_member(site_id, user_id, display_name, status) VALUES(?, ?, 'Origin User S2', 'active')`, site2ID, userID)
+	_, err = database.Exec(`INSERT INTO gocms_site_member(site_id, user_id, status) VALUES(?, ?, 'active')`, site2ID, userID)
 	if err != nil {
 		t.Fatal(err)
 	}

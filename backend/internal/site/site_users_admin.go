@@ -109,8 +109,8 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 	} else {
 		if status != "" {
 			_, err = tx.ExecContext(r.Context(), `
-				INSERT OR IGNORE INTO gocms_site_member (site_id, user_id, display_name, status)
-				SELECT ?, id, display_name, ? FROM gocms_user WHERE id = ?`,
+				INSERT OR IGNORE INTO gocms_site_member (site_id, user_id, status)
+				SELECT ?, id, ? FROM gocms_user WHERE id = ?`,
 				siteID, status, in.ID,
 			)
 			if err != nil {

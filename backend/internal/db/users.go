@@ -85,7 +85,7 @@ func EnsureSiteUsers(ctx context.Context, database *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS gocms_user_group (id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL DEFAULT 1, name TEXT NOT NULL, slug TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', sort_order INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active')`,
 		`CREATE TABLE IF NOT EXISTS gocms_user_group_member (user_id INTEGER NOT NULL, group_id INTEGER NOT NULL, started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TEXT, status TEXT NOT NULL DEFAULT 'active', PRIMARY KEY(user_id, group_id), FOREIGN KEY(user_id) REFERENCES gocms_user(id) ON DELETE CASCADE, FOREIGN KEY(group_id) REFERENCES gocms_user_group(id) ON DELETE CASCADE)`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_user_group_member_expiry ON gocms_user_group_member(user_id, expires_at)`,
-		`CREATE TABLE IF NOT EXISTS gocms_site_member (site_id INTEGER NOT NULL, user_id INTEGER NOT NULL, display_name TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'active', joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(site_id, user_id), FOREIGN KEY(user_id) REFERENCES gocms_user(id) ON DELETE CASCADE)`,
+		`CREATE TABLE IF NOT EXISTS gocms_site_member (site_id INTEGER NOT NULL, user_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'active', joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(site_id, user_id), FOREIGN KEY(user_id) REFERENCES gocms_user(id) ON DELETE CASCADE)`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_site_member_user ON gocms_site_member(user_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_site_member_site ON gocms_site_member(site_id, status)`,
 	}
@@ -129,8 +129,8 @@ func EnsureSiteUsers(ctx context.Context, database *sql.DB) error {
 		return err
 	}
 	_, _ = database.ExecContext(ctx, `
-		INSERT OR IGNORE INTO gocms_site_member (site_id, user_id, display_name, status, joined_at)
-		SELECT site_id, id, display_name, status, created_at FROM gocms_user`)
+		INSERT OR IGNORE INTO gocms_site_member (site_id, user_id, status, joined_at)
+		SELECT site_id, id, status, created_at FROM gocms_user`)
 
 	return nil
 }

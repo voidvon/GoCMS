@@ -399,6 +399,20 @@ func UpdateSite(ctx context.Context, database *sql.DB, s *Site) error {
 	}
 	aliasesData, _ := json.Marshal(s.Aliases)
 
+	var existingIsDefault int
+	if err := database.QueryRowContext(ctx, `SELECT "is_default" FROM "`+SiteTable+`" WHERE "id" = ?`, s.ID).Scan(&existingIsDefault); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return sql.ErrNoRows
+		}
+		return err
+	}
+	if (s.IsDefault || existingIsDefault == 1) && s.Status == "disabled" {
+		return errors.New("默认站点状态必须为正常，不允许停用")
+	}
+	if existingIsDefault == 1 && !s.IsDefault {
+		return errors.New("系统必须保留一个默认站点，请先将其他站点设为默认站点")
+	}
+
 	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
 		return err

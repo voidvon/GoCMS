@@ -82,17 +82,17 @@ func TestAuthenticateMultiSiteScoping(t *testing.T) {
 	}
 
 	// 3. Add to Site 2
-	if _, err := database.Exec("INSERT INTO gocms_site_member(site_id, user_id, display_name, status) VALUES(2, ?, 'AliceSub', 'active')", p.ID); err != nil {
+	if _, err := database.Exec("INSERT INTO gocms_site_member(site_id, user_id, status) VALUES(2, ?, 'active')", p.ID); err != nil {
 		t.Fatal(err)
 	}
 
-	// 4. Authenticate on Site 2 should now succeed with Site 2 display name
+	// 4. Authenticate on Site 2 should now succeed with unified display name
 	auth2, err := svc.Authenticate(ctx, token, 2)
 	if err != nil || auth2.ID != p.ID {
 		t.Fatalf("expected auth on site 2 to succeed, got %v", err)
 	}
-	if auth2.DisplayName != "AliceSub" {
-		t.Fatalf("expected display name 'AliceSub', got %q", auth2.DisplayName)
+	if auth2.DisplayName != "alice" {
+		t.Fatalf("expected display name 'alice', got %q", auth2.DisplayName)
 	}
 
 	// 5. Ban/disable member on Site 2
@@ -112,24 +112,24 @@ func TestAuthenticateMultiSiteScoping(t *testing.T) {
 		t.Fatalf("expected auth on site 1 to still succeed, got %v", err)
 	}
 
-	// 8. Re-enable Site 2 and test Profile & UpdateProfile site-scoping
+	// 8. Re-enable Site 2 and test unified Profile & UpdateProfile
 	if _, err := database.Exec("UPDATE gocms_site_member SET status='active' WHERE site_id=2 AND user_id=?", p.ID); err != nil {
 		t.Fatal(err)
 	}
-	profS2, err := svc.Profile(ctx, p.ID, 2)
-	if err != nil || profS2.DisplayName != "AliceSub" {
-		t.Fatalf("expected profile on site 2 to return 'AliceSub', got %q, err: %v", profS2.DisplayName, err)
+	prof, err := svc.Profile(ctx, p.ID)
+	if err != nil || prof.DisplayName != "alice" {
+		t.Fatalf("expected profile to return 'alice', got %q, err: %v", prof.DisplayName, err)
 	}
-	newName := "AliceSubUpdated"
-	if err := svc.UpdateProfile(ctx, p.ID, &newName, nil, 2); err != nil {
-		t.Fatalf("update profile on site 2 failed: %v", err)
+	newName := "AliceGlobal"
+	if err := svc.UpdateProfile(ctx, p.ID, &newName, nil); err != nil {
+		t.Fatalf("update profile failed: %v", err)
 	}
-	profS2Updated, err := svc.Profile(ctx, p.ID, 2)
-	if err != nil || profS2Updated.DisplayName != "AliceSubUpdated" {
-		t.Fatalf("expected updated profile on site 2 to return 'AliceSubUpdated', got %q", profS2Updated.DisplayName)
+	profUpdated, err := svc.Profile(ctx, p.ID)
+	if err != nil || profUpdated.DisplayName != "AliceGlobal" {
+		t.Fatalf("expected updated profile to return 'AliceGlobal', got %q", profUpdated.DisplayName)
 	}
 	authS2Updated, err := svc.Authenticate(ctx, token, 2)
-	if err != nil || authS2Updated.DisplayName != "AliceSubUpdated" {
-		t.Fatalf("expected authenticate on site 2 to return 'AliceSubUpdated', got %q", authS2Updated.DisplayName)
+	if err != nil || authS2Updated.DisplayName != "AliceGlobal" {
+		t.Fatalf("expected authenticate on site 2 to return 'AliceGlobal', got %q", authS2Updated.DisplayName)
 	}
 }

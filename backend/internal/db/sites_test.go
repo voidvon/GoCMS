@@ -266,3 +266,54 @@ func TestSiteSettingsScoping(t *testing.T) {
 		t.Errorf("expected site 2 site_name '站点2名称', got %q", s2Settings["site_name"])
 	}
 }
+
+func TestDefaultSiteSafeguards(t *testing.T) {
+	database, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+
+	def, err := GetDefaultSite(context.Background(), database)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Attempting to disable default site must fail
+	def.Status = "disabled"
+	if err := UpdateSite(context.Background(), database, def); err == nil {
+		t.Fatal("expected error when disabling default site, got nil")
+	}
+
+	// 2. Attempting to unset is_default on default site must fail
+	def.Status = "active"
+	def.IsDefault = false
+	if err := UpdateSite(context.Background(), database, def); err == nil {
+		t.Fatal("expected error when unsetting is_default on sole default site, got nil")
+	}
+
+	// 3. Create site2 and set site2 as default -> succeeds
+	site2, err := CreateSite(context.Background(), database, &Site{
+		Name:      "分站二",
+		Code:      "sub2",
+		IsDefault: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newDef, err := GetDefaultSite(context.Background(), database)
+	if err != nil || newDef.ID != site2.ID {
+		t.Fatalf("expected site2 to be new default, got %v, err: %v", newDef, err)
+	}
+
+	// 4. Now site1 is no longer default, so it can be updated
+	def.IsDefault = false
+	def.Status = "disabled"
+	if err := UpdateSite(context.Background(), database, def); err != nil {
+		t.Fatalf("expected updating former default site to succeed, got: %v", err)
+	}
+}
+
