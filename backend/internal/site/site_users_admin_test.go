@@ -479,6 +479,32 @@ func TestMultiSiteRound2AuditFixes(t *testing.T) {
 		t.Fatalf("shared user should appear in group members list: %s", wListGrpMembers.Body.String())
 	}
 
+	// Verify shared user deletion from Site 1 by non-superadmin only detaches from Site 1
+	if _, err := database.Exec(`
+		INSERT INTO gocms_admin_group (id, name, permissions, site_ids) VALUES (201, 'Site 1 Admin', '["members"]', '[1]');
+		INSERT INTO gocms_admin_user (username, group_id, site_ids) VALUES ('s1_admin', 201, '[1]');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	s1AdminToken, _ := s.createSession("s1_admin")
+	wDelShared := categoryRequest(t, s, s1AdminToken, "DELETE", "/api/admin/site-users?site_id=1", fmt.Sprintf(`{"id":%d}`, sharedUserID))
+	if wDelShared.Code != 200 {
+		t.Fatalf("failed to detach shared user from site 1: %d %s", wDelShared.Code, wDelShared.Body.String())
+	}
+	// Check that shared user still exists in gocms_user and has site_id reassigned to Site 2
+	var sUserSiteID int64
+	if err := database.QueryRow(`SELECT site_id FROM gocms_user WHERE id = ?`, sharedUserID).Scan(&sUserSiteID); err != nil {
+		t.Fatalf("shared user was erroneously deleted from gocms_user: %v", err)
+	}
+	if sUserSiteID != site2ID {
+		t.Fatalf("expected origin site reassigned to %d, got %d", site2ID, sUserSiteID)
+	}
+	// Check that shared user is still active in gocms_site_member on Site 2
+	var s2MemberCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM gocms_site_member WHERE user_id = ? AND site_id = ?`, sharedUserID, site2ID).Scan(&s2MemberCount); err != nil || s2MemberCount != 1 {
+		t.Fatalf("shared user missing on site 2 after site 1 detachment")
+	}
+
 	// Test 4: DeleteSite Cascade Cleanup
 	// Create Site 3 with all types of child records
 	resSite3, err := db.CreateSite(context.Background(), database, &db.Site{
@@ -778,6 +804,35 @@ func TestMultiSiteRound3AuditFixes(t *testing.T) {
 	wCatS1Valid := categoryRequest(t, s, token, "POST", "/api/admin/categories?site_id=1", `{"name":"S1 Cat","list_template":"list_site1.html","detail_template":"detail_site1.html"}`)
 	if wCatS1Valid.Code != 200 {
 		t.Fatalf("expected 200 creating category on site 1 with site 1 template, got %d: %s", wCatS1Valid.Code, wCatS1Valid.Body.String())
+	}
+
+	// 7. Site-Specific content.review Permission & Subsite site-settings authorization
+	if _, err := database.Exec(`
+		INSERT INTO gocms_admin_group (id, name, permissions, site_ids, site_permissions) VALUES (301, 'S2 Editor Group', '["content", "content.add", "content.edit"]', '[2]', '{"2":["content","content.add","content.edit","content.review"]}');
+		INSERT INTO gocms_admin_user (username, group_id, site_ids) VALUES ('s2_reviewer', 301, '[2]');
+	`); err != nil {
+		t.Fatal(err)
+	}
+	s2ReviewerToken, _ := s.createSession("s2_reviewer")
+
+	// Verify s2_reviewer can edit site-settings for site 2
+	wS2Settings := categoryRequest(t, s, s2ReviewerToken, "POST", fmt.Sprintf("/api/admin/site-settings?site_id=%d", site2ID), `{"site_name":"S2 Custom Title"}`)
+	if wS2Settings.Code != 200 {
+		t.Fatalf("subsite admin cannot edit site-settings: %d %s", wS2Settings.Code, wS2Settings.Body.String())
+	}
+
+	// Verify s2_reviewer cannot edit site-settings for site 1 (403)
+	wS1SettingsForbidden := categoryRequest(t, s, s2ReviewerToken, "POST", "/api/admin/site-settings?site_id=1", `{"site_name":"Hacked"}`)
+	if wS1SettingsForbidden.Code != 403 {
+		t.Fatalf("subsite admin should not be able to edit site 1 settings, got %d", wS1SettingsForbidden.Code)
+	}
+
+	// Create visible content on Site 2 using reviewer token
+	var s2CatID int64
+	_ = database.QueryRow(`SELECT id FROM gocms_category WHERE site_id = ? LIMIT 1`, site2ID).Scan(&s2CatID)
+	wCreateContent := categoryRequest(t, s, s2ReviewerToken, "POST", fmt.Sprintf("/api/admin/content?site_id=%d", site2ID), fmt.Sprintf(`{"category":%d,"title":"Reviewed Content","visible":1}`, s2CatID))
+	if wCreateContent.Code != 200 && wCreateContent.Code != 201 {
+		t.Fatalf("expected s2_reviewer to be able to create and review visible content on site 2, got %d %s", wCreateContent.Code, wCreateContent.Body.String())
 	}
 }
 

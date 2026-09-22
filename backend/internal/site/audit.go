@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -37,9 +38,13 @@ func (s *Server) recordOperation(username string, r *http.Request, result *opera
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	siteID, _ := s.resolveSiteID(r, nil)
+	if siteID <= 0 {
+		siteID = 1
+	}
 	// Never persist passwords, API keys, request bodies, or query strings.
 	_, err := s.database.ExecContext(ctx, `INSERT INTO gocms_admin_operation
-		(username, method, path, status, ip) VALUES (?, ?, ?, ?, ?)`, username, r.Method, r.URL.Path, status, clientIP(r))
+		(site_id, username, method, path, status, ip) VALUES (?, ?, ?, ?, ?, ?)`, siteID, username, r.Method, r.URL.Path, status, clientIP(r))
 	if err != nil {
 		log.Printf("record administrator operation: %v", err)
 	}
@@ -47,6 +52,7 @@ func (s *Server) recordOperation(username string, r *http.Request, result *opera
 
 type operationLog struct {
 	ID        int64  `json:"id"`
+	SiteID    int64  `json:"site_id"`
 	Username  string `json:"username"`
 	Method    string `json:"method"`
 	Path      string `json:"path"`
@@ -60,6 +66,15 @@ func (s *Server) adminOperationLogs(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
+	user := s.currentAdmin(r)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或账号已停用"})
+		return
+	}
+	if !user.IsSuper && !user.hasPermission("logs") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此操作权限"})
+		return
+	}
 	page := positiveInt(r.URL.Query().Get("page"), 1)
 	if page > 1000000 {
 		page = 1000000
@@ -68,17 +83,43 @@ func (s *Server) adminOperationLogs(w http.ResponseWriter, r *http.Request) {
 	username := strings.TrimSpace(r.URL.Query().Get("username"))
 	where := "1=1"
 	args := []any{}
-	if username != "" {
-		where += " AND username = ?"
-		args = append(args, username)
+
+	if !user.IsSuper {
+		siteID, err := s.resolveSiteID(r, user)
+		if err != nil || siteID <= 0 {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权访问该站点日志"})
+			return
+		}
+		if !user.HasPermissionInSite(siteID, "logs") {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此站点的日志查看权限"})
+			return
+		}
+		where += " AND site_id = ?"
+		args = append(args, siteID)
+		if username != "" {
+			where += " AND username = ?"
+			args = append(args, username)
+		}
+	} else {
+		if siteIDStr := strings.TrimSpace(r.URL.Query().Get("site_id")); siteIDStr != "" {
+			if sid, err := strconv.ParseInt(siteIDStr, 10, 64); err == nil && sid > 0 {
+				where += " AND site_id = ?"
+				args = append(args, sid)
+			}
+		}
+		if username != "" {
+			where += " AND username = ?"
+			args = append(args, username)
+		}
 	}
+
 	var total int64
 	if err := s.database.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_admin_operation WHERE `+where, args...).Scan(&total); err != nil {
 		accountError(w, err)
 		return
 	}
 	args = append(args, pageSize, (page-1)*pageSize)
-	rows, err := s.database.QueryContext(r.Context(), `SELECT id, username, method, path, status, ip, created_at FROM gocms_admin_operation WHERE `+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, args...)
+	rows, err := s.database.QueryContext(r.Context(), `SELECT id, site_id, username, method, path, status, ip, created_at FROM gocms_admin_operation WHERE `+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		accountError(w, err)
 		return
@@ -87,7 +128,7 @@ func (s *Server) adminOperationLogs(w http.ResponseWriter, r *http.Request) {
 	items := []operationLog{}
 	for rows.Next() {
 		var item operationLog
-		if err := rows.Scan(&item.ID, &item.Username, &item.Method, &item.Path, &item.Status, &item.IP, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.SiteID, &item.Username, &item.Method, &item.Path, &item.Status, &item.IP, &item.CreatedAt); err != nil {
 			accountError(w, err)
 			return
 		}
@@ -105,7 +146,22 @@ func (s *Server) adminLoginLogs(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	rows, err := s.database.QueryContext(r.Context(), `SELECT id, username, success, ip, created_at FROM gocms_admin_login ORDER BY id DESC LIMIT 100`)
+	user := s.currentAdmin(r)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或账号已停用"})
+		return
+	}
+	if !user.IsSuper && !user.hasPermission("login_logs") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此操作权限"})
+		return
+	}
+	query := `SELECT id, username, success, ip, created_at FROM gocms_admin_login ORDER BY id DESC LIMIT 100`
+	args := []any{}
+	if !user.IsSuper {
+		query = `SELECT id, username, success, ip, created_at FROM gocms_admin_login WHERE username = ? ORDER BY id DESC LIMIT 100`
+		args = append(args, user.Username)
+	}
+	rows, err := s.database.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		accountError(w, err)
 		return

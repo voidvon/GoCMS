@@ -995,11 +995,11 @@ func atomicWrite(filePath string, data []byte) error {
 }
 
 func (c *content) homeTemplate() string {
-	if strings.TrimSpace(c.homeTemplatePath) != "" {
-		return strings.TrimSpace(c.homeTemplatePath)
-	}
 	if templatePath, ok := c.assignments[templateconfig.RoleHomeIndex]; ok && strings.TrimSpace(templatePath) != "" {
 		return strings.TrimSpace(templatePath)
+	}
+	if strings.TrimSpace(c.homeTemplatePath) != "" {
+		return strings.TrimSpace(c.homeTemplatePath)
 	}
 	return "index.html"
 }

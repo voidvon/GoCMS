@@ -705,4 +705,56 @@ func TestMultiSiteGenerationIndependentDirectories(t *testing.T) {
 	}
 }
 
+func TestPublisherHomeTemplate(t *testing.T) {
+	root := t.TempDir()
+	templates := filepath.Join(root, "templates")
+	if err := os.MkdirAll(templates, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(templates, "custom_home.html"), []byte("CUSTOM HOME VIA THEME"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(templates, "msg.html"), []byte("MSG"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(templates, "search.html"), []byte("SEARCH"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	database, err := db.Open(filepath.Join(root, "site.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	web := filepath.Join(root, "web")
+	pub := Publisher{
+		DB:           database,
+		Web:          web,
+		Templates:    templates,
+		Data:         filepath.Join(root, "data"),
+		SiteID:       1,
+		HomeTemplate: "custom_home.html",
+	}
+	rep, err := pub.Generate(ctx)
+	if err != nil {
+		t.Fatalf("generate failed: %v", err)
+	}
+	if rep.State != "success" {
+		t.Fatalf("report state: %s", rep.State)
+	}
+	content, err := os.ReadFile(filepath.Join(web, "1", "index.html"))
+	if err != nil {
+		content, err = os.ReadFile(filepath.Join(web, "index.html"))
+	}
+	if err != nil {
+		t.Fatalf("index.html not generated: %v", err)
+	}
+	if !strings.Contains(string(content), "CUSTOM HOME VIA THEME") {
+		t.Fatalf("expected custom home template, got: %s", string(content))
+	}
+}
+
 

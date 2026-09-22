@@ -141,6 +141,7 @@ func (s *Server) adminLanguages(response http.ResponseWriter, request *http.Requ
 		}
 
 		newID, _ := res.LastInsertId()
+		s.invalidateAllPublications()
 		writeJSON(response, http.StatusCreated, map[string]any{"ok": true, "id": newID})
 
 	default:
@@ -199,6 +200,7 @@ func (s *Server) adminLanguageItem(response http.ResponseWriter, request *http.R
 			http.Error(response, "database error or duplicate code", http.StatusBadRequest)
 			return
 		}
+		s.invalidateAllPublications()
 		writeJSON(response, http.StatusOK, map[string]any{"ok": true})
 
 	case http.MethodDelete:
@@ -218,6 +220,7 @@ func (s *Server) adminLanguageItem(response http.ResponseWriter, request *http.R
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
+		s.invalidateAllPublications()
 		writeJSON(response, http.StatusOK, map[string]any{"ok": true})
 
 	default:

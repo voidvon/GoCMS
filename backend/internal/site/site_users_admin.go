@@ -83,7 +83,9 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == http.MethodDelete {
-		if userOriginSite == siteID {
+		var otherMemberships int
+		_ = tx.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM gocms_site_member WHERE user_id = ? AND site_id != ?", in.ID, siteID).Scan(&otherMemberships)
+		if (user.IsSuper || otherMemberships == 0) && userOriginSite == siteID {
 			if _, err := tx.ExecContext(r.Context(), "DELETE FROM gocms_user WHERE id = ?", in.ID); err != nil {
 				accountError(w, err)
 				return
@@ -97,6 +99,12 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_user_group_member WHERE user_id = ? AND group_id IN (SELECT id FROM gocms_user_group WHERE site_id = ?)", in.ID, siteID)
+			if userOriginSite == siteID {
+				var nextSiteID int64
+				if err := tx.QueryRowContext(r.Context(), "SELECT site_id FROM gocms_site_member WHERE user_id = ? LIMIT 1", in.ID).Scan(&nextSiteID); err == nil && nextSiteID > 0 {
+					_, _ = tx.ExecContext(r.Context(), "UPDATE gocms_user SET site_id = ? WHERE id = ?", nextSiteID, in.ID)
+				}
+			}
 		}
 	} else {
 		if status != "" {
@@ -123,7 +131,7 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		if in.MaxSessions != nil {
+		if in.MaxSessions != nil && (user.IsSuper || userOriginSite == siteID) {
 			_, err = tx.ExecContext(r.Context(), "UPDATE gocms_user SET max_sessions = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", *in.MaxSessions, in.ID)
 			if err != nil {
 				accountError(w, err)

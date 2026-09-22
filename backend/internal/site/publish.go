@@ -15,6 +15,7 @@ import (
 
 	"gocms/internal/db"
 	"gocms/internal/generator"
+	themepkg "gocms/internal/theme"
 )
 
 type publication struct {
@@ -103,6 +104,12 @@ func (s *Server) publicationForSite(ctx context.Context, siteID int64) *publicat
 		if stat, err := os.Stat(themeAssets); err == nil && stat.IsDir() {
 			themeRoot = themeAssets
 		}
+		if manifestBytes, err := os.ReadFile(filepath.Join(siteThemeDir, "theme.json")); err == nil {
+			var m themepkg.Manifest
+			if json.Unmarshal(manifestBytes, &m) == nil {
+				homeTpl = themepkg.Definition{Manifest: m}.HomeTemplate()
+			}
+		}
 	}
 
 	pub := &publication{
@@ -133,6 +140,12 @@ func (s *Server) invalidateSitePublication(siteID int64) {
 	if s.sitePublications != nil {
 		delete(s.sitePublications, siteID)
 	}
+}
+
+func (s *Server) invalidateAllPublications() {
+	s.sitePubMu.Lock()
+	defer s.sitePubMu.Unlock()
+	s.sitePublications = make(map[int64]*publication)
 }
 
 func (s *Server) startPublish(queue bool) (generator.Report, bool) {

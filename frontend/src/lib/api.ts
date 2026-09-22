@@ -40,7 +40,7 @@ export const saveSiteSettings = (settings: Record<string, string>, siteId?: numb
     body: JSON.stringify(settings),
   })
 
-export type OperationLog = { id: number; username: string; method: string; path: string; status: number; ip: string; created_at: string }
+export type OperationLog = { id: number; site_id?: number; username: string; method: string; path: string; status: number; ip: string; created_at: string }
 export const getOperationLogs = (page: number, username: string) => request<{ items: OperationLog[]; total: number; page_size: number }>(`/api/admin/logs?page=${page}&username=${encodeURIComponent(username)}`)
 export type LoginLog = { id: number; username: string; success: boolean; ip: string; created_at: string }
 export const getLoginLogs = () => request<{ items: LoginLog[] }>("/api/admin/logins")

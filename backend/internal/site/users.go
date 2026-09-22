@@ -176,7 +176,7 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 			return false
 		}
 		switch module {
-		case "session", "stats":
+		case "session", "stats", "site-settings":
 			return true
 		case "sites", "languages", "categories", "models", "model-fields", "model-tables":
 			// Editor selectors require read-only site, model, language and category metadata.

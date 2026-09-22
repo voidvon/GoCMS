@@ -276,7 +276,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			return
 		}
 	}
-	if !user.hasPermission("content.review") {
+	if !user.HasPermissionInSite(targetSiteID, "content.review") {
 		// Editing already-public material also changes the published version.
 		// Require a reviewer instead of silently unpublishing existing content.
 		var previousVisible int64

@@ -478,6 +478,7 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 		"gocms_site_member",
 		"gocms_user_group",
 		"gocms_user",
+		"gocms_admin_operation",
 	}
 	for _, t := range tables {
 		var count int

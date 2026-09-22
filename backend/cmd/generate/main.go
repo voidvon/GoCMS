@@ -90,6 +90,12 @@ func main() {
 			if stat, err := os.Stat(tAssets); err == nil && stat.IsDir() {
 				assetsRoot = tAssets
 			}
+			if manifestBytes, err := os.ReadFile(filepath.Join(siteThemeDir, "theme.json")); err == nil {
+				var m theme.Manifest
+				if json.Unmarshal(manifestBytes, &m) == nil {
+					homeTpl = theme.Definition{Manifest: m}.HomeTemplate()
+				}
+			}
 		}
 
 		pub := generator.Publisher{
