@@ -227,7 +227,7 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 	rows, err := query.QueryContext(ctx, `
 		SELECT "id", "name", "code", "domain", "aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
 		FROM "`+SiteTable+`"
-		WHERE "domain" = ? AND "status" = 'active'
+		WHERE "domain" = ?
 		LIMIT 1`, host)
 	if err == nil {
 		defer rows.Close()
@@ -236,15 +236,12 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 		}
 	}
 
-	// 2. Scan all active sites to check aliases (exact match)
+	// 2. Scan all sites to check aliases (exact match)
 	sites, err := ListSites(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 	for _, s := range sites {
-		if s.Status != "active" {
-			continue
-		}
 		for _, alias := range s.Aliases {
 			if NormalizeDomain(alias) == host {
 				match := s
@@ -255,9 +252,6 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 
 	// 3. Scan wildcard domain or aliases (*.domain.com)
 	for _, s := range sites {
-		if s.Status != "active" {
-			continue
-		}
 		if matchHostPattern(s.Domain, host) {
 			match := s
 			return &match, nil

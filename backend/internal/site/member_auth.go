@@ -35,7 +35,11 @@ func (s *Server) userRegister(w http.ResponseWriter, r *http.Request) {
 	if !s.memberAttempt(w, r, "register", in.Username, 10) {
 		return
 	}
-	siteID, _ := s.resolveSiteID(r, nil)
+	siteID, err := s.resolveSiteID(r, nil)
+	if err != nil {
+		memberResult(w, nil, err)
+		return
+	}
 	p, err := (member.Service{DB: s.database}).Register(r.Context(), in.Username, in.Email, in.Password, siteID)
 	if err != nil {
 		memberResult(w, nil, err)
@@ -67,7 +71,11 @@ func (s *Server) userLogin(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie("gocms_user"); err == nil {
 		currentToken = cookie.Value
 	}
-	siteID, _ := s.resolveSiteID(r, nil)
+	siteID, err := s.resolveSiteID(r, nil)
+	if err != nil {
+		memberResult(w, nil, err)
+		return
+	}
 	p, token, err := (member.Service{DB: s.database}).Login(r.Context(), idf, in.Password, clientIP(r), r.UserAgent(), currentToken, siteID)
 	if err != nil {
 		memberResult(w, nil, err)

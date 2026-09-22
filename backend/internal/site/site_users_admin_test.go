@@ -836,5 +836,97 @@ func TestMultiSiteRound3AuditFixes(t *testing.T) {
 	}
 }
 
+func TestDisabledSiteAndSubsiteIsolation(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := db.CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+
+	siteRoot := t.TempDir()
+	s, err := New(database, siteRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Prepare files in siteRoot
+	if err := os.WriteFile(filepath.Join(siteRoot, "index.html"), []byte("Site 1 Index"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	subDir := filepath.Join(siteRoot, "sub2")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(subDir, "index.html"), []byte("Site 2 Index"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Create subsite in DB
+	site2, err := db.CreateSite(context.Background(), database, &db.Site{
+		Name:      "分站二",
+		Code:      "sub2",
+		Domain:    "sub2.test.local",
+		OutputDir: "sub2",
+		Status:    "active",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Test active subsite static serving
+	reqS2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqS2.Host = "sub2.test.local"
+	wS2 := httptest.NewRecorder()
+	s.Handler().ServeHTTP(wS2, reqS2)
+	if wS2.Code != 200 || !strings.Contains(wS2.Body.String(), "Site 2 Index") {
+		t.Fatalf("expected sub2 active to serve Site 2 Index, got %d: %s", wS2.Code, wS2.Body.String())
+	}
+
+	// 4. Test missing file on subsite returns 404 (does NOT leak site 1 index)
+	reqMissing := httptest.NewRequest(http.MethodGet, "/missing.html", nil)
+	reqMissing.Host = "sub2.test.local"
+	wMissing := httptest.NewRecorder()
+	s.Handler().ServeHTTP(wMissing, reqMissing)
+	if wMissing.Code != 404 {
+		t.Fatalf("expected sub2 missing file to return 404, got %d: %s", wMissing.Code, wMissing.Body.String())
+	}
+
+	// 5. Disable subsite in DB
+	site2.Status = "disabled"
+	if err := db.UpdateSite(context.Background(), database, site2); err != nil {
+		t.Fatal(err)
+	}
+
+	// 6. Request to disabled subsite static root must return 403
+	reqDisabled := httptest.NewRequest(http.MethodGet, "/", nil)
+	reqDisabled.Host = "sub2.test.local"
+	wDisabled := httptest.NewRecorder()
+	s.Handler().ServeHTTP(wDisabled, reqDisabled)
+	if wDisabled.Code != 403 || !strings.Contains(wDisabled.Body.String(), "站点已停用") {
+		t.Fatalf("expected disabled site to return 403, got %d: %s", wDisabled.Code, wDisabled.Body.String())
+	}
+
+	// 7. Public API to disabled subsite must return 403
+	reqPubAPI := httptest.NewRequest(http.MethodGet, "/api/content", nil)
+	reqPubAPI.Host = "sub2.test.local"
+	wPubAPI := httptest.NewRecorder()
+	s.Handler().ServeHTTP(wPubAPI, reqPubAPI)
+	if wPubAPI.Code != 403 {
+		t.Fatalf("expected public API on disabled site to return 403, got %d: %s", wPubAPI.Code, wPubAPI.Body.String())
+	}
+
+	// 8. Admin access to disabled site still succeeds for management
+	seedTestAdmin(t, s)
+	adminToken, _ := s.createSession("gocms")
+	wAdminSettings := categoryRequest(t, s, adminToken, "GET", fmt.Sprintf("/api/admin/site-settings?site_id=%d", site2.ID), "")
+	if wAdminSettings.Code != 200 {
+		t.Fatalf("expected admin to be able to manage disabled site settings, got %d: %s", wAdminSettings.Code, wAdminSettings.Body.String())
+	}
+}
+
+
 
 

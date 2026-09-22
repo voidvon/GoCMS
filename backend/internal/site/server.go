@@ -54,6 +54,12 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		if _, err := database.Exec(`CREATE INDEX IF NOT EXISTS "idx_gocms_admin_session_expiry" ON "gocms_admin_session" ("expires_at")`); err != nil {
 			return nil, fmt.Errorf("create admin session index: %w", err)
 		}
+		if err := db.EnsureSites(context.Background(), database); err != nil {
+			return nil, err
+		}
+		if err := db.EnsureSiteSettings(context.Background(), database); err != nil {
+			return nil, err
+		}
 		if err := db.EnsureAdminUsers(context.Background(), database); err != nil {
 			return nil, err
 		}
@@ -387,6 +393,10 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 			matched, _ = db.GetDefaultSite(request.Context(), s.database)
 		}
 		if matched != nil {
+			if matched.Status != "active" {
+				http.Error(response, "站点已停用", http.StatusForbidden)
+				return
+			}
 			siteDir := matched.OutputDir
 			if siteDir == "" && matched.ID > 0 {
 				siteDir = fmt.Sprintf("%d", matched.ID)
@@ -412,6 +422,11 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 						http.FileServer(http.Dir(siteDir)).ServeHTTP(response, request)
 						return
 					}
+				}
+				if !matched.IsDefault && matched.ID > 1 {
+					// Non-default sub-sites must never fall through to default site's files in siteRoot
+					http.NotFound(response, request)
+					return
 				}
 			}
 		}

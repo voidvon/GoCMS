@@ -492,22 +492,34 @@ export function SitesPage() {
               <div className="space-y-0.5">
                 <Label className="text-sm font-medium">设为默认站点</Label>
                 <p className="text-xs text-muted-foreground">
-                  当访问未绑定的域名或 IP 时，系统将回退到默认站点展示
+                  {editingSite?.is_default
+                    ? "当前为系统默认站点，不可直接取消；将其他站点设为默认时将自动接替"
+                    : "当访问未绑定的域名或 IP 时，系统将回退到默认站点展示"}
                 </p>
               </div>
               <Switch
                 checked={formData.is_default}
-                onCheckedChange={(checked) => setFormData({ ...formData, is_default: checked })}
+                disabled={editingSite?.is_default}
+                onCheckedChange={(checked) =>
+                  setFormData({
+                    ...formData,
+                    is_default: checked,
+                    status: checked ? "active" : formData.status,
+                  })
+                }
               />
             </div>
 
             <div className="flex items-center justify-between rounded-lg border p-3">
               <div className="space-y-0.5">
                 <Label className="text-sm font-medium">站点启用状态</Label>
-                <p className="text-xs text-muted-foreground">停用后前台将暂停服务</p>
+                <p className="text-xs text-muted-foreground">
+                  {formData.is_default ? "默认站点必须保持启用" : "停用后前台将暂停服务"}
+                </p>
               </div>
               <Switch
                 checked={formData.status === "active"}
+                disabled={formData.is_default}
                 onCheckedChange={(checked) =>
                   setFormData({ ...formData, status: checked ? "active" : "disabled" })
                 }

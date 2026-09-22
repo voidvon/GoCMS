@@ -670,7 +670,11 @@ func (s *Server) contentJSON(response http.ResponseWriter, request *http.Request
 		methodNotAllowed(response)
 		return
 	}
-	siteID, _ := s.resolveSiteID(request, nil)
+	siteID, err := s.resolveSiteID(request, nil)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
 	result, err := s.queryContent(request.Context(), siteID, query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
@@ -691,7 +695,11 @@ func (s *Server) contentJSONItem(response http.ResponseWriter, request *http.Req
 		http.Error(response, "invalid content id", http.StatusBadRequest)
 		return
 	}
-	siteID, _ := s.resolveSiteID(request, nil)
+	siteID, err := s.resolveSiteID(request, nil)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 	var contentSiteID int64
 	if err := s.database.QueryRowContext(request.Context(), `SELECT "site_id" FROM "gocms_content" WHERE "id" = ?`, id).Scan(&contentSiteID); err != nil {
 		if err == sql.ErrNoRows {

@@ -130,7 +130,11 @@ func (s *Server) feedbackSubmit(response http.ResponseWriter, request *http.Requ
 	ip := clientIP(request)
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	siteID, _ := s.resolveSiteID(request, nil)
+	siteID, err := s.resolveSiteID(request, nil)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusForbidden)
+		return
+	}
 
 
 	_, err = s.database.ExecContext(request.Context(), `

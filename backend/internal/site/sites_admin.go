@@ -90,6 +90,25 @@ func (s *Server) resolveSiteID(r *http.Request, user *AdminUser) (int64, error) 
 	if siteID <= 0 {
 		siteID = 1
 	}
+
+	if s.database != nil && r != nil {
+		target, err := db.GetSiteByID(r.Context(), s.database, siteID)
+		if err != nil || target == nil {
+			if user != nil {
+				return 0, errors.New("站点不存在")
+			}
+			if def, errDef := db.GetDefaultSite(r.Context(), s.database); errDef == nil && def != nil {
+				target = def
+				siteID = def.ID
+			} else {
+				return 0, errors.New("站点不存在")
+			}
+		}
+		if user == nil && target.Status != "active" {
+			return 0, errors.New("站点已停用")
+		}
+	}
+
 	if user != nil && !user.CanManageSite(siteID) {
 		return 0, errors.New("无权访问该站点")
 	}
