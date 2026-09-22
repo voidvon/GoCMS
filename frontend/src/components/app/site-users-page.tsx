@@ -30,9 +30,11 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { InlineAlert } from "@/components/app/app-ui"
+import { useSite } from "@/lib/site-context"
 
 
 export function SiteUsersPage() {
+  const { activeSite, activeSiteId } = useSite()
   const [items, setItems] = useState<SiteUser[]>([])
   const [total, setTotal] = useState(0)
   const [size, setSize] = useState(30)
@@ -59,8 +61,22 @@ export function SiteUsersPage() {
   const [expires, setExpires] = useState("")
 
   useEffect(() => {
+    setPage(1)
+    setSearch("")
+    setQuery("")
+    setSelectedGroup(null)
+    setMembers([])
+    setViewingGroupMembers(null)
+    setGroupForm(null)
+    setAssignUser(null)
+    setSessionUser(null)
+    setError("")
+    setNotice("")
+  }, [activeSiteId])
+
+  useEffect(() => {
     let active = true
-    getSiteUsers(page, query)
+    getSiteUsers(page, query, activeSiteId)
       .then((data) => {
         if (!active) return
         if (page > 1 && data.items.length === 0) {
@@ -80,22 +96,22 @@ export function SiteUsersPage() {
     return () => {
       active = false
     }
-  }, [page, query, version])
+  }, [page, query, version, activeSiteId])
 
   useEffect(() => {
-    getMemberGroups()
+    getMemberGroups(activeSiteId)
       .then((data) => {
         setGroups(data.items)
         setSelectedGroup((id) => (data.items.some((g) => g.id === id) ? id : data.items[0]?.id ?? null))
       })
       .catch((e: Error) => setError(e.message))
-  }, [version])
+  }, [version, activeSiteId])
 
   useEffect(() => {
     let active = true
     setMembers([])
     if (selectedGroup !== null) {
-      getMemberGroupMembers(selectedGroup)
+      getMemberGroupMembers(selectedGroup, activeSiteId)
         .then((data) => {
           if (active) setMembers(data.items)
         })
@@ -106,7 +122,7 @@ export function SiteUsersPage() {
     return () => {
       active = false
     }
-  }, [selectedGroup, version])
+  }, [selectedGroup, version, activeSiteId])
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true)
@@ -115,9 +131,8 @@ export function SiteUsersPage() {
     try {
       await action()
       setNotice("操作已完成")
-      setLoading(true)
-      setVersion((value) => value + 1)
-    } catch (e) {
+      setVersion((v) => v + 1)
+    } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "操作失败")
     } finally {
       setBusy(false)
@@ -129,6 +144,11 @@ export function SiteUsersPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <h2 className="font-medium text-base">前台用户</h2>
+          {activeSite && (
+            <Badge variant="outline" className="text-xs">
+              {activeSite.name}
+            </Badge>
+          )}
           <Button
             variant="outline"
             size="sm"

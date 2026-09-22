@@ -22,7 +22,7 @@ func TokenHash(token string) string {
 	v := sha256.Sum256([]byte(token))
 	return base64.RawURLEncoding.EncodeToString(v[:])
 }
-func (s Service) Register(ctx context.Context, username, email, password string) (Profile, error) {
+func (s Service) Register(ctx context.Context, username, email, password string, siteID ...int64) (Profile, error) {
 	username = strings.TrimSpace(username)
 	email = strings.ToLower(strings.TrimSpace(email))
 	if len(username) < 3 || len(username) > 64 || strings.ContainsAny(username, "@ \t\n\r") || len(password) < 8 || len(password) > 1024 || len(email) > 254 {
@@ -38,7 +38,11 @@ func (s Service) Register(ctx context.Context, username, email, password string)
 	if err != nil {
 		return Profile{}, err
 	}
-	result, err := s.DB.ExecContext(ctx, "INSERT INTO gocms_user(username,email,password_hash,display_name) VALUES(?,?,?,?)", username, email, encoded, username)
+	sid := int64(1)
+	if len(siteID) > 0 && siteID[0] > 0 {
+		sid = siteID[0]
+	}
+	result, err := s.DB.ExecContext(ctx, "INSERT INTO gocms_user(site_id,username,email,password_hash,display_name) VALUES(?,?,?,?,?)", sid, username, email, encoded, username)
 	if err != nil {
 		var constraint interface{ Code() int }
 		if errors.As(err, &constraint) && constraint.Code()&255 == 19 {
@@ -50,6 +54,7 @@ func (s Service) Register(ctx context.Context, username, email, password string)
 	if err != nil {
 		return Profile{}, err
 	}
+	_, _ = s.DB.ExecContext(ctx, "INSERT OR IGNORE INTO gocms_site_member(site_id,user_id,display_name,status) VALUES(?,?,?,?)", sid, id, username, "active")
 	return s.Profile(ctx, id)
 }
 func (s Service) Login(ctx context.Context, identifier, password, ip, agent string, currentToken string) (Profile, string, error) {

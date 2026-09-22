@@ -94,6 +94,7 @@ const mainNavItems: NavigationItem[] = [
   { id: "categories", label: "分类", icon: FolderTree },
   { id: "languages", label: "多语言", icon: Languages },
   { id: "messages", label: "信息反馈", icon: MessageSquareText },
+  { id: "members", label: "会员管理", icon: UserCheck },
   { id: "publish", label: "网站发布", icon: Globe },
   { id: "theme", label: "模板管理", icon: Palette },
 ]
@@ -101,14 +102,13 @@ const mainNavItems: NavigationItem[] = [
 const platformNavItems: NavigationItem[] = [
   { id: "sites", label: "多站点", icon: Globe },
   { id: "users", label: "用户管理", icon: Users },
-  { id: "members", label: "会员管理", icon: UserCheck },
   { id: "models", label: "系统模型", icon: Boxes },
   { id: "api-keys", label: "API Key", icon: KeyRound },
   { id: "logs", label: "操作日志", icon: ScrollText },
 ]
 
 function canView(user: AdminUser, view: AdminView, activeSiteId?: number) {
-  if (view === "sites" || view === "users" || view === "members") return user.is_super
+  if (view === "sites" || view === "users") return user.is_super
   if (view === "logs") return user.is_super || user.permissions.includes("logs") || user.permissions.includes("login_logs")
   if (user.is_super || view === "overview") return true
   if (activeSiteId && user.site_permissions && user.site_permissions[activeSiteId]) {
@@ -347,13 +347,13 @@ function viewMeta(view: AdminView): { parent?: string; title: string; descriptio
     case "logs":
       return { parent: "平台管理", title: "操作日志", description: "查看后台操作记录" }
     case "members":
-      return { parent: "平台管理", title: "会员管理", description: "管理前台会员、会员组和 VIP 有效期" }
+      return { title: "会员管理", description: "管理前台会员、会员组和 VIP 有效期" }
     case "users":
       return { parent: "平台管理", title: "用户管理", description: "管理后台账号、用户组和模块权限" }
     case "models":
       return { parent: "平台管理", title: "系统模型", description: "管理数据表、扩展字段与系统内容模型" }
     case "api-keys":
-      return { parent: "平台管理", title: "API Key", description: "管理用于外部系统调用接口的 API 凭据" }
+      return { parent: "平台管理", title: "API Key", description: "管理用于外部系统调用接口的 API凭据" }
     case "media":
       return { title: "附件管理", description: "管理全站上传图片及内容引用" }
     case "publish":
@@ -374,7 +374,8 @@ function viewMeta(view: AdminView): { parent?: string; title: string; descriptio
 }
 
 function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
-  if (!canView(user, view)) return <p className="text-sm text-muted-foreground">当前用户组没有此模块的管理权限。</p>
+  const { activeSite } = useSite()
+  if (!canView(user, view, activeSite?.id)) return <p className="text-sm text-muted-foreground">当前用户组没有此模块的管理权限。</p>
   switch (view) {
     case "sites":
       return <SitesPage />

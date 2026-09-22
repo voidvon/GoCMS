@@ -19,8 +19,23 @@ type siteUserAdminItem struct {
 }
 
 func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
+	user := s.currentAdmin(r)
+	if user == nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或账号已停用"})
+		return
+	}
+	siteID, err := s.resolveSiteID(r, user)
+	if err != nil || siteID <= 0 {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权访问该站点"})
+		return
+	}
+	if !user.HasPermissionInSite(siteID, "members") {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此会员管理权限"})
+		return
+	}
+
 	if r.Method == http.MethodGet {
-		s.listSiteUsers(w, r)
+		s.listSiteUsers(w, r, siteID)
 		return
 	}
 	if r.Method != http.MethodPatch && r.Method != http.MethodDelete {
@@ -52,11 +67,11 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	query := "UPDATE gocms_user SET status=COALESCE(NULLIF(?,''),status), max_sessions=COALESCE(?,max_sessions), updated_at=CURRENT_TIMESTAMP WHERE id=?"
-	args := []any{status, in.MaxSessions, in.ID}
+	query := "UPDATE gocms_user SET status=COALESCE(NULLIF(?,''),status), max_sessions=COALESCE(?,max_sessions), updated_at=CURRENT_TIMESTAMP WHERE id=? AND site_id=?"
+	args := []any{status, in.MaxSessions, in.ID, siteID}
 	if r.Method == http.MethodDelete {
-		query = "DELETE FROM gocms_user WHERE id=?"
-		args = []any{in.ID}
+		query = "DELETE FROM gocms_user WHERE id=? AND site_id=?"
+		args = []any{in.ID, siteID}
 	}
 	result, err := tx.ExecContext(r.Context(), query, args...)
 	if err != nil {
@@ -72,8 +87,12 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if r.Method == http.MethodDelete || (status != "" && status != "active") || in.RevokeSessions {
-		if _, err := tx.ExecContext(r.Context(), "DELETE FROM gocms_user_session WHERE user_id=?", in.ID); err != nil {
+	if r.Method == http.MethodDelete {
+		_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_site_member WHERE user_id=? AND site_id=?", in.ID, siteID)
+		_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_user_group_member WHERE user_id=?", in.ID)
+		_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_user_session WHERE user_id=?", in.ID)
+	} else if (status != "" && status != "active") || in.RevokeSessions {
+		if _, err := tx.ExecContext(r.Context(), "DELETE FROM gocms_user_session WHERE user_id=? AND user_id IN (SELECT id FROM gocms_user WHERE id=? AND site_id=?)", in.ID, in.ID, siteID); err != nil {
 			accountError(w, err)
 			return
 		}
@@ -86,7 +105,7 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
-func (s *Server) listSiteUsers(w http.ResponseWriter, r *http.Request) {
+func (s *Server) listSiteUsers(w http.ResponseWriter, r *http.Request, siteID int64) {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page > 1000000 {
 		page = 1000000
@@ -101,11 +120,11 @@ func (s *Server) listSiteUsers(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	like := "%" + q + "%"
 	var total int64
-	if err := s.database.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_user WHERE (?='' OR username LIKE ? OR email LIKE ? OR display_name LIKE ?)`, q, like, like, like).Scan(&total); err != nil {
+	if err := s.database.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM gocms_user WHERE site_id=? AND (?='' OR username LIKE ? OR email LIKE ? OR display_name LIKE ?)`, siteID, q, like, like, like).Scan(&total); err != nil {
 		http.Error(w, "database error", 500)
 		return
 	}
-	rows, err := s.database.QueryContext(r.Context(), `SELECT id,username,email,display_name,status,max_sessions,created_at,COALESCE(last_login_at,'') FROM gocms_user WHERE (?='' OR username LIKE ? OR email LIKE ? OR display_name LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?`, q, like, like, like, size, (page-1)*size)
+	rows, err := s.database.QueryContext(r.Context(), `SELECT id,username,email,display_name,status,max_sessions,created_at,COALESCE(last_login_at,'') FROM gocms_user WHERE site_id=? AND (?='' OR username LIKE ? OR email LIKE ? OR display_name LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?`, siteID, q, like, like, like, size, (page-1)*size)
 	if err != nil {
 		http.Error(w, "database error", 500)
 		return

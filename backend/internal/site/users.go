@@ -22,6 +22,7 @@ var adminPermissions = []struct {
 	{"content.add", "新增内容"}, {"content.edit", "修改内容"},
 	{"content.delete", "删除内容"}, {"content.review", "审核并公开内容"},
 	{"media", "附件管理"}, {"messages", "信息反馈"},
+	{"members", "会员管理"},
 	{"models", "系统模型"}, {"theme", "模板管理"},
 	{"publish", "网站发布"}, {"languages", "语言配置"},
 	{"logs", "查看操作日志"},
@@ -131,15 +132,27 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 		module = "login_logs"
 	}
 	*r = *r.WithContext(context.WithValue(r.Context(), contentScopeKey{}, u))
-	// API keys cannot administer accounts or groups even when owned by a super administrator.
-	if module == "users" || module == "groups" || module == "site-users" || module == "member-groups" || (module == "sites" && r.Method != http.MethodGet) {
+	// API keys cannot administer accounts or groups or member accounts even when owned by a super administrator.
+	if module == "users" || module == "groups" || module == "site-users" || module == "member-groups" {
+		if !session {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "API Key 无权管理用户或会员"})
+			return false
+		}
+	}
+	if module == "users" || module == "groups" || (module == "sites" && r.Method != http.MethodGet) {
 		if u.IsSuper && session {
 			return true
 		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此操作权限"})
+		return false
 	} else if u.IsSuper {
 		return true
 	} else {
-		siteID, _ := s.resolveSiteID(r, u)
+		siteID, err := s.resolveSiteID(r, u)
+		if err != nil {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权访问该站点"})
+			return false
+		}
 		hasPerm := func(key string) bool {
 			if siteID > 0 {
 				return u.HasPermissionInSite(siteID, key)
@@ -178,6 +191,8 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 			module = "models"
 		case "feedback", "feedback-classes", "feedback-fields":
 			module = "messages"
+		case "site-users", "member-groups":
+			module = "members"
 		}
 		if hasPerm(module) {
 			return true

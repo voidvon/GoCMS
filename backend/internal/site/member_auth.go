@@ -35,7 +35,8 @@ func (s *Server) userRegister(w http.ResponseWriter, r *http.Request) {
 	if !s.memberAttempt(w, r, "register", in.Username, 10) {
 		return
 	}
-	p, err := (member.Service{DB: s.database}).Register(r.Context(), in.Username, in.Email, in.Password)
+	siteID, _ := s.resolveSiteID(r, nil)
+	p, err := (member.Service{DB: s.database}).Register(r.Context(), in.Username, in.Email, in.Password, siteID)
 	if err != nil {
 		memberResult(w, nil, err)
 		return
