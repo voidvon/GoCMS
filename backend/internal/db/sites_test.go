@@ -88,6 +88,18 @@ func TestCreateSiteAndUniqueCode(t *testing.T) {
 	if len(found.Aliases) != 2 {
 		t.Errorf("expected 2 aliases, got %d", len(found.Aliases))
 	}
+
+	// Verify site_name and site_url settings are seeded
+	settings, err := LoadSiteSettingsForSite(context.Background(), database, created.ID)
+	if err != nil {
+		t.Fatalf("LoadSiteSettingsForSite failed: %v", err)
+	}
+	if settings["site_name"] != "技术博客" {
+		t.Errorf("expected site_name '技术博客', got %q", settings["site_name"])
+	}
+	if settings["site_url"] != "https://blog.example.com" {
+		t.Errorf("expected site_url 'https://blog.example.com', got %q", settings["site_url"])
+	}
 }
 
 func TestGetSiteByHostAndAliases(t *testing.T) {

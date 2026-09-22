@@ -351,6 +351,14 @@ func CreateSite(ctx context.Context, database *sql.DB, s *Site) (*Site, error) {
 		VALUES (?, 'site_name', ?, CURRENT_TIMESTAMP)`, siteID, s.Name); err != nil {
 		return nil, err
 	}
+	if s.Domain != "" {
+		siteURL := "https://" + s.Domain
+		if _, err := tx.ExecContext(ctx, `
+			INSERT OR IGNORE INTO "`+siteSettingsTable+`" ("site_id", "key", "value", "updated_at")
+			VALUES (?, 'site_url', ?, CURRENT_TIMESTAMP)`, siteID, siteURL); err != nil {
+			return nil, err
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -390,7 +398,7 @@ func UpdateSite(ctx context.Context, database *sql.DB, s *Site) error {
 
 	if s.IsDefault {
 		if _, err := tx.ExecContext(ctx, `UPDATE "`+SiteTable+`" SET "is_default" = 0 WHERE "id" <> ?`, s.ID); err != nil {
-			return nil
+			return fmt.Errorf("reset other default sites: %w", err)
 		}
 	}
 
@@ -410,6 +418,26 @@ func UpdateSite(ctx context.Context, database *sql.DB, s *Site) error {
 	affected, err := res.RowsAffected()
 	if err != nil || affected == 0 {
 		return sql.ErrNoRows
+	}
+
+	// Keep site_name setting in sync
+	_, _ = tx.ExecContext(ctx, `
+		INSERT INTO "`+siteSettingsTable+`" ("site_id", "key", "value", "updated_at")
+		VALUES (?, 'site_name', ?, CURRENT_TIMESTAMP)
+		ON CONFLICT("site_id", "key") DO UPDATE SET "value" = excluded."value", "updated_at" = CURRENT_TIMESTAMP`,
+		s.ID, s.Name)
+
+	// If site_url is empty in settings and domain is provided, populate it
+	if s.Domain != "" {
+		var existingURL string
+		_ = tx.QueryRowContext(ctx, `SELECT "value" FROM "`+siteSettingsTable+`" WHERE "site_id" = ? AND "key" = 'site_url'`, s.ID).Scan(&existingURL)
+		if strings.TrimSpace(existingURL) == "" {
+			_, _ = tx.ExecContext(ctx, `
+				INSERT INTO "`+siteSettingsTable+`" ("site_id", "key", "value", "updated_at")
+				VALUES (?, 'site_url', ?, CURRENT_TIMESTAMP)
+				ON CONFLICT("site_id", "key") DO UPDATE SET "value" = excluded."value", "updated_at" = CURRENT_TIMESTAMP`,
+				s.ID, "https://"+s.Domain)
+		}
 	}
 
 	return tx.Commit()

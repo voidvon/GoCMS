@@ -5,6 +5,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Settings,
   Star,
   Trash2,
   CheckCircle2,
@@ -12,7 +13,9 @@ import {
 
 import {
   deleteSite,
+  getSiteSettings,
   saveSite,
+  saveSiteSettings,
   type Site,
 } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
@@ -72,6 +75,85 @@ export function SitesPage() {
   // Delete Confirm Dialog state
   const [deleteTarget, setDeleteTarget] = useState<Site | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Site Settings Dialog state
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false)
+  const [settingsSite, setSettingsSite] = useState<Site | null>(null)
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const [settingsSaving, setSettingsSaving] = useState(false)
+  const [standardSettings, setStandardSettings] = useState<Record<string, string>>({
+    site_name: "",
+    site_url: "",
+    site_keywords: "",
+    site_description: "",
+    icp_beian: "",
+    police_beian: "",
+    copyright: "",
+  })
+  const [customSettingsList, setCustomSettingsList] = useState<Array<{ key: string; value: string }>>([])
+  const [settingsError, setSettingsError] = useState("")
+
+  const handleOpenSettings = async (site: Site) => {
+    setSettingsSite(site)
+    setSettingsDialogOpen(true)
+    setSettingsLoading(true)
+    setSettingsError("")
+    try {
+      const data = await getSiteSettings(site.id)
+      const stdKeys = new Set([
+        "site_name",
+        "site_url",
+        "site_keywords",
+        "site_description",
+        "icp_beian",
+        "police_beian",
+        "copyright",
+      ])
+      setStandardSettings({
+        site_name: data.site_name || site.name || "",
+        site_url: data.site_url || (site.domain ? `https://${site.domain}` : ""),
+        site_keywords: data.site_keywords || data.keywords || "",
+        site_description: data.site_description || data.description || "",
+        icp_beian: data.icp_beian || data.icp || "",
+        police_beian: data.police_beian || "",
+        copyright: data.copyright || "",
+      })
+      const custom: Array<{ key: string; value: string }> = []
+      for (const [k, v] of Object.entries(data)) {
+        if (!stdKeys.has(k) && k !== "keywords" && k !== "description" && k !== "icp") {
+          custom.push({ key: k, value: v })
+        }
+      }
+      setCustomSettingsList(custom)
+    } catch (err: unknown) {
+      setSettingsError(err instanceof Error ? err.message : "加载站点配置失败")
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!settingsSite) return
+    setSettingsSaving(true)
+    setSettingsError("")
+    try {
+      const merged: Record<string, string> = { ...standardSettings }
+      for (const item of customSettingsList) {
+        const k = item.key.trim()
+        if (k) {
+          merged[k] = item.value
+        }
+      }
+      await saveSiteSettings(merged, settingsSite.id)
+      showSuccess(`站点“${settingsSite.name}”配置已保存`)
+      setSettingsDialogOpen(false)
+    } catch (err: unknown) {
+      setSettingsError(err instanceof Error ? err.message : "保存配置失败")
+    } finally {
+      setSettingsSaving(false)
+    }
+  }
 
   const handleOpenAdd = () => {
     setEditingSite(null)
@@ -292,6 +374,15 @@ export function SitesPage() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => void handleOpenSettings(site)}
+                          title="站点参数配置"
+                        >
+                          <Settings className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
                           onClick={() => handleOpenEdit(site)}
                           title="编辑站点"
                         >
@@ -433,6 +524,179 @@ export function SitesPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Site Parameters / Global Settings Dialog */}
+      <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>站点参数配置 - {settingsSite?.name}</DialogTitle>
+            <DialogDescription>
+              配置该站点的全局变量与模板标签参数（对应模板中的 {"{{setting \"key\"}}"} ），保存后静态发布即时生效。
+            </DialogDescription>
+          </DialogHeader>
+          {settingsError && <InlineAlert>{settingsError}</InlineAlert>}
+          {settingsLoading ? (
+            <div className="flex h-48 items-center justify-center">
+              <LoaderCircle className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <form onSubmit={handleSaveSettings} className="space-y-4 overflow-y-auto pr-1 flex-1 py-2">
+              <div className="space-y-3 rounded-lg border p-3.5 bg-muted/20">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">基础与链接</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="std-site-name" className="text-xs">站点全称 (site_name)</Label>
+                    <Input
+                      id="std-site-name"
+                      className="h-8 text-xs"
+                      value={standardSettings.site_name}
+                      onChange={(e) => setStandardSettings({ ...standardSettings, site_name: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="std-site-url" className="text-xs">站点主网址 (site_url)</Label>
+                    <Input
+                      id="std-site-url"
+                      className="h-8 text-xs"
+                      placeholder="https://example.com"
+                      value={standardSettings.site_url}
+                      onChange={(e) => setStandardSettings({ ...standardSettings, site_url: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border p-3.5 bg-muted/20">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">SEO 与元信息</h4>
+                <div className="space-y-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="std-site-keywords" className="text-xs">全局关键词 (site_keywords)</Label>
+                    <Input
+                      id="std-site-keywords"
+                      className="h-8 text-xs"
+                      placeholder="关键词用逗号隔开"
+                      value={standardSettings.site_keywords}
+                      onChange={(e) => setStandardSettings({ ...standardSettings, site_keywords: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="std-site-description" className="text-xs">全局描述 (site_description)</Label>
+                    <Textarea
+                      id="std-site-description"
+                      className="text-xs min-h-[60px]"
+                      rows={2}
+                      placeholder="网站的默认描述信息"
+                      value={standardSettings.site_description}
+                      onChange={(e) => setStandardSettings({ ...standardSettings, site_description: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border p-3.5 bg-muted/20">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">备案与版权</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="std-icp" className="text-xs">ICP 备案号 (icp_beian)</Label>
+                    <Input
+                      id="std-icp"
+                      className="h-8 text-xs"
+                      placeholder="例如：京ICP备12345678号"
+                      value={standardSettings.icp_beian}
+                      onChange={(e) => setStandardSettings({ ...standardSettings, icp_beian: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="std-police" className="text-xs">公安联网备案号 (police_beian)</Label>
+                    <Input
+                      id="std-police"
+                      className="h-8 text-xs"
+                      placeholder="例如：京公网安备11010802020110号"
+                      value={standardSettings.police_beian}
+                      onChange={(e) => setStandardSettings({ ...standardSettings, police_beian: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="std-copyright" className="text-xs">版权声明 (copyright)</Label>
+                  <Input
+                    id="std-copyright"
+                    className="h-8 text-xs"
+                    placeholder="例如：© 2026 某某公司 版权所有"
+                    value={standardSettings.copyright}
+                    onChange={(e) => setStandardSettings({ ...standardSettings, copyright: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border p-3.5 bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">自定义扩展参数</h4>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs gap-1"
+                    onClick={() => setCustomSettingsList([...customSettingsList, { key: "", value: "" }])}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    添加参数
+                  </Button>
+                </div>
+                {customSettingsList.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">暂无自定义参数，可按需添加自定义 Key-Value 并在模板中调用。</p>
+                ) : (
+                  <div className="space-y-2">
+                    {customSettingsList.map((item, index) => (
+                      <div key={index} className="flex items-center gap-2">
+                        <Input
+                          placeholder="键名 (key)"
+                          className="h-8 text-xs w-1/3 font-mono"
+                          value={item.key}
+                          onChange={(e) => {
+                            const updated = [...customSettingsList]
+                            updated[index].key = e.target.value
+                            setCustomSettingsList(updated)
+                          }}
+                        />
+                        <Input
+                          placeholder="配置值 (value)"
+                          className="h-8 text-xs flex-1"
+                          value={item.value}
+                          onChange={(e) => {
+                            const updated = [...customSettingsList]
+                            updated[index].value = e.target.value
+                            setCustomSettingsList(updated)
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          onClick={() => setCustomSettingsList(customSettingsList.filter((_, i) => i !== index))}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter className="pt-2 sticky bottom-0 bg-background pb-1">
+                <Button type="button" variant="outline" onClick={() => setSettingsDialogOpen(false)}>
+                  取消
+                </Button>
+                <Button type="submit" disabled={settingsSaving}>
+                  {settingsSaving && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
+                  保存配置
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
 
