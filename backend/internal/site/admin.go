@@ -131,6 +131,7 @@ type categoryPayload struct {
 	Name              string                             `json:"name"`
 	ParentID          int64                              `json:"parent_id"`
 	OrderID           int64                              `json:"order_id"`
+	RouteID           int64                              `json:"route_id,omitempty"`
 	ListPageSize      int64                              `json:"list_page_size"`
 	PageType          string                             `json:"page_type"`
 	ListPath          string                             `json:"list_path"`
@@ -544,7 +545,11 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
-		if _, err := s.database.ExecContext(request.Context(), `UPDATE "gocms_category" SET "route_id" = ? WHERE "id" = ?`, newID, newID); err != nil {
+		routeID := payload.RouteID
+		if routeID <= 0 {
+			routeID = newID
+		}
+		if _, err := s.database.ExecContext(request.Context(), `UPDATE "gocms_category" SET "route_id" = ? WHERE "id" = ?`, routeID, newID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -573,11 +578,16 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			})
 		}
 
+		routeID := payload.RouteID
+		if routeID <= 0 {
+			routeID = id
+		}
+
 		if requestedLang == defaultLang || payload.Translations != nil {
 			result, err := s.database.ExecContext(request.Context(), `
-				UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "list_page_size" = ?, "page_type" = ?,
+				UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "route_id" = ?, "list_page_size" = ?, "page_type" = ?,
 				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "keywords" = ?, "description" = ?, "cover_content" = ?, "model_id" = ?, "link_url" = ?, "nav_position" = ? WHERE "id" = ?`,
-				payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL, payload.NavPosition, id)
+				payload.Name, payload.ParentID, payload.OrderID, routeID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL, payload.NavPosition, id)
 			if err != nil {
 				http.Error(response, "database error", http.StatusInternalServerError)
 				return
@@ -589,9 +599,9 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			}
 		} else {
 			result, err := s.database.ExecContext(request.Context(), `
-				UPDATE "gocms_category" SET "parent_id" = ?, "order_id" = ?, "list_page_size" = ?, "page_type" = ?,
+				UPDATE "gocms_category" SET "parent_id" = ?, "order_id" = ?, "route_id" = ?, "list_page_size" = ?, "page_type" = ?,
 				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "model_id" = ?, "link_url" = ?, "nav_position" = ? WHERE "id" = ?`,
-				payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.ModelID, payload.LinkURL, payload.NavPosition, id)
+				payload.ParentID, payload.OrderID, routeID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.ModelID, payload.LinkURL, payload.NavPosition, id)
 			if err != nil {
 				http.Error(response, "database error", http.StatusInternalServerError)
 				return
@@ -610,9 +620,9 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, siteID, id int64, 
 	var current categoryPayload
 	if id > 0 {
 		err := s.database.QueryRowContext(ctx, `
-			SELECT "list_page_size", "page_type", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", COALESCE("model_id", 1), COALESCE("link_url", ''), COALESCE("nav_position", 'main')
+			SELECT "list_page_size", "page_type", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", COALESCE("model_id", 1), COALESCE("link_url", ''), COALESCE("nav_position", 'main'), COALESCE("route_id", 0)
 			FROM "gocms_category" WHERE "id" = ?`, id).
-			Scan(&current.ListPageSize, &current.PageType, &current.ListPath, &current.ListFilePattern, &current.ListTemplate, &current.CoverTemplate, &current.DetailPath, &current.DetailFilePattern, &current.DetailTemplate, &current.ModelID, &current.LinkURL, &current.NavPosition)
+			Scan(&current.ListPageSize, &current.PageType, &current.ListPath, &current.ListFilePattern, &current.ListTemplate, &current.CoverTemplate, &current.DetailPath, &current.DetailFilePattern, &current.DetailTemplate, &current.ModelID, &current.LinkURL, &current.NavPosition, &current.RouteID)
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("分类不存在")
 		}
@@ -623,6 +633,9 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, siteID, id int64, 
 			payload.ModelID = current.ModelID
 		} else if payload.ModelID < 1 {
 			payload.ModelID = current.ModelID
+		}
+		if payload.RouteID <= 0 {
+			payload.RouteID = current.RouteID
 		}
 		if payload.ListPath == "" {
 			payload.ListPath = current.ListPath

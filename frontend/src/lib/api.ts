@@ -111,6 +111,7 @@ export type Content = {
 }
 
 export type ContentInput = Omit<Content, "id" | "route_key"> & {
+  route_key?: string
   translations?: Record<string, ContentTranslationItem>
 }
 
@@ -279,6 +280,7 @@ export type CategoryItem = {
 }
 
 export type CategoryInput = Omit<CategoryItem, "id" | "route_id" | "content_count"> & {
+  route_id?: number
   translations?: Record<string, CategoryTranslationItem>
 }
 

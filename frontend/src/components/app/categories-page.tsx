@@ -181,6 +181,7 @@ function categoryInput(category: CategoryItem, templateGroups: ThemeTemplateGrou
     name: category.name,
     parent_id: category.parent_id,
     order_id: category.order_id,
+    route_id: category.route_id,
     list_page_size: category.list_page_size,
     page_type: category.page_type || "list",
     list_path: category.list_path,
@@ -676,6 +677,18 @@ export function CategoriesPage() {
                       <Label htmlFor="category-order">排序值</Label>
                       <Input id="category-order" type="number" min="0" value={form.order_id} onChange={(event) => update("order_id", Number(event.target.value))} />
                       <p className="text-xs text-muted-foreground">数值越小越靠前。</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="category-route-id">自定义路由编号 (Route ID)</Label>
+                      <Input
+                        id="category-route-id"
+                        type="number"
+                        min="0"
+                        value={form.route_id || ""}
+                        onChange={(event) => update("route_id", Number(event.target.value))}
+                        placeholder="默认自增ID (如 1)"
+                      />
+                      <p className="text-xs text-muted-foreground">用于生成如 /valve/1.html 的分类列表文件名，便于旧站精准匹配。</p>
                     </div>
                     {form.page_type === "link" ? (
                       <div className="space-y-2 sm:col-span-2">

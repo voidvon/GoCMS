@@ -1223,7 +1223,7 @@ function ContentEditor({
             {/* 发布与展示属性 */}
             <div className="space-y-3 rounded-lg border p-3.5 bg-card">
               <p className="text-sm font-semibold text-muted-foreground border-b pb-1.5">发布与展示属性</p>
-              <div className="grid gap-3 sm:grid-cols-3 items-center">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 items-center">
                 <div className="space-y-1">
                   <Label htmlFor="content-order">显示排序权重</Label>
                   <Input
@@ -1233,6 +1233,15 @@ function ContentEditor({
                     value={form.order_id}
                     onChange={(e) => update("order_id", Number(e.target.value))}
                     placeholder="数字越大越靠前"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="content-route-key">自定义文件名 (Route Key)</Label>
+                  <Input
+                    id="content-route-key"
+                    value={form.route_key || ""}
+                    onChange={(e) => update("route_key", e.target.value.trim())}
+                    placeholder="留空为系统ID (如 412)"
                   />
                 </div>
                 <div className="flex items-center justify-between rounded-md border p-2.5">
@@ -1430,6 +1439,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
       featured: editingDetail.featured,
       visible: editingDetail.visible,
       model_id: editingDetail.model_id ?? 1,
+      route_key: editingDetail.route_key,
       extra_data: editingDetail.extra_data ?? {},
     }
   }, [editingDetail, categoryID, categoryOptions])

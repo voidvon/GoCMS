@@ -317,3 +317,71 @@ func TestCategoryNavPosition(t *testing.T) {
 	}
 }
 
+func TestCustomRouteIDAndRouteKey(t *testing.T) {
+	server, database, token := newCategoryTestServer(t)
+
+	// 1. Create category with custom route_id
+	catPayload := `{"name":"疏水阀","parent_id":0,"order_id":1,"route_id":100,"list_path":"valve","detail_path":"product"}`
+	resp := categoryRequest(t, server, token, http.MethodPost, "/api/admin/categories", catPayload)
+	if resp.Code != http.StatusOK {
+		t.Fatalf("create category failed: %d %s", resp.Code, resp.Body.String())
+	}
+	catID := categoryID(t, database, "疏水阀")
+	var routeID int64
+	if err := database.QueryRow(`SELECT "route_id" FROM "gocms_category" WHERE "id" = ?`, catID).Scan(&routeID); err != nil {
+		t.Fatal(err)
+	}
+	if routeID != 100 {
+		t.Fatalf("expected route_id 100, got %d", routeID)
+	}
+
+	// 2. Update category with new custom route_id
+	updateCat := `{"name":"疏水阀","parent_id":0,"order_id":1,"route_id":88,"list_path":"valve","detail_path":"product"}`
+	updateResp := categoryRequest(t, server, token, http.MethodPut, "/api/admin/categories/"+strconv.FormatInt(catID, 10), updateCat)
+	if updateResp.Code != http.StatusOK {
+		t.Fatalf("update category failed: %d %s", updateResp.Code, updateResp.Body.String())
+	}
+	if err := database.QueryRow(`SELECT "route_id" FROM "gocms_category" WHERE "id" = ?`, catID).Scan(&routeID); err != nil {
+		t.Fatal(err)
+	}
+	if routeID != 88 {
+		t.Fatalf("expected updated route_id 88, got %d", routeID)
+	}
+
+	// 3. Create content with custom route_key
+	contentPayload := `{"title":"BTM7疏水阀","category_id":` + strconv.FormatInt(catID, 10) + `,"route_key":"412"}`
+	contentResp := categoryRequest(t, server, token, http.MethodPost, "/api/admin/content", contentPayload)
+	if contentResp.Code != http.StatusOK {
+		t.Fatalf("create content failed: %d %s", contentResp.Code, contentResp.Body.String())
+	}
+	var contentID int64
+	var routeKey string
+	if err := database.QueryRow(`SELECT "id", "route_key" FROM "gocms_content" WHERE "title" = 'BTM7疏水阀'`).Scan(&contentID, &routeKey); err != nil {
+		t.Fatal(err)
+	}
+	if routeKey != "412" {
+		t.Fatalf("expected route_key 412, got %q", routeKey)
+	}
+
+	// 4. Update content with new custom route_key
+	updateContent := `{"title":"BTM7疏水阀","category_id":` + strconv.FormatInt(catID, 10) + `,"route_key":"btm7-valve"}`
+	updateContentResp := categoryRequest(t, server, token, http.MethodPut, "/api/admin/content/"+strconv.FormatInt(contentID, 10), updateContent)
+	if updateContentResp.Code != http.StatusOK {
+		t.Fatalf("update content failed: %d %s", updateContentResp.Code, updateContentResp.Body.String())
+	}
+	if err := database.QueryRow(`SELECT "route_key" FROM "gocms_content" WHERE "id" = ?`, contentID).Scan(&routeKey); err != nil {
+		t.Fatal(err)
+	}
+	if routeKey != "btm7-valve" {
+		t.Fatalf("expected updated route_key btm7-valve, got %q", routeKey)
+	}
+
+	// 5. Verify illegal route_key rejected
+	invalidPayload := `{"title":"非法路径文章","category_id":` + strconv.FormatInt(catID, 10) + `,"route_key":"bad/key"}`
+	invalidResp := categoryRequest(t, server, token, http.MethodPost, "/api/admin/content", invalidPayload)
+	if invalidResp.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for illegal route_key, got %d", invalidResp.Code)
+	}
+}
+
+

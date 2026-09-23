@@ -52,6 +52,7 @@ type ContentPage struct {
 type contentPayload struct {
 	Lang          string                            `json:"lang,omitempty"`
 	Translations  map[string]ContentTranslationItem `json:"translations,omitempty"`
+	RouteKey      string                            `json:"route_key,omitempty"`
 	Title         string                            `json:"title"`
 	Code          string                            `json:"code"`
 	Category      int64                             `json:"category_id"`
@@ -215,6 +216,11 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		http.Error(response, "content title is required", http.StatusBadRequest)
 		return
 	}
+	payload.RouteKey = strings.TrimSpace(payload.RouteKey)
+	if payload.RouteKey != "" && strings.ContainsAny(payload.RouteKey, `/\\?#%`) {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "route_key 包含非法字符"})
+		return
+	}
 	if payload.OrderID < 0 {
 		payload.OrderID = 0
 	}
@@ -347,7 +353,11 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
-		if _, err := transaction.ExecContext(request.Context(), `UPDATE "gocms_content" SET "route_key" = ? WHERE "id" = ?`, strconv.FormatInt(newID, 10), newID); err != nil {
+		routeKey := payload.RouteKey
+		if routeKey == "" {
+			routeKey = strconv.FormatInt(newID, 10)
+		}
+		if _, err := transaction.ExecContext(request.Context(), `UPDATE "gocms_content" SET "route_key" = ? WHERE "id" = ?`, routeKey, newID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -419,12 +429,15 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			})
 		}
 
+		routeKey := payload.RouteKey
 		if requestedLang == defaultLang || payload.Translations != nil {
 			result, err := transaction.ExecContext(request.Context(), `
-				UPDATE "gocms_content" SET "site_id" = ?, "category_id" = ?, "title" = ?, "code" = ?, "summary" = ?, "body" = ?,
+				UPDATE "gocms_content" SET "site_id" = ?, "category_id" = ?,
+				"route_key" = CASE WHEN ? != '' THEN ? ELSE "route_key" END,
+				"title" = ?, "code" = ?, "summary" = ?, "body" = ?,
 				"cover_image" = ?, "published_at" = ?, "source" = ?, "keywords" = ?, "description" = ?,
 				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
-				targetSiteID, payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
+				targetSiteID, payload.Category, routeKey, routeKey, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
 				payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
 				modelID, extraDataStr, id)
 			if err != nil {
@@ -438,10 +451,12 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			}
 		} else {
 			result, err := transaction.ExecContext(request.Context(), `
-				UPDATE "gocms_content" SET "site_id" = ?, "category_id" = ?, "code" = ?,
+				UPDATE "gocms_content" SET "site_id" = ?, "category_id" = ?,
+				"route_key" = CASE WHEN ? != '' THEN ? ELSE "route_key" END,
+				"code" = ?,
 				"cover_image" = ?, "published_at" = ?, "source" = ?,
 				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
-				targetSiteID, payload.Category, payload.Code, payload.CoverImage,
+				targetSiteID, payload.Category, routeKey, routeKey, payload.Code, payload.CoverImage,
 				payload.PublishedAt, payload.Source, payload.OrderID, payload.Featured, payload.Visible,
 				modelID, extraDataStr, id)
 			if err != nil {
