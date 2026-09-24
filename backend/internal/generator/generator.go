@@ -1453,16 +1453,30 @@ func (c *content) catalogCategories() []ListCategory {
 	if c.catalogCache != nil {
 		return c.catalogCache
 	}
-	collection := c.categoryCollectionKey(c.rootCategory())
+	root := c.rootCategory()
 	items := make([]ListCategory, 0)
-	for _, category := range c.tables["gocms_category"] {
-		if category.n("parent_id") != 0 || c.categoryCollectionKey(category) != collection {
-			continue
+	if root["id"] != "" {
+		children := c.children(root.n("id"))
+		if len(children) > 0 {
+			for _, category := range children {
+				items = append(items, ListCategory{
+					URL:  esc(c.categoryListURL(category, 1)),
+					Name: esc(category["name"]),
+				})
+			}
 		}
-		items = append(items, ListCategory{
-			URL:  esc(c.categoryListURL(category, 1)),
-			Name: esc(category["name"]),
-		})
+	}
+	if len(items) == 0 {
+		collection := c.categoryCollectionKey(root)
+		for _, category := range c.tables["gocms_category"] {
+			if category.n("parent_id") != 0 || c.categoryCollectionKey(category) != collection {
+				continue
+			}
+			items = append(items, ListCategory{
+				URL:  esc(c.categoryListURL(category, 1)),
+				Name: esc(category["name"]),
+			})
+		}
 	}
 	for index := range items {
 		items[index].Last = index+1 == len(items)

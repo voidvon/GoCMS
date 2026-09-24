@@ -757,4 +757,27 @@ func TestPublisherHomeTemplate(t *testing.T) {
 	}
 }
 
+func TestCatalogCategoriesUsesRootChildren(t *testing.T) {
+	c := &content{
+		tables: map[string][]Row{
+			"gocms_category": {
+				{"id": "1230", "name": "产品展示", "parent_id": "0", "order_id": "0", "route_id": "1230", "list_path": "valve", "list_file_pattern": "{id}.html"},
+				{"id": "678", "name": "闸阀", "parent_id": "1230", "order_id": "10", "route_id": "1", "list_path": "valve", "list_file_pattern": "{id}.html"},
+				{"id": "725", "name": "蝶阀", "parent_id": "1230", "order_id": "20", "route_id": "2", "list_path": "valve", "list_file_pattern": "{id}.html"},
+				{"id": "667", "name": "新闻资讯", "parent_id": "0", "order_id": "10", "route_id": "667", "list_path": "news", "list_file_pattern": "{id}.html"},
+			},
+		},
+	}
+	cats := c.catalogCategories()
+	if len(cats) != 2 {
+		t.Fatalf("expected 2 catalog categories, got %d: %+v", len(cats), cats)
+	}
+	if cats[0].Name != "闸阀" || cats[0].URL != "/valve/1.html" {
+		t.Errorf("unexpected first category: %+v", cats[0])
+	}
+	if cats[1].Name != "蝶阀" || cats[1].URL != "/valve/2.html" {
+		t.Errorf("unexpected second category: %+v", cats[1])
+	}
+}
+
 
