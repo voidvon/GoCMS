@@ -820,3 +820,46 @@ func TestRelatedItemsFallbackAndKeywordMatching(t *testing.T) {
 	}
 }
 
+func TestCatalogCategoriesMultiTopLevel(t *testing.T) {
+	// 场景 1: 多顶级分类（如站点 4 拥有 26 个并列阀门顶级大类：进口阀门、闸阀、蝶阀...）
+	// catalogCategories 应该返回所有顶级分类，而不是某个分类的子分类
+	cMulti := &content{
+		tables: map[string][]Row{
+			"gocms_category": {
+				{"id": "1", "name": "进口阀门", "parent_id": "0", "order_id": "0", "list_path": "valve", "route_id": "25"},
+				{"id": "2", "name": "闸阀", "parent_id": "0", "order_id": "1", "list_path": "valve", "route_id": "1"},
+				{"id": "3", "name": "蝶阀", "parent_id": "0", "order_id": "2", "list_path": "valve", "route_id": "2"},
+				// 闸阀下的子分类
+				{"id": "11", "name": "铸铁闸阀", "parent_id": "2", "order_id": "1", "list_path": "valve", "route_id": "38"},
+				{"id": "12", "name": "铸钢闸阀", "parent_id": "2", "order_id": "2", "list_path": "valve", "route_id": "39"},
+			},
+		},
+	}
+	catsMulti := cMulti.catalogCategories()
+	if len(catsMulti) != 3 {
+		t.Fatalf("expected 3 top-level categories, got %d", len(catsMulti))
+	}
+	if catsMulti[0].Name != "进口阀门" || catsMulti[1].Name != "闸阀" || catsMulti[2].Name != "蝶阀" {
+		t.Errorf("unexpected categories: %+v", catsMulti)
+	}
+
+	// 场景 2: 单顶级分类（如站点 5 只有一个顶级分类“产品展示”，下属各产品分类）
+	// catalogCategories 应该返回该顶级分类的下属子分类
+	cSingle := &content{
+		tables: map[string][]Row{
+			"gocms_category": {
+				{"id": "1", "name": "产品展示", "parent_id": "0", "order_id": "1", "list_path": "valve", "route_id": "1"},
+				{"id": "10", "name": "疏水阀", "parent_id": "1", "order_id": "1", "list_path": "valve", "route_id": "10"},
+				{"id": "11", "name": "减压阀", "parent_id": "1", "order_id": "2", "list_path": "valve", "route_id": "11"},
+			},
+		},
+	}
+	catsSingle := cSingle.catalogCategories()
+	if len(catsSingle) != 2 {
+		t.Fatalf("expected 2 child categories, got %d", len(catsSingle))
+	}
+	if catsSingle[0].Name != "疏水阀" || catsSingle[1].Name != "减压阀" {
+		t.Errorf("unexpected categories: %+v", catsSingle)
+	}
+}
+

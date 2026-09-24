@@ -1454,9 +1454,24 @@ func (c *content) catalogCategories() []ListCategory {
 		return c.catalogCache
 	}
 	root := c.rootCategory()
+	collection := c.categoryCollectionKey(root)
+	var topCats []Row
+	for _, category := range c.tables["gocms_category"] {
+		if category.n("parent_id") == 0 && c.categoryCollectionKey(category) == collection {
+			topCats = append(topCats, category)
+		}
+	}
+
 	items := make([]ListCategory, 0)
-	if root["id"] != "" {
-		children := c.children(root.n("id"))
+	if len(topCats) > 1 {
+		for _, category := range topCats {
+			items = append(items, ListCategory{
+				URL:  esc(c.categoryListURL(category, 1)),
+				Name: esc(category["name"]),
+			})
+		}
+	} else if len(topCats) == 1 {
+		children := c.children(topCats[0].n("id"))
 		if len(children) > 0 {
 			for _, category := range children {
 				items = append(items, ListCategory{
@@ -1464,14 +1479,15 @@ func (c *content) catalogCategories() []ListCategory {
 					Name: esc(category["name"]),
 				})
 			}
+		} else {
+			items = append(items, ListCategory{
+				URL:  esc(c.categoryListURL(topCats[0], 1)),
+				Name: esc(topCats[0]["name"]),
+			})
 		}
-	}
-	if len(items) == 0 {
-		collection := c.categoryCollectionKey(root)
-		for _, category := range c.tables["gocms_category"] {
-			if category.n("parent_id") != 0 || c.categoryCollectionKey(category) != collection {
-				continue
-			}
+	} else if root["id"] != "" {
+		children := c.children(root.n("id"))
+		for _, category := range children {
 			items = append(items, ListCategory{
 				URL:  esc(c.categoryListURL(category, 1)),
 				Name: esc(category["name"]),
