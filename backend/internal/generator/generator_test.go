@@ -780,4 +780,43 @@ func TestCatalogCategoriesUsesRootChildren(t *testing.T) {
 	}
 }
 
+func TestRelatedItemsFallbackAndKeywordMatching(t *testing.T) {
+	c := &content{
+		tables: map[string][]Row{
+			"gocms_category": {
+				{"id": "100", "name": "产品展示", "parent_id": "0", "order_id": "1", "list_path": "products", "list_file_pattern": "{id}.html"},
+				{"id": "101", "name": "疏水阀", "parent_id": "100", "order_id": "1", "list_path": "products", "list_file_pattern": "{id}.html"},
+				{"id": "102", "name": "闸阀", "parent_id": "100", "order_id": "2", "list_path": "products", "list_file_pattern": "{id}.html"},
+			},
+			"gocms_content": {
+				// 疏水阀栏目 (101)
+				{"id": "1", "category_id": "101", "title": "斯派莎克BTM7疏水阀", "keywords": "斯派莎克 疏水阀", "route_key": "1", "visible": "1", "sort_order": "1"},
+				{"id": "2", "category_id": "101", "title": "斯派莎克BT6疏水阀", "keywords": "斯派莎克 疏水阀", "route_key": "2", "visible": "1", "sort_order": "2"},
+				// 闸阀栏目 (102)
+				{"id": "3", "category_id": "102", "title": "铸铁闸阀Z41T", "keywords": "铸铁 闸阀 斯派莎克", "route_key": "3", "visible": "1", "sort_order": "1"},
+				{"id": "4", "category_id": "102", "title": "锻钢闸阀Z41Y", "keywords": "锻钢 闸阀", "route_key": "4", "visible": "1", "sort_order": "2"},
+			},
+		},
+	}
+
+	// 测试用例 1: 闸阀 ID=3 栏目内只有 1 个其他产品 (ID=4)，但需要 3 个相关产品
+	// 期望：同栏目的 ID=4 必定优先选中；另外 1 个通过关键词“斯派莎克”或根分类兜底补充疏水阀的内容，最终返回 3 条。
+	view := c.tables["gocms_content"][2] // ID=3 (铸铁闸阀Z41T, keywords: 铸铁 闸阀 斯派莎克)
+	related := c.relatedItems(view, 3)
+	if len(related) != 3 {
+		t.Fatalf("expected 3 related items, got %d", len(related))
+	}
+	// 验证第一条是否为同栏目的 ID=4
+	if related[0].ID != 4 {
+		t.Errorf("expected first related item to be same-category item ID 4, got ID %d", related[0].ID)
+	}
+	// 验证后两条来自同大类(产品展示)，且包含关键词匹配
+	var ids []int
+	for _, item := range related {
+		ids = append(ids, item.ID)
+	}
+	if ids[1] != 1 && ids[1] != 2 {
+		t.Errorf("expected item 2 or 1 in related items, got ids: %v", ids)
+	}
+}
 

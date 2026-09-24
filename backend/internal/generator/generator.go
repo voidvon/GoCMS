@@ -1606,24 +1606,152 @@ func (c *content) relatedItems(view Row, limit int) []ListItem {
 	if limit < 1 {
 		return []ListItem{}
 	}
+	viewID := view.n("id")
 	category := c.cat(view.n("category_id"))
-	if category["id"] == "" {
-		return []ListItem{}
-	}
-	items := make([]Row, 0, limit)
-	for _, item := range c.tables["gocms_content"] {
-		if item.n("visible") != 1 || item.n("id") == view.n("id") || item.n("category_id") != category.n("id") {
-			continue
+
+	// 1. 同栏目候选（保持原始行为优先级）
+	sameCatItems := make([]Row, 0, limit)
+	if category["id"] != "" {
+		for _, item := range c.tables["gocms_content"] {
+			if item.n("visible") != 1 || item.n("id") == viewID || item.n("category_id") != category.n("id") {
+				continue
+			}
+			sameCatItems = append(sameCatItems, item)
 		}
-		items = append(items, item)
+		sortRows(sameCatItems, "sort_order", false)
 	}
-	sortRows(items, "sort_order", false)
-	if len(items) > limit {
-		items = items[:limit]
+
+	// 如果同栏目内容已经满足 limit，直接返回（完全向后兼容原有逻辑）
+	if len(sameCatItems) >= limit {
+		result := make([]ListItem, 0, limit)
+		for index, item := range sameCatItems[:limit] {
+			result = append(result, c.listItem(item, category, index, limit))
+		}
+		return result
 	}
-	result := make([]ListItem, 0, len(items))
-	for index, item := range items {
-		result = append(result, c.listItem(item, category, index, len(items)))
+
+	selected := make([]Row, 0, limit)
+	selectedIDs := make(map[int]bool)
+	for _, item := range sameCatItems {
+		selected = append(selected, item)
+		selectedIDs[item.n("id")] = true
+	}
+
+	// 2. 关键词匹配（参考帝国 CMS 算法：按逗号/空格分词，在所属大类/根栏目下匹配标题或关键词）
+	keywordsStr := strings.TrimSpace(view["keywords"])
+	var keywords []string
+	if keywordsStr != "" {
+		rawTokens := strings.FieldsFunc(keywordsStr, func(r rune) bool {
+			return r == ',' || r == '，' || r == ' ' || r == ';' || r == '；'
+		})
+		for _, tok := range rawTokens {
+			tok = strings.TrimSpace(tok)
+			if len([]rune(tok)) >= 2 {
+				keywords = append(keywords, strings.ToLower(tok))
+			}
+		}
+	}
+
+	root := c.listRoot(category)
+	rootID := root.n("id")
+
+	if len(keywords) > 0 && len(selected) < limit {
+		type kwCandidate struct {
+			row   Row
+			score int
+		}
+		var kwCandidates []kwCandidate
+		for _, item := range c.tables["gocms_content"] {
+			itemID := item.n("id")
+			if item.n("visible") != 1 || itemID == viewID || selectedIDs[itemID] {
+				continue
+			}
+			// 优先在同根分类下匹配
+			if rootID > 0 && !c.under(item.n("category_id"), rootID) {
+				continue
+			}
+			titleLower := strings.ToLower(item["title"])
+			kwLower := strings.ToLower(item["keywords"])
+			score := 0
+			for _, kw := range keywords {
+				if strings.Contains(titleLower, kw) {
+					score += 2
+				}
+				if strings.Contains(kwLower, kw) {
+					score += 1
+				}
+			}
+			if score > 0 {
+				kwCandidates = append(kwCandidates, kwCandidate{row: item, score: score})
+			}
+		}
+		sort.SliceStable(kwCandidates, func(i, j int) bool {
+			if kwCandidates[i].score == kwCandidates[j].score {
+				if kwCandidates[i].row.n("sort_order") == kwCandidates[j].row.n("sort_order") {
+					return kwCandidates[i].row.n("id") > kwCandidates[j].row.n("id")
+				}
+				return kwCandidates[i].row.n("sort_order") < kwCandidates[j].row.n("sort_order")
+			}
+			return kwCandidates[i].score > kwCandidates[j].score
+		})
+		for _, cand := range kwCandidates {
+			if len(selected) >= limit {
+				break
+			}
+			selected = append(selected, cand.row)
+			selectedIDs[cand.row.n("id")] = true
+		}
+	}
+
+	// 3. 根分类兜底（若仍未填满，从所属大类/根分类下的其他栏目中补充排序靠前的内容）
+	if len(selected) < limit && rootID > 0 {
+		var rootCandidates []Row
+		for _, item := range c.tables["gocms_content"] {
+			itemID := item.n("id")
+			if item.n("visible") != 1 || itemID == viewID || selectedIDs[itemID] {
+				continue
+			}
+			if c.under(item.n("category_id"), rootID) {
+				rootCandidates = append(rootCandidates, item)
+			}
+		}
+		sortRows(rootCandidates, "sort_order", false)
+		for _, item := range rootCandidates {
+			if len(selected) >= limit {
+				break
+			}
+			selected = append(selected, item)
+			selectedIDs[item.n("id")] = true
+		}
+	}
+
+	// 4. 全站兜底（若仍不足，如全站只有很少内容时，从全站其他可见内容补充）
+	if len(selected) < limit {
+		var allCandidates []Row
+		for _, item := range c.tables["gocms_content"] {
+			itemID := item.n("id")
+			if item.n("visible") != 1 || itemID == viewID || selectedIDs[itemID] {
+				continue
+			}
+			allCandidates = append(allCandidates, item)
+		}
+		sortRows(allCandidates, "sort_order", false)
+		for _, item := range allCandidates {
+			if len(selected) >= limit {
+				break
+			}
+			selected = append(selected, item)
+			selectedIDs[item.n("id")] = true
+		}
+	}
+
+	result := make([]ListItem, 0, len(selected))
+	for index, item := range selected {
+		itemCat := c.cat(item.n("category_id"))
+		if itemCat["id"] == "" {
+			itemCat = category
+		}
+		result = append(result, c.listItem(item, itemCat, index, len(selected)))
 	}
 	return result
 }
