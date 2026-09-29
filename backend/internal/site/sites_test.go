@@ -252,3 +252,97 @@ func TestMultiSiteHostRouting(t *testing.T) {
 		t.Fatalf("expected Site 2 via X-Forwarded-Host, got %d: %s", rec3.Code, rec3.Body.String())
 	}
 }
+
+func TestAliasRedirection(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := db.CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+
+	siteDir := t.TempDir()
+	server, err := New(database, siteDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create Site with RedirectAliases = true
+	_, err = db.CreateSite(context.Background(), database, &db.Site{
+		Name:            "重定向站点",
+		Code:            "redir",
+		Domain:          "www.bilvie.com",
+		Aliases:         []string{"bilvie.com", "m.bilvie.com"},
+		RedirectAliases: true,
+		OutputDir:       "redir",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create index.html for Site
+	redirDir := filepath.Join(siteDir, "redir")
+	if err := os.MkdirAll(redirDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(redirDir, "index.html"), []byte("Bilvie Home"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Access via alias domain "bilvie.com" -> 301 to "http://www.bilvie.com/"
+	req1 := httptest.NewRequest(http.MethodGet, "/about.html?page=1", nil)
+	req1.Host = "bilvie.com"
+	rec1 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusMovedPermanently {
+		t.Fatalf("expected 301 Moved Permanently, got %d", rec1.Code)
+	}
+	expectedLoc := "http://www.bilvie.com/about.html?page=1"
+	if loc := rec1.Header().Get("Location"); loc != expectedLoc {
+		t.Fatalf("expected Location %q, got %q", expectedLoc, loc)
+	}
+
+	// 2. Access via alias with X-Scheme: https -> 301 to "https://www.bilvie.com/..."
+	req2 := httptest.NewRequest(http.MethodGet, "/news", nil)
+	req2.Host = "bilvie.com"
+	req2.Header.Set("X-Scheme", "https")
+	rec2 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusMovedPermanently {
+		t.Fatalf("expected 301 Moved Permanently, got %d", rec2.Code)
+	}
+	expectedLocHTTPS := "https://www.bilvie.com/news"
+	if loc := rec2.Header().Get("Location"); loc != expectedLocHTTPS {
+		t.Fatalf("expected Location %q, got %q", expectedLocHTTPS, loc)
+	}
+
+	// 3. Access via primary domain -> 200 OK
+	req3 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req3.Host = "www.bilvie.com"
+	rec3 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusOK || rec3.Body.String() != "Bilvie Home" {
+		t.Fatalf("expected 200 OK with Bilvie Home, got %d: %s", rec3.Code, rec3.Body.String())
+	}
+
+	// 4. Update site to disable RedirectAliases -> 200 OK on alias
+	site2, err := db.GetSiteByCode(context.Background(), database, "redir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	site2.RedirectAliases = false
+	if err := db.UpdateSite(context.Background(), database, site2); err != nil {
+		t.Fatal(err)
+	}
+
+	req4 := httptest.NewRequest(http.MethodGet, "/", nil)
+	req4.Host = "bilvie.com"
+	rec4 := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec4, req4)
+	if rec4.Code != http.StatusOK || rec4.Body.String() != "Bilvie Home" {
+		t.Fatalf("expected 200 OK on alias when redirect is disabled, got %d: %s", rec4.Code, rec4.Body.String())
+	}
+}
+

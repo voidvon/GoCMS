@@ -46,6 +46,9 @@ func requestScheme(r *http.Request) string {
 	if r.TLS != nil {
 		return "https"
 	}
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Scheme")), "https") {
+		return "https"
+	}
 	if proto := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); proto != "" {
 		if comma := strings.Index(proto, ","); comma != -1 {
 			proto = strings.TrimSpace(proto[:comma])

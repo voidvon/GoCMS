@@ -20,17 +20,18 @@ const SiteTable = "gocms_site"
 var siteCodePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{1,63}$`)
 
 type Site struct {
-	ID        int64    `json:"id"`
-	Name      string   `json:"name"`
-	Code      string   `json:"code"`
-	Domain    string   `json:"domain"`
-	Aliases   []string `json:"aliases"`
-	ThemeID   string   `json:"theme_id"`
-	OutputDir string   `json:"output_dir"`
-	IsDefault bool     `json:"is_default"`
-	Status    string   `json:"status"`
-	CreatedAt string   `json:"created_at"`
-	UpdatedAt string   `json:"updated_at"`
+	ID              int64    `json:"id"`
+	Name            string   `json:"name"`
+	Code            string   `json:"code"`
+	Domain          string   `json:"domain"`
+	Aliases         []string `json:"aliases"`
+	RedirectAliases bool     `json:"redirect_aliases"`
+	ThemeID         string   `json:"theme_id"`
+	OutputDir       string   `json:"output_dir"`
+	IsDefault       bool     `json:"is_default"`
+	Status          string   `json:"status"`
+	CreatedAt       string   `json:"created_at"`
+	UpdatedAt       string   `json:"updated_at"`
 }
 
 func EnsureSites(ctx context.Context, database *sql.DB) error {
@@ -41,6 +42,7 @@ func EnsureSites(ctx context.Context, database *sql.DB) error {
 			"code" TEXT NOT NULL UNIQUE,
 			"domain" TEXT NOT NULL DEFAULT '',
 			"aliases" TEXT NOT NULL DEFAULT '[]',
+			"redirect_aliases" INTEGER NOT NULL DEFAULT 0,
 			"theme_id" TEXT NOT NULL DEFAULT '',
 			"output_dir" TEXT NOT NULL DEFAULT '',
 			"is_default" INTEGER NOT NULL DEFAULT 0,
@@ -62,9 +64,10 @@ func EnsureSites(ctx context.Context, database *sql.DB) error {
 	}
 
 	for name, definition := range map[string]string{
-		"output_dir": "TEXT NOT NULL DEFAULT ''",
-		"theme_id":   "TEXT NOT NULL DEFAULT ''",
-		"status":     "TEXT NOT NULL DEFAULT 'active'",
+		"output_dir":       "TEXT NOT NULL DEFAULT ''",
+		"theme_id":         "TEXT NOT NULL DEFAULT ''",
+		"status":           "TEXT NOT NULL DEFAULT 'active'",
+		"redirect_aliases": "INTEGER NOT NULL DEFAULT 0",
 	} {
 		if err := ensureTableColumn(ctx, database, SiteTable, name, definition); err != nil {
 			return err
@@ -83,8 +86,8 @@ func EnsureSites(ctx context.Context, database *sql.DB) error {
 			defaultDomain = NormalizeDomain(defaultDomain)
 		}
 		if _, err := database.ExecContext(ctx, `
-			INSERT INTO "`+SiteTable+`" ("id", "name", "code", "domain", "aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at")
-			VALUES (1, '默认站点', 'default', ?, '[]', '', '', 1, 'active', ?, ?)`, defaultDomain, now, now); err != nil {
+			INSERT INTO "`+SiteTable+`" ("id", "name", "code", "domain", "aliases", "redirect_aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at")
+			VALUES (1, '默认站点', 'default', ?, '[]', 0, '', '', 1, 'active', ?, ?)`, defaultDomain, now, now); err != nil {
 			return fmt.Errorf("seed default site: %w", err)
 		}
 	}
@@ -115,7 +118,7 @@ func NormalizeDomain(value string) string {
 	return prefix + strings.TrimSpace(host)
 }
 
-func matchHostPattern(pattern, host string) bool {
+func MatchHostPattern(pattern, host string) bool {
 	pattern = strings.ToLower(strings.TrimSpace(pattern))
 	host = strings.ToLower(strings.TrimSpace(host))
 	if pattern == "" || host == "" {
@@ -165,6 +168,7 @@ type rowScanner interface {
 func scanSite(scanner rowScanner) (*Site, error) {
 	var s Site
 	var aliasesJSON string
+	var redirectAliasesInt int
 	var isDefaultInt int
 	if err := scanner.Scan(
 		&s.ID,
@@ -172,6 +176,7 @@ func scanSite(scanner rowScanner) (*Site, error) {
 		&s.Code,
 		&s.Domain,
 		&aliasesJSON,
+		&redirectAliasesInt,
 		&s.ThemeID,
 		&s.OutputDir,
 		&isDefaultInt,
@@ -181,6 +186,7 @@ func scanSite(scanner rowScanner) (*Site, error) {
 	); err != nil {
 		return nil, err
 	}
+	s.RedirectAliases = redirectAliasesInt == 1
 	s.IsDefault = isDefaultInt == 1
 	if aliasesJSON != "" && aliasesJSON != "[]" {
 		_ = json.Unmarshal([]byte(aliasesJSON), &s.Aliases)
@@ -193,7 +199,7 @@ func scanSite(scanner rowScanner) (*Site, error) {
 
 func GetSiteByID(ctx context.Context, query settingsQueryer, id int64) (*Site, error) {
 	rows, err := query.QueryContext(ctx, `
-		SELECT "id", "name", "code", "domain", "aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
+		SELECT "id", "name", "code", "domain", "aliases", "redirect_aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
 		FROM "`+SiteTable+`"
 		WHERE "id" = ?`, id)
 	if err != nil {
@@ -209,7 +215,7 @@ func GetSiteByID(ctx context.Context, query settingsQueryer, id int64) (*Site, e
 func GetSiteByCode(ctx context.Context, query settingsQueryer, code string) (*Site, error) {
 	code = strings.TrimSpace(strings.ToLower(code))
 	rows, err := query.QueryContext(ctx, `
-		SELECT "id", "name", "code", "domain", "aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
+		SELECT "id", "name", "code", "domain", "aliases", "redirect_aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
 		FROM "`+SiteTable+`"
 		WHERE "code" = ?`, code)
 	if err != nil {
@@ -224,7 +230,7 @@ func GetSiteByCode(ctx context.Context, query settingsQueryer, code string) (*Si
 
 func GetDefaultSite(ctx context.Context, query settingsQueryer) (*Site, error) {
 	rows, err := query.QueryContext(ctx, `
-		SELECT "id", "name", "code", "domain", "aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
+		SELECT "id", "name", "code", "domain", "aliases", "redirect_aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
 		FROM "`+SiteTable+`"
 		WHERE "is_default" = 1
 		ORDER BY "id" ASC LIMIT 1`)
@@ -246,7 +252,7 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 
 	// 1. Direct domain match
 	rows, err := query.QueryContext(ctx, `
-		SELECT "id", "name", "code", "domain", "aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
+		SELECT "id", "name", "code", "domain", "aliases", "redirect_aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
 		FROM "`+SiteTable+`"
 		WHERE "domain" = ?
 		LIMIT 1`, host)
@@ -273,12 +279,12 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 
 	// 3. Scan wildcard domain or aliases (*.domain.com)
 	for _, s := range sites {
-		if matchHostPattern(s.Domain, host) {
+		if MatchHostPattern(s.Domain, host) {
 			match := s
 			return &match, nil
 		}
 		for _, alias := range s.Aliases {
-			if matchHostPattern(alias, host) {
+			if MatchHostPattern(alias, host) {
 				match := s
 				return &match, nil
 			}
@@ -290,7 +296,7 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 
 func ListSites(ctx context.Context, query settingsQueryer) ([]Site, error) {
 	rows, err := query.QueryContext(ctx, `
-		SELECT "id", "name", "code", "domain", "aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
+		SELECT "id", "name", "code", "domain", "aliases", "redirect_aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at"
 		FROM "`+SiteTable+`"
 		ORDER BY "is_default" DESC, "id" ASC`)
 	if err != nil {
@@ -349,10 +355,15 @@ func CreateSite(ctx context.Context, database *sql.DB, s *Site) (*Site, error) {
 		isDefInt = 1
 	}
 
+	redirectAliasesInt := 0
+	if s.RedirectAliases {
+		redirectAliasesInt = 1
+	}
+
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO "`+SiteTable+`" ("name", "code", "domain", "aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at")
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-		s.Name, s.Code, s.Domain, string(aliasesData), s.ThemeID, s.OutputDir, isDefInt, s.Status)
+		INSERT INTO "`+SiteTable+`" ("name", "code", "domain", "aliases", "redirect_aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at")
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		s.Name, s.Code, s.Domain, string(aliasesData), redirectAliasesInt, s.ThemeID, s.OutputDir, isDefInt, s.Status)
 	if err != nil {
 		return nil, fmt.Errorf("insert site: %w", err)
 	}
@@ -451,11 +462,16 @@ func UpdateSite(ctx context.Context, database *sql.DB, s *Site) error {
 		isDefInt = 1
 	}
 
+	redirectAliasesInt := 0
+	if s.RedirectAliases {
+		redirectAliasesInt = 1
+	}
+
 	res, err := tx.ExecContext(ctx, `
 		UPDATE "`+SiteTable+`"
-		SET "name" = ?, "code" = ?, "domain" = ?, "aliases" = ?, "theme_id" = ?, "output_dir" = ?, "is_default" = ?, "status" = ?, "updated_at" = CURRENT_TIMESTAMP
+		SET "name" = ?, "code" = ?, "domain" = ?, "aliases" = ?, "redirect_aliases" = ?, "theme_id" = ?, "output_dir" = ?, "is_default" = ?, "status" = ?, "updated_at" = CURRENT_TIMESTAMP
 		WHERE "id" = ?`,
-		s.Name, s.Code, s.Domain, string(aliasesData), s.ThemeID, s.OutputDir, isDefInt, s.Status, s.ID)
+		s.Name, s.Code, s.Domain, string(aliasesData), redirectAliasesInt, s.ThemeID, s.OutputDir, isDefInt, s.Status, s.ID)
 	if err != nil {
 		return fmt.Errorf("update site: %w", err)
 	}

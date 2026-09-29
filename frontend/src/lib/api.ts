@@ -16,6 +16,7 @@ export type Site = {
   code: string
   domain: string
   aliases: string[]
+  redirect_aliases?: boolean
   theme_id: string
   output_dir: string
   is_default: boolean

@@ -102,6 +102,11 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 	if cleanPath != "/" {
 		cleanPath = strings.TrimSuffix(cleanPath, "/")
 	}
+	if !strings.HasPrefix(strings.ToLower(cleanPath), "/api/") {
+		if s.checkAliasRedirect(response, request) {
+			return
+		}
+	}
 	if (s.frontendDevProxy != nil || s.frontendRoot != "" || s.frontendFS != nil) && (cleanPath == "/admin" || strings.HasPrefix(cleanPath, "/admin/")) {
 		s.serveAdminApp(response, request)
 		return
@@ -470,4 +475,44 @@ func writeJSON(response http.ResponseWriter, status int, value any) {
 	response.Header().Set("Content-Type", "application/json; charset=utf-8")
 	response.WriteHeader(status)
 	_ = json.NewEncoder(response).Encode(value)
+}
+
+func (s *Server) shouldRedirectAlias(site *db.Site, reqHost string) (string, bool) {
+	if site == nil || !site.RedirectAliases || site.Domain == "" {
+		return "", false
+	}
+	primary := db.NormalizeDomain(site.Domain)
+	normalizedReq := db.NormalizeDomain(reqHost)
+	if normalizedReq == "" || normalizedReq == primary {
+		return "", false
+	}
+	for _, alias := range site.Aliases {
+		normAlias := db.NormalizeDomain(alias)
+		if normAlias == normalizedReq || (strings.HasPrefix(alias, "*.") && db.MatchHostPattern(alias, normalizedReq)) {
+			return primary, true
+		}
+	}
+	return "", false
+}
+
+func (s *Server) checkAliasRedirect(response http.ResponseWriter, request *http.Request) bool {
+	if s.database == nil || (request.Method != http.MethodGet && request.Method != http.MethodHead) {
+		return false
+	}
+	reqHost := requestHost(request)
+	matched, err := db.GetSiteByHost(request.Context(), s.database, reqHost)
+	if err != nil || matched == nil {
+		return false
+	}
+	if primaryDomain, ok := s.shouldRedirectAlias(matched, reqHost); ok {
+		scheme := requestScheme(request)
+		uri := request.URL.RequestURI()
+		if uri == "" {
+			uri = "/"
+		}
+		target := fmt.Sprintf("%s://%s%s", scheme, primaryDomain, uri)
+		http.Redirect(response, request, target, http.StatusMovedPermanently)
+		return true
+	}
+	return false
 }

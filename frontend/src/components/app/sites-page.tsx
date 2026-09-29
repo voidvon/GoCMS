@@ -56,6 +56,7 @@ export function SitesPage() {
     code: string
     domain: string
     aliasesText: string
+    redirect_aliases: boolean
     theme_id: string
     output_dir: string
     is_default: boolean
@@ -65,6 +66,7 @@ export function SitesPage() {
     code: "",
     domain: "",
     aliasesText: "",
+    redirect_aliases: false,
     theme_id: "",
     output_dir: "",
     is_default: false,
@@ -162,6 +164,7 @@ export function SitesPage() {
       code: "",
       domain: "",
       aliasesText: "",
+      redirect_aliases: false,
       theme_id: "",
       output_dir: "",
       is_default: false,
@@ -178,6 +181,7 @@ export function SitesPage() {
       code: site.code,
       domain: site.domain,
       aliasesText: (site.aliases || []).join("\n"),
+      redirect_aliases: Boolean(site.redirect_aliases),
       theme_id: site.theme_id || "",
       output_dir: site.output_dir || "",
       is_default: site.is_default,
@@ -213,6 +217,7 @@ export function SitesPage() {
         code: formData.code.trim().toLowerCase(),
         domain: formData.domain.trim().toLowerCase(),
         aliases,
+        redirect_aliases: formData.redirect_aliases,
         theme_id: formData.theme_id.trim(),
         output_dir: formData.output_dir.trim(),
         is_default: formData.is_default,
@@ -330,9 +335,16 @@ export function SitesPage() {
                     </TableCell>
                     <TableCell>
                       {site.aliases && site.aliases.length > 0 ? (
-                        <span className="text-xs text-muted-foreground">
-                          {site.aliases.length} 个别名
-                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs text-muted-foreground">
+                            {site.aliases.length} 个别名
+                          </span>
+                          {site.redirect_aliases && (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                              301 跳转主域名
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">-</span>
                       )}
@@ -486,6 +498,25 @@ export function SitesPage() {
                     onChange={(e) => setFormData({ ...formData, output_dir: e.target.value })}
                   />
               </div>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-medium">重定向别名到主域名 (301)</Label>
+                <p className="text-xs text-muted-foreground">
+                  开启后，通过别名域名访问将自动 301 重定向至主域名，有利于 SEO 规范化
+                </p>
+              </div>
+              <Switch
+                checked={formData.redirect_aliases}
+                disabled={!formData.domain.trim()}
+                onCheckedChange={(checked) =>
+                  setFormData({
+                    ...formData,
+                    redirect_aliases: checked,
+                  })
+                }
+              />
             </div>
 
             <div className="flex items-center justify-between rounded-lg border p-3">

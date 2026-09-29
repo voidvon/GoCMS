@@ -329,3 +329,51 @@ func TestDefaultSiteSafeguards(t *testing.T) {
 		t.Fatalf("expected updating former default site to succeed, got: %v", err)
 	}
 }
+
+func TestSiteRedirectAliases(t *testing.T) {
+	database, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	if err := CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+
+	site, err := CreateSite(context.Background(), database, &Site{
+		Name:            "测试跳转站点",
+		Code:            "redirect_test",
+		Domain:          "www.bilvie.com",
+		Aliases:         []string{"bilvie.com", "m.bilvie.com"},
+		RedirectAliases: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !site.RedirectAliases {
+		t.Fatalf("expected RedirectAliases to be true on created site")
+	}
+
+	fetched, err := GetSiteByID(context.Background(), database, site.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fetched.RedirectAliases {
+		t.Fatalf("expected fetched site to have RedirectAliases = true")
+	}
+
+	fetched.RedirectAliases = false
+	if err := UpdateSite(context.Background(), database, fetched); err != nil {
+		t.Fatal(err)
+	}
+
+	refetched, err := GetSiteByID(context.Background(), database, site.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refetched.RedirectAliases {
+		t.Fatalf("expected refetched site to have RedirectAliases = false after update")
+	}
+}
+
