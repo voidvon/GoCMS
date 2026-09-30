@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"gocms/internal/auth"
 )
 
 type siteUserAdminItem struct {
@@ -47,6 +49,7 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 		Status         string `json:"status"`
 		MaxSessions    *int   `json:"max_sessions"`
 		RevokeSessions bool   `json:"revoke_sessions"`
+		Password       string `json:"password"`
 	}
 	if json.NewDecoder(r.Body).Decode(&in) != nil || in.ID <= 0 {
 		http.Error(w, "invalid payload", http.StatusBadRequest)
@@ -59,6 +62,10 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodDelete && status != "" && status != "active" && status != "disabled" && status != "pending" {
 		http.Error(w, "invalid status", 400)
+		return
+	}
+	if in.Password != "" && (len(in.Password) < 8 || len(in.Password) > 256) {
+		accountInputError(w, "密码长度应为 8–256 字符")
 		return
 	}
 	tx, err := s.database.BeginTx(r.Context(), nil)
@@ -133,6 +140,21 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+		}
+
+		if in.Password != "" {
+			hash, err := auth.HashPassword(in.Password)
+			if err != nil {
+				accountError(w, err)
+				return
+			}
+			_, err = tx.ExecContext(r.Context(), "UPDATE gocms_user SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", hash, in.ID)
+			if err != nil {
+				accountError(w, err)
+				return
+			}
+			_, _ = tx.ExecContext(r.Context(), "DELETE FROM gocms_user_session WHERE user_id = ?", in.ID)
+			_, _ = tx.ExecContext(r.Context(), "INSERT INTO gocms_user_event(user_id, action) VALUES(?, 'password_reset_by_admin')", in.ID)
 		}
 	}
 

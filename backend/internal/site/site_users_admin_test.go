@@ -928,6 +928,81 @@ func TestDisabledSiteAndSubsiteIsolation(t *testing.T) {
 	}
 }
 
+func TestSiteUserResetPassword(t *testing.T) {
+	s, database, root := newCategoryTestServer(t)
+
+	oldHash, _ := auth.HashPassword("oldpassword123")
+	result, err := database.Exec("INSERT INTO gocms_user(site_id,username,password_hash,status) VALUES(1,'member_reset',?,'active')", oldHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert existing session
+	if _, err := database.Exec("INSERT INTO gocms_user_session(token_hash,user_id,expires_at) VALUES(?,?,?)", hashToken("active-member-token"), id, time.Now().Add(time.Hour).Unix()); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Password too short (< 8)
+	shortRes := categoryRequest(t, s, root, "PATCH", "/api/admin/site-users", fmt.Sprintf(`{"id":%d,"password":"short"}`, id))
+	if shortRes.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for short password, got %d: %s", shortRes.Code, shortRes.Body.String())
+	}
+
+	// 2. Password too long (> 256)
+	longPwd := strings.Repeat("a", 257)
+	longRes := categoryRequest(t, s, root, "PATCH", "/api/admin/site-users", fmt.Sprintf(`{"id":%d,"password":"%s"}`, id, longPwd))
+	if longRes.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for long password, got %d: %s", longRes.Code, longRes.Body.String())
+	}
+
+	// 3. Unauthorized request
+	unauthRes := categoryRequest(t, s, "", "PATCH", "/api/admin/site-users", fmt.Sprintf(`{"id":%d,"password":"newpassword123"}`, id))
+	if unauthRes.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthorized reset, got %d", unauthRes.Code)
+	}
+
+	// 4. Valid password reset
+	validRes := categoryRequest(t, s, root, "PATCH", "/api/admin/site-users", fmt.Sprintf(`{"id":%d,"password":"newpassword123"}`, id))
+	if validRes.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid password reset, got %d: %s", validRes.Code, validRes.Body.String())
+	}
+
+	// Verify DB password hash was updated
+	var newHash string
+	if err := database.QueryRow("SELECT password_hash FROM gocms_user WHERE id = ?", id).Scan(&newHash); err != nil {
+		t.Fatal(err)
+	}
+	if !auth.ComparePassword("newpassword123", newHash) {
+		t.Fatal("expected new password to match hash")
+	}
+	if auth.ComparePassword("oldpassword123", newHash) {
+		t.Fatal("expected old password to NOT match hash")
+	}
+
+	// Verify session was revoked
+	var sessionCount int
+	if err := database.QueryRow("SELECT COUNT(*) FROM gocms_user_session WHERE user_id = ?", id).Scan(&sessionCount); err != nil {
+		t.Fatal(err)
+	}
+	if sessionCount != 0 {
+		t.Fatalf("expected 0 sessions after password reset, got %d", sessionCount)
+	}
+
+	// Verify user event was recorded
+	var eventCount int
+	if err := database.QueryRow("SELECT COUNT(*) FROM gocms_user_event WHERE user_id = ? AND action = 'password_reset_by_admin'", id).Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if eventCount != 1 {
+		t.Fatalf("expected 1 audit event, got %d", eventCount)
+	}
+}
+
+
 
 
 

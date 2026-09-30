@@ -138,9 +138,13 @@ type ListCategory struct {
 }
 
 type NavigationItem struct {
+	ID       int
+	ParentID int
 	URL      string
 	Name     string
 	Position string
+	Current  bool
+	Active   bool
 	Children []NavigationItem
 }
 
@@ -209,8 +213,12 @@ func TemplateTags() []TemplateTag {
 			Description: "返回指定位置的导航树（支持 'main' 主导航、'top' 顶部副导航、'footer' 底部页脚导航，默认为 'main'）。",
 			Context:     "所有模板", Example: `{{range navigation "top" .}}<a href="{{.URL}}">{{.Name}}</a>{{end}}`,
 			Fields: []TemplateField{
+				{Name: ".ID", Type: "int", Description: "栏目 ID"},
+				{Name: ".ParentID", Type: "int", Description: "父栏目 ID"},
 				{Name: ".URL", Type: "string", Description: "栏目链接"},
 				{Name: ".Name", Type: "string", Description: "栏目名称"},
+				{Name: ".Current", Type: "bool", Description: "当前栏目是否完全匹配"},
+				{Name: ".Active", Type: "bool", Description: "当前栏目或其子孙栏目匹配（用于高亮父级）"},
 				{Name: ".Children", Type: "[]NavigationItem", Description: "子栏目导航，可继续 range"},
 			},
 		},
@@ -1518,9 +1526,12 @@ func (c *content) children(parentID int) []Row {
 func (c *content) navigation(args ...any) []NavigationItem {
 	position := "main"
 	depth := -1 // -1 means all levels
+	currentID := 0
+	isHome := false
 	for i, arg := range args {
-		if s, ok := arg.(string); ok {
-			s = strings.ToLower(strings.TrimSpace(s))
+		switch v := arg.(type) {
+		case string:
+			s := strings.ToLower(strings.TrimSpace(v))
 			if i > 0 && (s == "none" || s == "children" || s == "all") {
 				if s == "none" {
 					depth = 0
@@ -1534,12 +1545,50 @@ func (c *content) navigation(args ...any) []NavigationItem {
 			if s != "" {
 				position = s
 			}
+		case Row:
+			if id := v.n("category_id"); id > 0 {
+				currentID = id
+			}
+			if v["is_home"] == "true" {
+				isHome = true
+			}
+		case map[string]string:
+			if idStr, ok := v["category_id"]; ok {
+				if id, _ := strconv.Atoi(idStr); id > 0 {
+					currentID = id
+				}
+			}
+			if v["is_home"] == "true" {
+				isHome = true
+			}
+		case map[string]any:
+			if idVal, ok := v["category_id"]; ok {
+				switch id := idVal.(type) {
+				case int:
+					currentID = id
+				case int64:
+					currentID = int(id)
+				case string:
+					currentID, _ = strconv.Atoi(id)
+				}
+			}
+			if homeVal, ok := v["is_home"]; ok {
+				if b, ok := homeVal.(bool); ok && b {
+					isHome = true
+				} else if s, ok := homeVal.(string); ok && s == "true" {
+					isHome = true
+				}
+			}
+		case int:
+			currentID = v
+		case int64:
+			currentID = int(v)
 		}
 	}
 	if c.navigationCache == nil {
 		c.navigationCache = make(map[string][]NavigationItem)
 	}
-	cacheKey := fmt.Sprintf("%s:%d", position, depth)
+	cacheKey := fmt.Sprintf("%s:%d:%d:%t", position, depth, currentID, isHome)
 	if cached, ok := c.navigationCache[cacheKey]; ok {
 		return cached
 	}
@@ -1552,14 +1601,16 @@ func (c *content) navigation(args ...any) []NavigationItem {
 		if !strings.Contains(","+catPos+",", ","+position+",") {
 			continue
 		}
-		items = append(items, c.navigationItem(category, position, depth))
+		items = append(items, c.navigationItem(category, position, depth, currentID, isHome))
 	}
 	c.navigationCache[cacheKey] = items
 	return items
 }
 
-func (c *content) navigationItem(category Row, position string, depth int) NavigationItem {
-	children := c.children(category.n("id"))
+func (c *content) navigationItem(category Row, position string, depth int, currentID int, isHome bool) NavigationItem {
+	catID := category.n("id")
+	parentID := category.n("parent_id")
+	children := c.children(catID)
 	items := make([]NavigationItem, 0, len(children))
 	if depth == 0 {
 		children = nil
@@ -1570,17 +1621,38 @@ func (c *content) navigationItem(category Row, position string, depth int) Navig
 			catPos = "main"
 		}
 		if strings.Contains(","+catPos+",", ","+position+",") {
-			items = append(items, c.navigationItem(child, position, depth-1))
+			items = append(items, c.navigationItem(child, position, depth-1, currentID, isHome))
 		}
 	}
 	pos := strings.ToLower(strings.TrimSpace(category["nav_position"]))
 	if pos == "" {
 		pos = "main"
 	}
+	url := esc(c.categoryListURL(category, 1))
+
+	var isCurrent, isActive bool
+	if currentID > 0 {
+		if catID == currentID {
+			isCurrent = true
+			isActive = true
+		} else if c.under(currentID, catID) {
+			isActive = true
+		}
+	} else if isHome {
+		if url == c.homeURL() || url == "/" {
+			isCurrent = true
+			isActive = true
+		}
+	}
+
 	return NavigationItem{
-		URL:      esc(c.categoryListURL(category, 1)),
+		ID:       catID,
+		ParentID: parentID,
+		URL:      url,
 		Name:     esc(category["name"]),
 		Position: pos,
+		Current:  isCurrent,
+		Active:   isActive,
 		Children: items,
 	}
 }
@@ -1943,6 +2015,7 @@ func (c *content) buildForLang() error {
 		"root_category": "",
 		"home_url":      c.homeURL(),
 		"lang":          c.lang,
+		"is_home":       "true",
 	}); err != nil {
 		return err
 	}

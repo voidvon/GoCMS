@@ -6,6 +6,7 @@ import {
   getSiteUsers,
   setSiteUserSessionLimit,
   revokeSiteUserSessions,
+  resetSiteUserPassword,
   setSiteUserStatus,
   deleteSiteUser,
   getMemberGroups,
@@ -59,6 +60,10 @@ export function SiteUsersPage() {
   const [confirmation, setConfirmation] = useState<{ title: string; action: () => Promise<unknown> } | null>(null)
   const [expiryBase, setExpiryBase] = useState(() => new Date())
   const [expires, setExpires] = useState("")
+  const [resetUser, setResetUser] = useState<SiteUser | null>(null)
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
 
   useEffect(() => {
     setPage(1)
@@ -70,6 +75,10 @@ export function SiteUsersPage() {
     setGroupForm(null)
     setAssignUser(null)
     setSessionUser(null)
+    setResetUser(null)
+    setNewPassword("")
+    setConfirmPassword("")
+    setShowPassword(false)
     setError("")
     setNotice("")
   }, [activeSiteId])
@@ -190,7 +199,7 @@ export function SiteUsersPage() {
         </Button>
       </form>
 
-      {error && !groupsDialogOpen && !sessionUser && !assignUser && !groupForm && !confirmation && (
+      {error && !groupsDialogOpen && !sessionUser && !assignUser && !groupForm && !confirmation && !resetUser && (
         <InlineAlert>{error}</InlineAlert>
       )}
       {notice && <p role="status" className="text-sm text-emerald-600 dark:text-emerald-400">{notice}</p>}
@@ -242,6 +251,20 @@ export function SiteUsersPage() {
                       }
                     >
                       {item.status === "active" ? "禁用" : item.status === "pending" ? "审核通过" : "启用"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => {
+                        setError("")
+                        setResetUser(item)
+                        setNewPassword("")
+                        setConfirmPassword("")
+                        setShowPassword(false)
+                      }}
+                    >
+                      重置密码
                     </Button>
                     <Button
                       size="sm"
@@ -885,6 +908,158 @@ export function SiteUsersPage() {
                 </Button>
                 <Button type="submit" disabled={busy}>
                   保存
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 重置密码 Dialog */}
+      <Dialog
+        open={resetUser !== null}
+        onOpenChange={(open) => {
+          if (!open && !busy) {
+            setResetUser(null)
+            setNewPassword("")
+            setConfirmPassword("")
+            setShowPassword(false)
+            setError("")
+          }
+        }}
+      >
+        <DialogContent showCloseButton={!busy} className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>重置密码</DialogTitle>
+            <DialogDescription>
+              为前台用户“{resetUser?.username}”设置新密码。保存后将自动撤销该用户的全部在线会话，需使用新密码重新登录。
+            </DialogDescription>
+          </DialogHeader>
+          {error && <InlineAlert>{error}</InlineAlert>}
+          {resetUser && (
+            <form
+              className="space-y-4"
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (newPassword.length < 8) {
+                  setError("密码长度不能少于 8 位")
+                  return
+                }
+                if (newPassword.length > 256) {
+                  setError("密码长度不能超过 256 位")
+                  return
+                }
+                if (newPassword !== confirmPassword) {
+                  setError("两次输入的密码不一致")
+                  return
+                }
+                void run(async () => {
+                  await resetSiteUserPassword(resetUser.id, newPassword, activeSiteId)
+                  setResetUser(null)
+                  setNewPassword("")
+                  setConfirmPassword("")
+                  setShowPassword(false)
+                })
+              }}
+            >
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">新密码</span>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="text-xs text-primary hover:underline disabled:opacity-50"
+                    onClick={() => {
+                      const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+                      const array = new Uint32Array(12)
+                      crypto.getRandomValues(array)
+                      const pwd = Array.from(array, (x) => chars[x % chars.length]).join("")
+                      setNewPassword(pwd)
+                      setConfirmPassword(pwd)
+                      setShowPassword(true)
+                      if (error) setError("")
+                    }}
+                  >
+                    随机生成
+                  </button>
+                </div>
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  required
+                  disabled={busy}
+                  placeholder="至少 8 位密码"
+                  value={newPassword}
+                  onChange={(e) => {
+                    setNewPassword(e.target.value)
+                    if (error) setError("")
+                  }}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-sm font-medium">确认新密码</span>
+                <Input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  required
+                  disabled={busy}
+                  placeholder="请再次输入新密码"
+                  value={confirmPassword}
+                  onChange={(e) => {
+                    setConfirmPassword(e.target.value)
+                    if (error) setError("")
+                  }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    disabled={busy}
+                    checked={showPassword}
+                    onChange={(e) => setShowPassword(e.target.checked)}
+                    className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-ring"
+                  />
+                  <span>显示明文密码</span>
+                </label>
+                {newPassword && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="text-primary hover:underline disabled:opacity-50"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(newPassword)
+                        setNotice("密码已复制到剪贴板")
+                      } catch {
+                        // ignore clipboard failure
+                      }
+                    }}
+                  >
+                    复制密码
+                  </button>
+                )}
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    setResetUser(null)
+                    setNewPassword("")
+                    setConfirmPassword("")
+                    setShowPassword(false)
+                    setError("")
+                  }}
+                >
+                  取消
+                </Button>
+                <Button type="submit" disabled={busy || !newPassword || !confirmPassword}>
+                  确认重置
                 </Button>
               </DialogFooter>
             </form>

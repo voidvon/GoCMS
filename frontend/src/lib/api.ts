@@ -1015,3 +1015,9 @@ export const setSiteUserSessionLimit = (id: number, max_sessions: number) =>
   request("/api/admin/site-users", { method: "PATCH", body: JSON.stringify({ id, max_sessions }) })
 export const revokeSiteUserSessions = (id: number) =>
   request("/api/admin/site-users", { method: "PATCH", body: JSON.stringify({ id, revoke_sessions: true }) })
+export const resetSiteUserPassword = (id: number, password: string, siteId?: number) =>
+  request(`/api/admin/site-users${siteId ? `?site_id=${siteId}` : ""}`, {
+    method: "PATCH",
+    body: JSON.stringify({ id, password }),
+  })
+

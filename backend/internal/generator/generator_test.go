@@ -863,3 +863,94 @@ func TestCatalogCategoriesMultiTopLevel(t *testing.T) {
 	}
 }
 
+func TestNavigationCurrentAndActive(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err = db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+
+	// Categories:
+	// 10: 产品 (parent 0)
+	//   20: 球阀 (parent 10)
+	//     30: 电动球阀 (parent 20)
+	// 40: 新闻 (parent 0)
+	// 50: 首页 (parent 0, link '/')
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO gocms_category (id, name, parent_id, order_id, route_id, page_type, link_url, nav_position) VALUES
+			(50, '首页', 0, 0, 50, 'link', '/', 'main'),
+			(10, '产品', 0, 1, 10, 'list', '', 'main'),
+			(20, '球阀', 10, 1, 20, 'list', '', 'main'),
+			(30, '电动球阀', 20, 1, 30, 'list', '', 'main'),
+			(40, '新闻', 0, 2, 40, 'list', '', 'main')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add an article in category 30 (电动球阀)
+	if _, err := database.ExecContext(ctx, `
+		INSERT INTO "gocms_content" ("id", "category_id", "route_key", "title", "summary", "body", "sort_order", "visible")
+		VALUES (100, 30, 'valve-100', '高性能电动球阀', '电动球阀摘要', '<p>正文</p>', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	templates := filepath.Join(t.TempDir(), "templates")
+	navSnippet := `{{define "navtree"}}{{range .}}[{{.ID}}:{{.Name}}:cur={{.Current}}:act={{.Active}}{{if .Children}}({{template "navtree" .Children}}){{end}}]{{end}}{{end}}`
+	writeTemplate(t, templates, "index.html", navSnippet+`home={{template "navtree" (navigation .)}}`)
+	writeTemplate(t, templates, "category_cover.html", navSnippet+`cover={{.category_id}}:{{template "navtree" (navigation .)}}`)
+	writeTemplate(t, templates, "category_list.html", navSnippet+`list={{.category_id}}:{{template "navtree" (navigation .)}}`)
+	writeTemplate(t, templates, "content_detail.html", navSnippet+`detail={{.category_id}}:{{template "navtree" (navigation .)}}`)
+	writeTemplate(t, templates, "msg.html", `msg`)
+	writeTemplate(t, templates, "search.html", `search`)
+
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	publisher := Publisher{DB: database, Web: web, Templates: templates, Data: filepath.Join(root, "data")}
+	if _, err := publisher.Generate(ctx); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// 1. Verify Home page: '首页' link is current and active, other categories are not
+	homeHtml := readGenerated(t, web, "index.html")
+	if !strings.Contains(homeHtml, "[50:首页:cur=true:act=true]") {
+		t.Errorf("homepage nav should highlight 首页 link as current and active, got: %s", homeHtml)
+	}
+	if !strings.Contains(homeHtml, "[10:产品:cur=false:act=false([20:球阀:cur=false:act=false([30:电动球阀:cur=false:act=false])])]") {
+		t.Errorf("homepage nav should have other categories inactive, got: %s", homeHtml)
+	}
+
+	// 2. Verify Category 10 (产品) page:
+	// 产品 has cur=true:act=true; children have cur=false:act=false
+	cat10Html := readGenerated(t, web, "category/10.html")
+	if !strings.Contains(cat10Html, "[10:产品:cur=true:act=true([20:球阀:cur=false:act=false([30:电动球阀:cur=false:act=false])])]") {
+		t.Errorf("cat 10 nav mismatch, got: %s", cat10Html)
+	}
+	if !strings.Contains(cat10Html, "[40:新闻:cur=false:act=false]") {
+		t.Errorf("cat 10 nav should have 新闻 inactive, got: %s", cat10Html)
+	}
+
+	// 3. Verify Category 20 (球阀) page:
+	// 产品 has cur=false:act=true (ancestor!); 球阀 has cur=true:act=true; 电动球阀 has cur=false:act=false
+	cat20Html := readGenerated(t, web, "category/20.html")
+	if !strings.Contains(cat20Html, "[10:产品:cur=false:act=true([20:球阀:cur=true:act=true([30:电动球阀:cur=false:act=false])])]") {
+		t.Errorf("cat 20 nav mismatch, got: %s", cat20Html)
+	}
+
+	// 4. Verify Category 30 (电动球阀) page:
+	// 产品 has cur=false:act=true; 球阀 has cur=false:act=true; 电动球阀 has cur=true:act=true
+	cat30Html := readGenerated(t, web, "category/30.html")
+	if !strings.Contains(cat30Html, "[10:产品:cur=false:act=true([20:球阀:cur=false:act=true([30:电动球阀:cur=true:act=true])])]") {
+		t.Errorf("cat 30 nav mismatch, got: %s", cat30Html)
+	}
+
+	// 5. Verify Content Detail page (article in category 30):
+	// 产品 has act=true; 球阀 has act=true; 电动球阀 has cur=true:act=true
+	detailHtml := readGenerated(t, web, "content/valve-100.html")
+	if !strings.Contains(detailHtml, "[10:产品:cur=false:act=true([20:球阀:cur=false:act=true([30:电动球阀:cur=true:act=true])])]") {
+		t.Errorf("content detail nav mismatch, got: %s", detailHtml)
+	}
+}
+

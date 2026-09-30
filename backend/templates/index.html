@@ -1,6 +1,6 @@
 {{define "nav"}}
 {{range .}}
-<li><a href="{{.URL}}">{{.Name}}</a>{{if .Children}}<ul>{{template "nav" .Children}}</ul>{{end}}</li>
+<li{{if .Active}} class="active"{{end}}><a href="{{.URL}}">{{.Name}}</a>{{if .Children}}<ul>{{template "nav" .Children}}</ul>{{end}}</li>
 {{end}}
 {{end}}
 <!doctype html>
