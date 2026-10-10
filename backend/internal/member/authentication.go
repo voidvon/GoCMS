@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +21,19 @@ var ErrSessionLimit = errors.New("session limit reached")
 
 var ErrConflict = errors.New("account conflict")
 
+var (
+	usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,64}$`)
+	digitsPattern   = regexp.MustCompile(`^\d+$`)
+)
+
+// IsValidUsername validates a member username:
+// - Length must be between 3 and 64 characters
+// - Whitelist characters: a-z, A-Z, 0-9, underscores (_), hyphens (-)
+// - Can start with a digit, but cannot be purely numeric
+func IsValidUsername(username string) bool {
+	return usernamePattern.MatchString(username) && !digitsPattern.MatchString(username)
+}
+
 func TokenHash(token string) string {
 	v := sha256.Sum256([]byte(token))
 	return base64.RawURLEncoding.EncodeToString(v[:])
@@ -27,7 +41,7 @@ func TokenHash(token string) string {
 func (s Service) Register(ctx context.Context, username, email, password string, siteID ...int64) (Profile, error) {
 	username = strings.TrimSpace(username)
 	email = strings.ToLower(strings.TrimSpace(email))
-	if len(username) < 3 || len(username) > 64 || strings.ContainsAny(username, "@ \t\n\r") || len(password) < 8 || len(password) > 1024 || len(email) > 254 {
+	if !IsValidUsername(username) || len(password) < 8 || len(password) > 1024 || len(email) > 254 {
 		return Profile{}, ErrInvalid
 	}
 	if email != "" {

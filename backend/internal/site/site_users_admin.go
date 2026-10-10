@@ -1,6 +1,7 @@
 package site
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -10,14 +11,16 @@ import (
 )
 
 type siteUserAdminItem struct {
-	MaxSessions int    `json:"max_sessions"`
-	ID          int64  `json:"id"`
-	Username    string `json:"username"`
-	Email       string `json:"email,omitempty"`
-	DisplayName string `json:"display_name"`
-	Status      string `json:"status"`
-	CreatedAt   string `json:"created_at"`
-	LastLoginAt string `json:"last_login_at,omitempty"`
+	MaxSessions  int     `json:"max_sessions"`
+	ID           int64   `json:"id"`
+	Username     string  `json:"username"`
+	Email        string  `json:"email,omitempty"`
+	DisplayName  string  `json:"display_name"`
+	Status       string  `json:"status"`
+	CreatedAt    string  `json:"created_at"`
+	LastLoginAt  string  `json:"last_login_at,omitempty"`
+	VipExpiresAt *string `json:"vip_expires_at,omitempty"`
+	IsVip        bool    `json:"is_vip"`
 }
 
 func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
@@ -193,12 +196,26 @@ func (s *Server) listSiteUsers(w http.ResponseWriter, r *http.Request, siteID in
 	selectQuery := `
 		SELECT u.id, u.username, u.email, u.display_name,
 		       u.status AS effective_status,
-		       u.max_sessions, u.created_at, COALESCE(u.last_login_at, '')
+		       u.max_sessions, u.created_at, COALESCE(u.last_login_at, ''),
+		       (
+		           SELECT m.expires_at
+		           FROM gocms_user_group_member m
+		           JOIN gocms_user_group g ON m.group_id = g.id
+		           WHERE m.user_id = u.id AND g.site_id = ? AND m.status = 'active' AND g.status = 'active'
+		           ORDER BY CASE WHEN m.expires_at IS NULL THEN 1 ELSE 0 END DESC, m.expires_at DESC
+		           LIMIT 1
+		       ) AS vip_expires_at,
+		       (
+		           SELECT COUNT(*)
+		           FROM gocms_user_group_member m
+		           JOIN gocms_user_group g ON m.group_id = g.id
+		           WHERE m.user_id = u.id AND g.site_id = ? AND m.status = 'active' AND g.status = 'active'
+		       ) AS vip_group_count
 		FROM gocms_user u
 		WHERE (u.site_id = ? OR EXISTS (SELECT 1 FROM json_each(u.site_ids) WHERE value = ?))
 		  AND (? = '' OR u.username LIKE ? OR u.email LIKE ? OR u.display_name LIKE ?)
 		ORDER BY u.id DESC LIMIT ? OFFSET ?`
-	rows, err := s.database.QueryContext(r.Context(), selectQuery, siteID, siteID, q, like, like, like, size, (page-1)*size)
+	rows, err := s.database.QueryContext(r.Context(), selectQuery, siteID, siteID, siteID, siteID, q, like, like, like, size, (page-1)*size)
 	if err != nil {
 		http.Error(w, "database error", 500)
 		return
@@ -207,9 +224,18 @@ func (s *Server) listSiteUsers(w http.ResponseWriter, r *http.Request, siteID in
 	items := []siteUserAdminItem{}
 	for rows.Next() {
 		var x siteUserAdminItem
-		if err := rows.Scan(&x.ID, &x.Username, &x.Email, &x.DisplayName, &x.Status, &x.MaxSessions, &x.CreatedAt, &x.LastLoginAt); err != nil {
+		var rawVipExpiresAt sql.NullString
+		var vipGroupCount int
+		if err := rows.Scan(&x.ID, &x.Username, &x.Email, &x.DisplayName, &x.Status, &x.MaxSessions, &x.CreatedAt, &x.LastLoginAt, &rawVipExpiresAt, &vipGroupCount); err != nil {
 			http.Error(w, "database error", 500)
 			return
+		}
+		if vipGroupCount > 0 {
+			x.IsVip = true
+			if rawVipExpiresAt.Valid && rawVipExpiresAt.String != "" {
+				exp := rawVipExpiresAt.String
+				x.VipExpiresAt = &exp
+			}
 		}
 		items = append(items, x)
 	}

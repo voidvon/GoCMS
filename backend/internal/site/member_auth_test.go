@@ -263,3 +263,42 @@ func TestDefaultMemberGroupRegistration(t *testing.T) {
 	_ = standardID
 }
 
+func TestSiteUserRegisterUsernameValidation(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := db.CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(database, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+
+	// 1. Starts with digit: 201 Created
+	res1 := request(http.MethodPost, "/api/auth/register", `{"username":"9527coder","password":"password123"}`)
+	if res1.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for '9527coder', got: %d %s", res1.Code, res1.Body.String())
+	}
+
+	// 2. Purely numeric: 400 Bad Request
+	res2 := request(http.MethodPost, "/api/auth/register", `{"username":"123456","password":"password123"}`)
+	if res2.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for purely numeric '123456', got: %d %s", res2.Code, res2.Body.String())
+	}
+
+	// 3. Invalid characters: 400 Bad Request
+	res3 := request(http.MethodPost, "/api/auth/register", `{"username":"user@domain","password":"password123"}`)
+	if res3.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for 'user@domain', got: %d %s", res3.Code, res3.Body.String())
+	}
+}

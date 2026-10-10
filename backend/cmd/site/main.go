@@ -34,7 +34,7 @@ func main() {
 	templates := flag.String("templates", defaults.templates, "Go template directory")
 	data := flag.String("data", defaults.data, "publication state directory")
 	frontend := flag.String("frontend", defaults.frontend, "built admin SPA; empty uses the embedded SPA")
-	frontendDev := flag.String("frontend-dev", defaults.frontendDev, "Vite dev server URL to proxy /admin/ (e.g. http://127.0.0.1:5173); empty disables dev proxy")
+	frontendDev := flag.String("frontend-dev", defaults.frontendDev, "Vite dev server URL to proxy /admin/ (e.g. http://127.0.0.1:1244); empty disables dev proxy")
 	assets := flag.String("assets", defaults.assets, "public resource directory")
 	themeOverride := flag.String("theme", "", "theme resource directory override")
 	flag.Parse()
@@ -122,7 +122,7 @@ func runtimeDefaults() runtimePathDefaults {
 			templates:   "templates",
 			data:        filepath.Join("..", "data"),
 			frontend:    filepath.Join("..", "frontend", "dist"),
-			frontendDev: "http://127.0.0.1:5173",
+			frontendDev: "http://127.0.0.1:1244",
 			assets:      filepath.Join("..", "assets"),
 		}
 	}

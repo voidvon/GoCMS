@@ -20,7 +20,7 @@ backend:
 backend-once:
 	cd backend && go run ./cmd/site -addr 127.0.0.1:18080
 frontend:
-	cd frontend && npm run dev -- --host 127.0.0.1
+	cd frontend && npm run dev -- --host 127.0.0.1 --port 1244
 embedded-assets:
 	node scripts/sync-embedded.mjs
 build:

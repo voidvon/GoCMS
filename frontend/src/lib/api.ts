@@ -986,6 +986,8 @@ export type SiteUser = {
   status: "active" | "disabled" | "pending"
   created_at: string
   last_login_at?: string
+  vip_expires_at?: string
+  is_vip?: boolean
 }
 export const getSiteUsers = (page: number, q: string, siteId?: number) =>
   request<{ items: SiteUser[]; total: number; page_size: number }>(

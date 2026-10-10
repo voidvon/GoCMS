@@ -476,10 +476,16 @@ func TestMultiSiteRound2AuditFixes(t *testing.T) {
 	}
 	s2UserGroupID, _ := resGrp.LastInsertId()
 
-	// Assign shared_user to Site 2's group
-	wAssignGrp := categoryRequest(t, s, superToken, "POST", fmt.Sprintf("/api/admin/member-groups?site_id=%d", site2ID), fmt.Sprintf(`{"user_id":%d,"group_id":%d}`, sharedUserID, s2UserGroupID))
+	// Assign shared_user to Site 2's group with expiration
+	wAssignGrp := categoryRequest(t, s, superToken, "POST", fmt.Sprintf("/api/admin/member-groups?site_id=%d", site2ID), fmt.Sprintf(`{"user_id":%d,"group_id":%d,"expires_at":"2028-01-01T00:00:00Z"}`, sharedUserID, s2UserGroupID))
 	if wAssignGrp.Code != 200 {
 		t.Fatalf("failed to assign shared user to site 2 group: %d %s", wAssignGrp.Code, wAssignGrp.Body.String())
+	}
+
+	// List site users -> verify vip_expires_at and is_vip appear
+	wListUsersWithVIP := categoryRequest(t, s, superToken, "GET", fmt.Sprintf("/api/admin/site-users?site_id=%d", site2ID), "")
+	if !strings.Contains(wListUsersWithVIP.Body.String(), `"is_vip":true`) || !strings.Contains(wListUsersWithVIP.Body.String(), "2028-01-01") {
+		t.Fatalf("expected vip_expires_at and is_vip in site users list: %s", wListUsersWithVIP.Body.String())
 	}
 
 	// List group members -> shared user must appear!

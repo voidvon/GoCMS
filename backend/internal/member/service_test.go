@@ -2,6 +2,7 @@ package member
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -180,3 +181,81 @@ func TestRegisterWithDefaultGroup(t *testing.T) {
 	}
 }
 
+func TestIsValidUsername(t *testing.T) {
+	tests := []struct {
+		name     string
+		username string
+		valid    bool
+	}{
+		{"normal lowercase", "alice", true},
+		{"normal mixed case", "AliceBob", true},
+		{"starts with digit and has letters", "123alice", true},
+		{"starts with digit and has underscore", "9527_dev", true},
+		{"starts with digit and has hyphen", "007-agent", true},
+		{"starts with underscore and digits", "_123", true},
+		{"starts with hyphen and letters", "-user", true},
+		{"minimum length 3", "a-b", true},
+		{"maximum length 64", strings.Repeat("a", 63) + "1", true},
+		{"alphanumeric with underscore and hyphen", "Dev-User_99", true},
+
+		{"pure digits length 3", "123", false},
+		{"pure digits length 6", "123456", false},
+		{"pure digits with zeroes", "007", false},
+		{"pure digits long", "13800138000", false},
+		{"too short length 2", "ab", false},
+		{"too short length 1", "a", false},
+		{"empty string", "", false},
+		{"too long length 65", strings.Repeat("a", 65), false},
+		{"contains email at sign", "user@test.com", false},
+		{"contains whitespace", "user name", false},
+		{"contains tab", "user\tname", false},
+		{"contains exclamation", "user!name", false},
+		{"contains special symbol", "user#123", false},
+		{"contains script tag", "<script>", false},
+		{"contains path traversal", "../admin", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsValidUsername(tc.username)
+			if got != tc.valid {
+				t.Fatalf("IsValidUsername(%q) = %v; want %v", tc.username, got, tc.valid)
+			}
+		})
+	}
+}
+
+func TestRegisterUsernameValidation(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := Service{DB: database}
+
+	// 1. Starts with digit: allowed
+	p1, err := svc.Register(ctx, "9527coder", "coder@example.com", "password123", 1)
+	if err != nil {
+		t.Fatalf("expected registration with '9527coder' to succeed, got %v", err)
+	}
+	if p1.Username != "9527coder" {
+		t.Fatalf("expected username '9527coder', got %q", p1.Username)
+	}
+
+	// 2. Purely numeric: rejected
+	_, err = svc.Register(ctx, "123456", "numeric@example.com", "password123", 1)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for purely numeric username '123456', got %v", err)
+	}
+
+	// 3. Invalid characters: rejected
+	_, err = svc.Register(ctx, "bad<user>", "bad@example.com", "password123", 1)
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected ErrInvalid for invalid character username, got %v", err)
+	}
+}

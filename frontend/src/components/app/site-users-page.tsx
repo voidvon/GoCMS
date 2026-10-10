@@ -211,9 +211,13 @@ export function SiteUsersPage() {
           <table className="w-full min-w-[800px] text-left text-sm">
             <thead className="bg-muted/40">
               <tr>
-                {["用户名", "显示名称", "邮箱", "状态", "注册时间", "最后登录", "操作"].map((label) => (
-                  <th key={label} className="p-3 font-medium">{label}</th>
-                ))}
+                <th className="p-3 font-medium">用户名</th>
+                <th className="p-3 font-medium">显示名称</th>
+                <th className="p-3 font-medium">邮箱</th>
+                <th className="p-3 font-medium">状态</th>
+                <th className="p-3 font-medium">VIP到期时间</th>
+                <th className="p-3 font-medium">最后登录</th>
+                <th className="p-3 font-medium text-right">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -237,7 +241,17 @@ export function SiteUsersPage() {
                       </Badge>
                     )}
                   </td>
-                  <td className="whitespace-nowrap p-3 text-xs text-muted-foreground">{item.created_at}</td>
+                  <td className="whitespace-nowrap p-3 text-xs">
+                    {item.vip_expires_at ? (
+                      <span className="text-muted-foreground">
+                        {item.vip_expires_at.slice(0, 16).replace("T", " ")}
+                      </span>
+                    ) : item.is_vip ? (
+                      <Badge variant="secondary" className="text-xs">永久有效</Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
                   <td className="whitespace-nowrap p-3 text-xs text-muted-foreground">{item.last_login_at || "尚未登录"}</td>
                   <td className="space-x-2 whitespace-nowrap p-3 text-right">
                     <Button
@@ -268,33 +282,6 @@ export function SiteUsersPage() {
                     </Button>
                     <Button
                       size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      disabled={busy}
-                      onClick={() => {
-                        setError("")
-                        setConfirmation({
-                          title: `永久删除前台用户“${item.username}”？该操作无法撤销。`,
-                          action: () => deleteSiteUser(item.id),
-                        })
-                      }}
-                    >
-                      删除
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => {
-                        setError("")
-                        setSessionUser(item)
-                        setSessionLimit(String(item.max_sessions))
-                      }}
-                    >
-                      登录会话（上限 {item.max_sessions}）
-                    </Button>
-                    <Button
-                      size="sm"
                       variant="outline"
                       disabled={busy}
                       onClick={() => {
@@ -307,6 +294,33 @@ export function SiteUsersPage() {
                       }}
                     >
                       设置VIP
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busy}
+                      onClick={() => {
+                        setError("")
+                        setSessionUser(item)
+                        setSessionLimit(String(item.max_sessions))
+                      }}
+                    >
+                      登录会话（上限 {item.max_sessions}）
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      disabled={busy}
+                      onClick={() => {
+                        setError("")
+                        setConfirmation({
+                          title: `永久删除前台用户“${item.username}”？该操作无法撤销。`,
+                          action: () => deleteSiteUser(item.id),
+                        })
+                      }}
+                    >
+                      删除
                     </Button>
                   </td>
                 </tr>

@@ -13,6 +13,7 @@ export default defineConfig({
     },
   },
   server: {
+    port: 1244,
     proxy: {
       '/images': { target: 'http://127.0.0.1:18080', changeOrigin: true },
       '/css': { target: 'http://127.0.0.1:18080', changeOrigin: true },
