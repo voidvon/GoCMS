@@ -703,6 +703,11 @@ function ContentEditor({
   const [bodyUploading, setBodyUploading] = useState(false)
 
   useEffect(() => {
+    setForm({ ...content, visible: canReview ? content.visible : 0 })
+    setTranslations(buildInitialContentTranslations(content, defaultLang, enabledLanguages))
+  }, [content, defaultLang, enabledLanguages, canReview])
+
+  useEffect(() => {
     setTranslations((prev) => {
       let changed = false
       const next = { ...prev }
@@ -1441,6 +1446,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
       model_id: editingDetail.model_id ?? 1,
       route_key: editingDetail.route_key,
       extra_data: editingDetail.extra_data ?? {},
+      translations: editingDetail.translations ?? {},
     }
   }, [editingDetail, categoryID, categoryOptions])
 
