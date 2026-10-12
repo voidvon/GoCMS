@@ -672,10 +672,24 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, siteID, id int64, 
 		}
 	}
 	parts := strings.Split(strings.ToLower(strings.TrimSpace(payload.NavPosition)), ",")
-	valid := map[string]bool{"main":true,"top":true,"footer":true,"none":true}
+	valid := map[string]bool{"main": true, "top": true, "footer": true, "none": true}
+	hasNone := false
 	out := make([]string, 0, 3)
-	for _, p := range parts { p = strings.TrimSpace(p); if valid[p] && p != "none" { out = append(out, p) } }
-	if len(out) == 0 { out = []string{"main"} }
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "none" {
+			hasNone = true
+		} else if valid[p] {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		if hasNone {
+			out = []string{"none"}
+		} else {
+			out = []string{"main"}
+		}
+	}
 	payload.NavPosition = strings.Join(out, ",")
 	if payload.ListPageSize <= 0 {
 		payload.ListPageSize = 14

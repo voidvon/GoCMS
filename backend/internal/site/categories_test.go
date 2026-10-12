@@ -315,6 +315,19 @@ func TestCategoryNavPosition(t *testing.T) {
 	if updatedPos != "footer" {
 		t.Fatalf("expected updated nav_position to be footer, got %q", updatedPos)
 	}
+
+	// 5. Update nav_position to "none"
+	nonePayload := `{"name":"联系我们","parent_id":0,"order_id":1,"nav_position":"none"}`
+	noneRes := categoryRequest(t, server, token, http.MethodPut, "/api/admin/categories/"+strconv.FormatInt(contactID, 10), nonePayload)
+	if noneRes.Code != http.StatusOK {
+		t.Fatalf("update nav_position to none failed: %d %s", noneRes.Code, noneRes.Body.String())
+	}
+	if err := database.QueryRow(`SELECT "nav_position" FROM "gocms_category" WHERE "id" = ?`, contactID).Scan(&updatedPos); err != nil {
+		t.Fatal(err)
+	}
+	if updatedPos != "none" {
+		t.Fatalf("expected updated nav_position to be none, got %q", updatedPos)
+	}
 }
 
 func TestCustomRouteIDAndRouteKey(t *testing.T) {

@@ -129,23 +129,30 @@ type ListItem struct {
 }
 
 type ListCategory struct {
-	URL      string
-	Name     string
-	Current  bool
-	Last     bool
-	RowStart bool
-	RowEnd   bool
+	ID           int
+	URL          string
+	Name         string
+	Current      bool
+	Last         bool
+	RowStart     bool
+	RowEnd       bool
+	Description  string
+	Keywords     string
+	CoverContent string
 }
 
 type NavigationItem struct {
-	ID       int
-	ParentID int
-	URL      string
-	Name     string
-	Position string
-	Current  bool
-	Active   bool
-	Children []NavigationItem
+	ID           int
+	ParentID     int
+	URL          string
+	Name         string
+	Position     string
+	Current      bool
+	Active       bool
+	Description  string
+	Keywords     string
+	CoverContent string
+	Children     []NavigationItem
 }
 
 type ListPage struct {
@@ -328,16 +335,47 @@ func (c *content) templateFuncs() template.FuncMap {
 	return template.FuncMap{
 		"contentItems":          c.contentItems,
 		"contentItemsWithImage": c.contentItemsWithImage,
-		"setting":               func(key string) string { return esc(c.settings[strings.TrimSpace(key)]) },
-		"settingHTML":           func(key string) string { return c.settings[strings.TrimSpace(key)] },
-		"include":               func(path string, row Row) (string, error) { return c.include(path, row) },
-		"label":                 func(key string, data any) (string, error) { return c.renderLabel(key, data) },
-		"listItems":             func(row Row) []ListItem { return c.listItems(row) },
-		"listCategories":        func(row Row) []ListCategory { return c.listCategories(row) },
-		"listChildren":          func(row Row) []ListCategory { return c.listChildren(row) },
-		"catalogCategories":     func(_ Row) []ListCategory { return c.catalogCategories() },
-		"navigation":            func(args ...any) []NavigationItem { return c.navigation(args...) },
-		"featuredItems":         func(limit int) []ListItem { return c.featuredItems(limit) },
+		"setting": func(key string) string {
+			k := strings.TrimSpace(key)
+			if c.lang != "" {
+				if val, ok := c.settings[k+"_"+c.lang]; ok && strings.TrimSpace(val) != "" {
+					return esc(val)
+				}
+				langUnder := strings.ReplaceAll(c.lang, "-", "_")
+				if val, ok := c.settings[k+"_"+langUnder]; ok && strings.TrimSpace(val) != "" {
+					return esc(val)
+				}
+			}
+			return esc(c.settings[k])
+		},
+		"settingHTML": func(key string) string {
+			k := strings.TrimSpace(key)
+			if c.lang != "" {
+				if val, ok := c.settings[k+"_"+c.lang]; ok && strings.TrimSpace(val) != "" {
+					return val
+				}
+				langUnder := strings.ReplaceAll(c.lang, "-", "_")
+				if val, ok := c.settings[k+"_"+langUnder]; ok && strings.TrimSpace(val) != "" {
+					return val
+				}
+			}
+			return c.settings[k]
+		},
+		"category": func(id int) NavigationItem {
+			cat := c.cat(id)
+			if cat["id"] == "" {
+				return NavigationItem{}
+			}
+			return c.navigationItem(cat, "main", 1, 0, false)
+		},
+		"include":           func(path string, row Row) (string, error) { return c.include(path, row) },
+		"label":             func(key string, data any) (string, error) { return c.renderLabel(key, data) },
+		"listItems":         func(row Row) []ListItem { return c.listItems(row) },
+		"listCategories":    func(row Row) []ListCategory { return c.listCategories(row) },
+		"listChildren":      func(arg any) []ListCategory { return c.listChildren(arg) },
+		"catalogCategories": func(_ Row) []ListCategory { return c.catalogCategories() },
+		"navigation":        func(args ...any) []NavigationItem { return c.navigation(args...) },
+		"featuredItems":     func(limit int) []ListItem { return c.featuredItems(limit) },
 		"featuredItemsIn": func(collection string, limit int) []ListItem {
 			return c.featuredItemsIn(collection, limit)
 		},
@@ -1432,26 +1470,49 @@ func (c *content) listCategories(view Row) []ListCategory {
 	items := make([]ListCategory, 0, len(children))
 	for index, child := range children {
 		items = append(items, ListCategory{
-			URL:     esc(c.categoryListURL(child, 1)),
-			Name:    esc(child["name"]),
-			Current: child.n("id") == category.n("id"),
-			Last:    index+1 == len(children),
+			ID:           child.n("id"),
+			URL:          esc(c.categoryListURL(child, 1)),
+			Name:         esc(child["name"]),
+			Current:      child.n("id") == category.n("id"),
+			Last:         index+1 == len(children),
+			Description:  esc(child["description"]),
+			Keywords:     esc(child["keywords"]),
+			CoverContent: esc(child["cover_content"]),
 		})
 	}
 	return items
 }
 
-func (c *content) listChildren(view Row) []ListCategory {
-	category := c.cat(view.n("category_id"))
+func (c *content) listChildren(arg any) []ListCategory {
+	var catID int
+	switch v := arg.(type) {
+	case int:
+		catID = v
+	case int64:
+		catID = int(v)
+	case Row:
+		catID = v.n("category_id")
+	case map[string]string:
+		catID, _ = strconv.Atoi(v["category_id"])
+	case map[string]any:
+		if id, ok := v["category_id"].(int); ok {
+			catID = id
+		}
+	}
+	category := c.cat(catID)
 	children := c.children(category.n("id"))
 	items := make([]ListCategory, 0, len(children))
 	for index, child := range children {
 		items = append(items, ListCategory{
-			URL:      esc(c.categoryListURL(child, 1)),
-			Name:     esc(child["name"]),
-			Last:     index+1 == len(children),
-			RowStart: index%5 == 0,
-			RowEnd:   index%5 == 4 || index+1 == len(children),
+			ID:           child.n("id"),
+			URL:          esc(c.categoryListURL(child, 1)),
+			Name:         esc(child["name"]),
+			Last:         index+1 == len(children),
+			RowStart:     index%5 == 0,
+			RowEnd:       index%5 == 4 || index+1 == len(children),
+			Description:  esc(child["description"]),
+			Keywords:     esc(child["keywords"]),
+			CoverContent: esc(child["cover_content"]),
 		})
 	}
 	return items
@@ -1646,14 +1707,17 @@ func (c *content) navigationItem(category Row, position string, depth int, curre
 	}
 
 	return NavigationItem{
-		ID:       catID,
-		ParentID: parentID,
-		URL:      url,
-		Name:     esc(category["name"]),
-		Position: pos,
-		Current:  isCurrent,
-		Active:   isActive,
-		Children: items,
+		ID:           catID,
+		ParentID:     parentID,
+		URL:          url,
+		Name:         esc(category["name"]),
+		Position:     pos,
+		Current:      isCurrent,
+		Active:       isActive,
+		Description:  esc(category["description"]),
+		Keywords:     esc(category["keywords"]),
+		CoverContent: esc(category["cover_content"]),
+		Children:     items,
 	}
 }
 
@@ -2008,10 +2072,60 @@ func (c *content) buildForLang() error {
 	if c.langPrefix != "" {
 		homePagePath = c.langPrefix + "/index.html"
 	}
+	siteName := c.settings["site_name"]
+	if c.lang != "" {
+		if sn, ok := c.settings["site_name_"+c.lang]; ok && strings.TrimSpace(sn) != "" {
+			siteName = sn
+		} else {
+			langUnder := strings.ReplaceAll(c.lang, "-", "_")
+			if sn, ok := c.settings["site_name_"+langUnder]; ok && strings.TrimSpace(sn) != "" {
+				siteName = sn
+			}
+		}
+	}
+	siteTitle := c.settings["site_title"]
+	if c.lang != "" {
+		if st, ok := c.settings["site_title_"+c.lang]; ok && strings.TrimSpace(st) != "" {
+			siteTitle = st
+		} else {
+			langUnder := strings.ReplaceAll(c.lang, "-", "_")
+			if st, ok := c.settings["site_title_"+langUnder]; ok && strings.TrimSpace(st) != "" {
+				siteTitle = st
+			}
+		}
+	}
+	if strings.TrimSpace(siteTitle) == "" {
+		siteTitle = siteName
+	}
+	siteKeywords := c.settings["site_keywords"]
+	if c.lang != "" {
+		if sk, ok := c.settings["site_keywords_"+c.lang]; ok && strings.TrimSpace(sk) != "" {
+			siteKeywords = sk
+		} else {
+			langUnder := strings.ReplaceAll(c.lang, "-", "_")
+			if sk, ok := c.settings["site_keywords_"+langUnder]; ok && strings.TrimSpace(sk) != "" {
+				siteKeywords = sk
+			}
+		}
+	}
+	siteDescription := c.settings["site_description"]
+	if c.lang != "" {
+		if sd, ok := c.settings["site_description_"+c.lang]; ok && strings.TrimSpace(sd) != "" {
+			siteDescription = sd
+		} else {
+			langUnder := strings.ReplaceAll(c.lang, "-", "_")
+			if sd, ok := c.settings["site_description_"+langUnder]; ok && strings.TrimSpace(sd) != "" {
+				siteDescription = sd
+			}
+		}
+	}
+
 	if err := c.pageTemplate(homePagePath, c.homeTemplate(), Row{
-		"title":         esc(c.settings["site_name"]),
-		"site_name":     esc(c.settings["site_name"]),
+		"title":         esc(siteTitle),
+		"site_name":     esc(siteName),
 		"site_url":      esc(c.settings["site_url"]),
+		"keywords":      esc(siteKeywords),
+		"description":   esc(siteDescription),
 		"root_category": "",
 		"home_url":      c.homeURL(),
 		"lang":          c.lang,
