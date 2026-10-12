@@ -393,6 +393,7 @@ func (c *content) templateFuncs() template.FuncMap {
 			}
 			return parseMorepic(fmt.Sprint(val))
 		},
+		"homeURL": func() string { return c.homeURL() },
 		"multiValue": func(val any) []string {
 			if val == nil {
 				return nil
@@ -1987,6 +1988,7 @@ func (c *content) categoryDetailTemplate(category Row) string {
 
 func (c *content) contentView(row Row) Row {
 	category := c.cat(row.n("category_id"))
+	parent := c.cat(category.n("parent_id"))
 	root := c.listRoot(category)
 	image := strings.TrimSpace(row["cover_image"])
 	res := Row{
@@ -2007,6 +2009,9 @@ func (c *content) contentView(row Row) Row {
 		"category_id":        esc(category["id"]),
 		"category_name":      esc(category["name"]),
 		"category_url":       c.categoryListURL(category, 1),
+		"parent_id":          esc(parent["id"]),
+		"parent_name":        esc(parent["name"]),
+		"parent_url":         c.categoryListURL(parent, 1),
 		"category_root_id":   esc(root["id"]),
 		"category_root_name": esc(root["name"]),
 		"category_root_url":  c.categoryListURL(root, 1),
