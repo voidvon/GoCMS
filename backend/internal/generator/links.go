@@ -17,6 +17,10 @@ var resourceAttribute = regexp.MustCompile(`(?i)\b(href|src|action)\s*=\s*("[^"]
 // Normalize theme and content resource references to the public URL space and
 // match the actual case of files on disk.
 func (c *content) normalizeLinks(assets, theme string, siteIDOpt ...int64) error {
+	return normalizePages(c.pages, assets, theme, siteIDOpt...)
+}
+
+func normalizePages(pages map[string][]byte, assets, theme string, siteIDOpt ...int64) error {
 	index := map[string]string{}
 	basenames := map[string]string{}
 	addTree := func(root, publicPrefix string) error {
@@ -111,11 +115,11 @@ func (c *content) normalizeLinks(assets, theme string, siteIDOpt ...int64) error
 			}
 		}
 	}
-	for p := range c.pages {
+	for p := range pages {
 		index[strings.ToLower(p)] = p
 	}
-	for name, b := range c.pages {
-		c.pages[name] = resourceAttribute.ReplaceAllFunc(b, func(raw []byte) []byte {
+	for name, b := range pages {
+		pages[name] = resourceAttribute.ReplaceAllFunc(b, func(raw []byte) []byte {
 			attr := string(raw)
 			m := resourceAttribute.FindStringSubmatch(attr)
 			value := html.UnescapeString(strings.Trim(m[2], `"'`))

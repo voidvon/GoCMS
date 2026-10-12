@@ -277,7 +277,49 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 		}
 	}
 
-	// 3. Scan wildcard domain or aliases (*.domain.com)
+	// 3. Scan standalone language sites (exact match or language domain pattern)
+	if langRows, err := query.QueryContext(ctx, `
+		SELECT "code", "domain", "output_dir"
+		FROM "`+LanguageTable+`"
+		WHERE "site_mode" = '`+LanguageSiteModeStandalone+`' AND "is_enabled" = 1 AND "domain" != ''`); err == nil {
+		type matchedLang struct {
+			code      string
+			domain    string
+			outputDir string
+		}
+		var matchedL *matchedLang
+		for langRows.Next() {
+			var code, dom, outDir string
+			if err := langRows.Scan(&code, &dom, &outDir); err == nil {
+				domNorm := NormalizeDomain(dom)
+				if domNorm == host || MatchHostPattern(domNorm, host) {
+					matchedL = &matchedLang{code: code, domain: domNorm, outputDir: outDir}
+					break
+				}
+			}
+		}
+		_ = langRows.Close()
+		if matchedL != nil {
+			mainSite, err := GetDefaultSite(ctx, query)
+			if err != nil {
+				return nil, err
+			}
+			siteCopy := *mainSite
+			siteCopy.Domain = matchedL.domain
+			if matchedL.outputDir != "" {
+				siteCopy.OutputDir = matchedL.outputDir
+			} else if mainSite.ID > 1 {
+				siteCopy.OutputDir = fmt.Sprintf("%d_%s", mainSite.ID, strings.ToLower(matchedL.code))
+			} else if mainSite.OutputDir != "" {
+				siteCopy.OutputDir = fmt.Sprintf("%s_%s", mainSite.OutputDir, strings.ToLower(matchedL.code))
+			} else {
+				siteCopy.OutputDir = fmt.Sprintf("standalone_%s", strings.ToLower(matchedL.code))
+			}
+			return &siteCopy, nil
+		}
+	}
+
+	// 4. Scan wildcard domain or aliases (*.domain.com)
 	for _, s := range sites {
 		if MatchHostPattern(s.Domain, host) {
 			match := s

@@ -377,3 +377,36 @@ func TestSiteRedirectAliases(t *testing.T) {
 	}
 }
 
+func TestGetSiteByHostStandaloneLanguage(t *testing.T) {
+	database, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+
+	if err := CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+
+	// Insert a standalone language
+	_, err = database.Exec(`
+		INSERT INTO "` + LanguageTable + `" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir")
+		VALUES ('ru', 'Русский', 0, 0, 1, 40, 'ru', 'standalone', 'ru.spiraxsteam.com', 'site2_ru')`)
+	if err != nil {
+		t.Fatalf("insert language failed: %v", err)
+	}
+
+	// Test GetSiteByHost with language domain
+	site, err := GetSiteByHost(context.Background(), database, "ru.spiraxsteam.com")
+	if err != nil {
+		t.Fatalf("expected to resolve standalone language site, got error: %v", err)
+	}
+	if site.Domain != "ru.spiraxsteam.com" {
+		t.Errorf("expected domain ru.spiraxsteam.com, got %s", site.Domain)
+	}
+	if site.OutputDir != "site2_ru" {
+		t.Errorf("expected output dir site2_ru, got %s", site.OutputDir)
+	}
+}
+
+

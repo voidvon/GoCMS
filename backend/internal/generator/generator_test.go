@@ -954,3 +954,143 @@ func TestNavigationCurrentAndActive(t *testing.T) {
 	}
 }
 
+func TestStandaloneLanguageSiteGeneration(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_site_setting" ("site_id", "key", "value") VALUES
+			(2, 'site_name', '主站'), (2, 'site_url', 'https://example.test/')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. zh-CN (default, subdir)
+	// 2. en (subdir)
+	// 3. ru (standalone, domain: ru.example.com, output_dir: sub_ru)
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_language" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir")
+		VALUES
+			('en', 'English', 0, 0, 1, 10, 'en', 'subdir', '', ''),
+			('ru', 'Русский', 0, 0, 1, 20, '', 'standalone', 'ru.example.com', 'sub_ru')`); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_category"
+			("id", "site_id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id",
+			 "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path",
+			 "detail_file_pattern", "detail_template")
+		VALUES
+			(1, 2, '新闻', 0, 1, 10, 'list', 1, 'news', '{id}.html', 'lists/news.html', '', 'news', '{id}.html', 'details/news.html')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_category_translation" ("category_id", "lang", "name")
+		VALUES (1, 'ru', 'Новости')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_content"
+			("id", "site_id", "category_id", "route_key", "title", "summary", "body", "sort_order", "visible")
+		VALUES
+			(10, 2, 1, 'first', '中文新闻1', '摘要1', '<p>正文1</p>', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_content_translation" ("content_id", "lang", "title")
+		VALUES (10, 'ru', 'Русская новость 1')`); err != nil {
+		t.Fatal(err)
+	}
+
+	templates := filepath.Join(t.TempDir(), "templates")
+	writeTemplate(t, templates, "index.html", `site={{setting "site_name"}} lang={{currentLang}} langs={{range languages .}}{{.Code}}:{{.URL}};{{end}}`)
+	writeTemplate(t, templates, "msg.html", `msg lang={{currentLang}}`)
+	writeTemplate(t, templates, "search.html", `search lang={{currentLang}}`)
+	writeTemplate(t, templates, "lists/news.html", `cat={{.category_name}} lang={{currentLang}}`)
+	writeTemplate(t, templates, "details/news.html", `title={{.title}} home={{.home_url}} lang={{.lang}}`)
+
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	publisher := Publisher{SiteID: 2, DB: database, Web: web, Templates: templates, Data: filepath.Join(root, "data")}
+	report, err := publisher.Generate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Contents != 1 {
+		t.Fatalf("visible content count = %d, want 1", report.Contents)
+	}
+
+	mainWeb := publisher.TargetWeb() // web/2
+	t.Logf("main site generated at: %s", mainWeb)
+
+	// 1. Verify Main site at web/2
+	zhHome := readGenerated(t, mainWeb, "index.html")
+	if !strings.Contains(zhHome, "lang=zh-CN") {
+		t.Fatalf("unexpected zh home: %s", zhHome)
+	}
+	// Main site language switcher should have:
+	// zh-CN: /
+	// en: /en/
+	// ru: https://ru.example.com/ (cross-domain standalone URL!)
+	if !strings.Contains(zhHome, "zh-CN:/;") || !strings.Contains(zhHome, "en:/en/;") || !strings.Contains(zhHome, "ru:https://ru.example.com/;") {
+		t.Fatalf("unexpected main site lang switcher: %s", zhHome)
+	}
+	// Verify en subdir exists on main site
+	enHome := readGenerated(t, mainWeb, "en/index.html")
+	if !strings.Contains(enHome, "lang=en") {
+		t.Fatalf("unexpected en home: %s", enHome)
+	}
+	// Crucial: ru must NOT be generated inside main site web/2
+	if _, err := os.Stat(filepath.Join(mainWeb, "ru")); !os.IsNotExist(err) {
+		t.Fatalf("expected mainWeb/ru to NOT exist, but it was found!")
+	}
+	if _, err := os.Stat(filepath.Join(mainWeb, "sub_ru")); !os.IsNotExist(err) {
+		t.Fatalf("expected mainWeb/sub_ru to NOT exist inside mainWeb, but it was found!")
+	}
+
+	// 2. Verify Standalone Russian site at filepath.Join(web, "..", "sub_ru")
+	// Publisher.LanguageTargetWeb(ru) with outDir 'sub_ru' and p.Web 'web' resolves to filepath.Join(p.Web, "sub_ru")
+	// Wait! Let's check where LanguageTargetWeb outputs:
+	ruDir := publisher.LanguageTargetWeb(LanguageInfo{SiteMode: "standalone", OutputDir: "sub_ru", Code: "ru"})
+	t.Logf("ruDir resolved to: %s", ruDir)
+
+	ruHome := readGenerated(t, ruDir, "index.html")
+	if !strings.Contains(ruHome, "lang=ru") {
+		t.Fatalf("unexpected ru home: %s", ruHome)
+	}
+	// Standalone site language switcher should have:
+	// zh-CN: https://example.test/ (cross-domain back to main site!)
+	// en: https://example.test/en/ (cross-domain back to main site subdir!)
+	// ru: https://ru.example.com/
+	if !strings.Contains(ruHome, "zh-CN:https://example.test/;") || !strings.Contains(ruHome, "en:https://example.test/en/;") || !strings.Contains(ruHome, "ru:https://ru.example.com/;") {
+		t.Fatalf("unexpected standalone ru lang switcher: %s", ruHome)
+	}
+
+	// Standalone site interior pages must be root-based without /ru/ prefix
+	ruList := readGenerated(t, ruDir, "news/1.html")
+	if !strings.Contains(ruList, "cat=Новости") {
+		t.Fatalf("unexpected ru list: %s", ruList)
+	}
+	ruDetail := readGenerated(t, ruDir, "news/first.html")
+	if !strings.Contains(ruDetail, "title=Русская новость 1") || !strings.Contains(ruDetail, "home=/") {
+		t.Fatalf("unexpected ru detail: %s", ruDetail)
+	}
+
+	// Standalone site sitemap must be based on standalone domain
+	ruSitemap := readGenerated(t, ruDir, "Sitemap.xml")
+	if !strings.Contains(ruSitemap, "https://ru.example.com/news/1.html") || strings.Contains(ruSitemap, "example.test") {
+		t.Fatalf("unexpected ru sitemap: %s", ruSitemap)
+	}
+	ruRobots := readGenerated(t, ruDir, "robots.txt")
+	if !strings.Contains(ruRobots, "Sitemap: https://ru.example.com/sitemap.xml") {
+		t.Fatalf("unexpected ru robots: %s", ruRobots)
+	}
+}
+
+

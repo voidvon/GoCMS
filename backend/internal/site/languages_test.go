@@ -176,3 +176,58 @@ func TestMultiLanguageContentAndCategory(t *testing.T) {
 		t.Fatalf("expected fallback to 默认文章标题, got %+v", singleContent)
 	}
 }
+
+func TestStandaloneLanguageSiteAPI(t *testing.T) {
+	server, _, token := newLanguageTestServer(t)
+
+	// 1. Add standalone language ru
+	ruPayload := `{"code":"ru","name":"Русский","is_default":false,"is_fallback":false,"is_enabled":true,"sort_order":40,"path_prefix":"ru","site_mode":"standalone","domain":"ru.example.com","output_dir":"sub_ru"}`
+	res := adminRequest(t, server, token, http.MethodPost, "/api/admin/languages", ruPayload)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on create, got %d: %s", res.Code, res.Body.String())
+	}
+
+	// 2. Query languages and verify fields
+	res = adminRequest(t, server, token, http.MethodGet, "/api/admin/languages", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.Code)
+	}
+	var items []LanguageItem
+	if err := json.Unmarshal(res.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	var ruItem *LanguageItem
+	for i := range items {
+		if items[i].Code == "ru" {
+			ruItem = &items[i]
+			break
+		}
+	}
+	if ruItem == nil {
+		t.Fatal("ru language not found")
+	}
+	if ruItem.SiteMode != db.LanguageSiteModeStandalone || ruItem.Domain != "ru.example.com" || ruItem.OutputDir != "sub_ru" {
+		t.Fatalf("unexpected ru item fields: %+v", ruItem)
+	}
+
+	// 3. Update ru language
+	updatePayload := fmt.Sprintf(`{"code":"ru","name":"Русский(Updated)","is_default":false,"is_fallback":false,"is_enabled":true,"sort_order":40,"path_prefix":"ru","site_mode":"standalone","domain":"new-ru.example.com","output_dir":"new_ru"}`,)
+	res = adminRequest(t, server, token, http.MethodPut, fmt.Sprintf("/api/admin/languages/%d", ruItem.ID), updatePayload)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200 on update, got %d: %s", res.Code, res.Body.String())
+	}
+
+	// 4. Verify updated fields
+	res = adminRequest(t, server, token, http.MethodGet, "/api/admin/languages", "")
+	_ = json.Unmarshal(res.Body.Bytes(), &items)
+	for i := range items {
+		if items[i].Code == "ru" {
+			ruItem = &items[i]
+			break
+		}
+	}
+	if ruItem.Domain != "new-ru.example.com" || ruItem.OutputDir != "new_ru" {
+		t.Fatalf("unexpected updated fields: %+v", ruItem)
+	}
+}
+

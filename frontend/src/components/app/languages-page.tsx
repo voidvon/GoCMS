@@ -56,6 +56,9 @@ export function LanguagesPage() {
     is_enabled: 1,
     is_default: 0,
     is_fallback: 0,
+    site_mode: "subdir",
+    domain: "",
+    output_dir: "",
   })
   const [submitting, setSubmitting] = useState(false)
 
@@ -72,6 +75,9 @@ export function LanguagesPage() {
       is_enabled: 1,
       is_default: 0,
       is_fallback: 0,
+      site_mode: "subdir",
+      domain: "",
+      output_dir: "",
     })
     setError("")
     setDialogOpen(true)
@@ -87,6 +93,9 @@ export function LanguagesPage() {
       is_enabled: lang.is_enabled,
       is_default: lang.is_default,
       is_fallback: lang.is_fallback,
+      site_mode: lang.site_mode || "subdir",
+      domain: lang.domain || "",
+      output_dir: lang.output_dir || "",
     })
     setError("")
     setDialogOpen(true)
@@ -201,8 +210,28 @@ export function LanguagesPage() {
                     <TableCell className="font-medium">
                       {lang.name}
                     </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">
-                      {lang.is_default === 1 ? "/" : `/${lang.path_prefix || lang.code.toLowerCase()}/`}
+                    <TableCell className="text-xs">
+                      {lang.is_default === 1 ? (
+                        <span className="font-mono text-muted-foreground">/</span>
+                      ) : lang.site_mode === "standalone" ? (
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1">
+                            <Badge variant="outline" className="text-[10px] h-4 px-1 text-purple-600 border-purple-500/30 bg-purple-500/10">
+                              独立分站
+                            </Badge>
+                            <span className="font-mono font-medium text-purple-700 dark:text-purple-300">
+                              {lang.domain || "(未绑定域名)"}
+                            </span>
+                          </div>
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            目录: {lang.output_dir || `<site_id>_${lang.code.toLowerCase()}`}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="font-mono text-muted-foreground">
+                          {`/${lang.path_prefix || lang.code.toLowerCase()}/`}
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -318,21 +347,82 @@ export function LanguagesPage() {
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="path-prefix">路径前缀 (静态生成目录)</Label>
-              <Input
-                id="path-prefix"
-                placeholder={formData.is_default === 1 ? "主站无需前缀，直接使用根路径 /" : "例如: en"}
-                value={formData.path_prefix}
-                onChange={(e) => setFormData({ ...formData, path_prefix: e.target.value })}
-                disabled={formData.is_default === 1}
-              />
-              <p className="text-xs text-muted-foreground">
-                {formData.is_default === 1
-                  ? "主站语言默认生成在根目录(/)，无需前缀。"
-                  : "副语言生成目录，例如输入 en，前台访问路径为 /en/。"}
-              </p>
-            </div>
+            {formData.is_default !== 1 && (
+              <div className="space-y-2 border-t pt-3">
+                <Label>站点模式</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={formData.site_mode === "standalone" ? "outline" : "default"}
+                    size="sm"
+                    className="h-9 justify-start text-xs"
+                    onClick={() => setFormData({ ...formData, site_mode: "subdir" })}
+                  >
+                    子目录模式 (Subdir)
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={formData.site_mode === "standalone" ? "default" : "outline"}
+                    size="sm"
+                    className="h-9 justify-start text-xs"
+                    onClick={() => setFormData({ ...formData, site_mode: "standalone" })}
+                  >
+                    独立域名模式 (Standalone)
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {formData.site_mode === "standalone"
+                    ? "独立域名模式：生成在与主站平级的独立物理目录，绑定独立域名，内页以根路径 / 渲染。"
+                    : "子目录模式：生成在主站的子目录下（如 /en/）。"}
+                </p>
+              </div>
+            )}
+
+            {formData.is_default !== 1 && formData.site_mode === "standalone" ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="lang-domain">独立域名 (Domain)</Label>
+                  <Input
+                    id="lang-domain"
+                    placeholder="例如: ru.spiraxsteam.com 或 bray.ru"
+                    value={formData.domain || ""}
+                    onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    该独立语言分站绑定的专属域名（支持多级子域名或独立顶级域名）。
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="lang-output-dir">独立输出目录 (物理文件夹)</Label>
+                  <Input
+                    id="lang-output-dir"
+                    placeholder={`留空默认: <site_id>_${formData.code.toLowerCase() || "lang"}`}
+                    value={formData.output_dir || ""}
+                    onChange={(e) => setFormData({ ...formData, output_dir: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    平级物理输出目录名，绝不嵌套在主站目录下。留空将自动根据站点与语言代码命名。
+                  </p>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="path-prefix">路径前缀 (静态生成目录)</Label>
+                <Input
+                  id="path-prefix"
+                  placeholder={formData.is_default === 1 ? "主站无需前缀，直接使用根路径 /" : "例如: en"}
+                  value={formData.path_prefix}
+                  onChange={(e) => setFormData({ ...formData, path_prefix: e.target.value })}
+                  disabled={formData.is_default === 1}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {formData.is_default === 1
+                    ? "主站语言默认生成在根目录(/)，无需前缀。"
+                    : "副语言生成目录，例如输入 en，前台访问路径为 /en/。"}
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="sort-order">排序序号</Label>

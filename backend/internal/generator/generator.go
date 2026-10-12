@@ -64,6 +64,30 @@ func (p Publisher) TargetWeb() string {
 	return targetWeb
 }
 
+func (p Publisher) LanguageTargetWeb(lang LanguageInfo) string {
+	if lang.SiteMode != "standalone" {
+		return p.TargetWeb()
+	}
+	outDir := strings.TrimSpace(strings.Trim(lang.OutputDir, "/\\"))
+	if outDir == "" {
+		if p.SiteID > 0 {
+			outDir = fmt.Sprintf("%d_%s", p.SiteID, strings.ToLower(lang.Code))
+		} else if p.OutputDir != "" {
+			outDir = fmt.Sprintf("%s_%s", p.OutputDir, strings.ToLower(lang.Code))
+		} else {
+			outDir = fmt.Sprintf("standalone_%s", strings.ToLower(lang.Code))
+		}
+	}
+	if filepath.IsAbs(outDir) {
+		return outDir
+	}
+	targetWeb := p.TargetWeb()
+	if filepath.Clean(targetWeb) == filepath.Clean(p.Web) {
+		return filepath.Join(filepath.Dir(targetWeb), outDir)
+	}
+	return filepath.Join(p.Web, outDir)
+}
+
 func (p Publisher) lockPath() string {
 	if p.SiteID > 1 {
 		return fmt.Sprintf("publish_%d.lock", p.SiteID)
@@ -85,6 +109,9 @@ type LanguageInfo struct {
 	IsCurrent  bool   `json:"is_current"`
 	IsDefault  bool   `json:"is_default"`
 	PathPrefix string `json:"path_prefix,omitempty"`
+	SiteMode   string `json:"site_mode,omitempty"`
+	Domain     string `json:"domain,omitempty"`
+	OutputDir  string `json:"output_dir,omitempty"`
 }
 
 type content struct {
@@ -98,6 +125,8 @@ type content struct {
 	labelDepth       int
 	lang             string
 	langPrefix       string
+	isStandalone     bool
+	currentLangInfo  LanguageInfo
 	languages        []LanguageInfo
 	visibleCache     []Row
 	categoryCache    map[int][]Row
@@ -413,13 +442,31 @@ func (c *content) homeURL() string {
 func (c *content) languagesNav() []LanguageInfo {
 	res := make([]LanguageInfo, len(c.languages))
 	for i, l := range c.languages {
+		targetURL := l.URL
+		if l.SiteMode == "standalone" {
+			if l.Domain != "" {
+				if strings.Contains(l.Domain, "://") {
+					targetURL = strings.TrimRight(l.Domain, "/") + "/"
+				} else {
+					targetURL = "https://" + l.Domain + "/"
+				}
+			}
+		} else if c.isStandalone {
+			mainSiteURL := strings.TrimRight(c.settings["site_url"], "/")
+			if mainSiteURL != "" {
+				targetURL = mainSiteURL + l.URL
+			}
+		}
 		res[i] = LanguageInfo{
 			Code:       l.Code,
 			Name:       l.Name,
-			URL:        l.URL,
+			URL:        targetURL,
 			IsCurrent:  l.Code == c.lang,
 			IsDefault:  l.IsDefault,
 			PathPrefix: l.PathPrefix,
+			SiteMode:   l.SiteMode,
+			Domain:     l.Domain,
+			OutputDir:  l.OutputDir,
 		}
 	}
 	return res
@@ -808,8 +855,19 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 			isDef := lr.n("is_default") == 1
 			isFb := lr.n("is_fallback") == 1
 			prefix := strings.Trim(lr["path_prefix"], "/")
+			siteMode := strings.ToLower(strings.TrimSpace(lr["site_mode"]))
+			if siteMode != "standalone" {
+				siteMode = "subdir"
+			}
+			domain := strings.TrimSpace(lr["domain"])
+			outDir := strings.TrimSpace(strings.Trim(lr["output_dir"], "/\\"))
 			if isDef {
 				defaultLang = lr["code"]
+				prefix = ""
+				siteMode = "subdir"
+				domain = ""
+				outDir = ""
+			} else if siteMode == "standalone" {
 				prefix = ""
 			} else if prefix == "" {
 				prefix = strings.ToLower(lr["code"])
@@ -818,7 +876,17 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 				fallbackLang = lr["code"]
 			}
 			url := "/"
-			if prefix != "" {
+			if siteMode == "standalone" {
+				if domain != "" {
+					if strings.Contains(domain, "://") {
+						url = strings.TrimRight(domain, "/") + "/"
+					} else {
+						url = "https://" + domain + "/"
+					}
+				} else {
+					url = "/"
+				}
+			} else if prefix != "" {
 				url = "/" + prefix + "/"
 			}
 			enabledLanguages = append(enabledLanguages, LanguageInfo{
@@ -827,6 +895,9 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 				URL:        url,
 				IsDefault:  isDef,
 				PathPrefix: prefix,
+				SiteMode:   siteMode,
+				Domain:     domain,
+				OutputDir:  outDir,
 			})
 		}
 	}
@@ -919,9 +990,25 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	if err != nil {
 		return report, err
 	}
+	type standaloneBuild struct {
+		lang      LanguageInfo
+		targetWeb string
+		pages     map[string][]byte
+	}
+	var standaloneList []standaloneBuild
+	mainPages := make(map[string][]byte)
+
 	for _, lang := range enabledLanguages {
 		c.lang = lang.Code
-		c.langPrefix = lang.PathPrefix
+		c.isStandalone = (lang.SiteMode == "standalone")
+		c.currentLangInfo = lang
+		if c.isStandalone {
+			c.langPrefix = ""
+		} else {
+			c.langPrefix = lang.PathPrefix
+		}
+		c.pages = make(map[string][]byte)
+
 		c.tables["gocms_category"] = prepareTranslatedCategories(baseCategories, c.tables["gocms_category_translation"], lang.Code, fallbackLang)
 		c.tables["gocms_content"] = prepareTranslatedContent(baseContents, c.tables["gocms_content_translation"], lang.Code, fallbackLang, transFields)
 		c.visibleCache = nil
@@ -935,8 +1022,53 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		if err = c.buildForLang(); err != nil {
 			return report, err
 		}
+
+		if c.isStandalone {
+			langSiteURL := lang.Domain
+			if langSiteURL == "" {
+				langSiteURL = c.settings["site_url"]
+			} else if !strings.Contains(langSiteURL, "://") {
+				langSiteURL = "https://" + langSiteURL
+			}
+			langSiteURL = strings.TrimRight(langSiteURL, "/")
+
+			langUrls := make([]string, 0, len(c.pages))
+			for pagePath := range c.pages {
+				langUrls = append(langUrls, pagePath)
+			}
+			sort.Strings(langUrls)
+
+			c.pages["llms.txt"], err = renderLLMS(ctx, langSiteURL, langUrls, func(path string) (io.ReadCloser, error) {
+				return io.NopCloser(bytes.NewReader(c.pages[path])), nil
+			})
+			if err != nil {
+				return report, err
+			}
+			c.pages["sitemap.html"] = renderSitemapHTML(langUrls)
+			xmlMap := renderSitemapXML(langSiteURL, langUrls)
+			c.pages["sitemap.xml"] = xmlMap
+			c.pages["Sitemap.xml"] = xmlMap
+			if c.pages["robots.txt"] == nil && langSiteURL != "" {
+				c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", langSiteURL))
+			}
+
+			if err = normalizePages(c.pages, p.Assets, p.Theme, p.SiteID); err != nil {
+				return report, err
+			}
+
+			standaloneList = append(standaloneList, standaloneBuild{
+				lang:      lang,
+				targetWeb: p.LanguageTargetWeb(lang),
+				pages:     c.pages,
+			})
+		} else {
+			for k, v := range c.pages {
+				mainPages[k] = v
+			}
+		}
 	}
 
+	c.pages = mainPages
 	urls := make([]string, 0, len(c.pages))
 	for pagePath := range c.pages {
 		urls = append(urls, pagePath)
@@ -961,50 +1093,66 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 			report.Contents++
 		}
 	}
-	report.Files = len(c.pages)
+	totalFiles := len(mainPages)
+	for _, b := range standaloneList {
+		totalFiles += len(b.pages)
+	}
+	report.Files = totalFiles
 
+	// Publish main site
 	targetWeb := p.TargetWeb()
+	if err = publishPagesToDirectory(ctx, targetWeb, mainPages); err != nil {
+		return report, err
+	}
+
+	// Publish standalone language sites to independent directories
+	for _, b := range standaloneList {
+		if err = publishPagesToDirectory(ctx, b.targetWeb, b.pages); err != nil {
+			return report, err
+		}
+	}
+
+	return report, nil
+}
+
+func publishPagesToDirectory(ctx context.Context, targetWeb string, pages map[string][]byte) error {
 	web, err := filepath.Abs(targetWeb)
 	if err != nil {
-		return report, err
+		return err
 	}
 	if web == filepath.Dir(web) {
-		return report, fmt.Errorf("invalid web root")
+		return fmt.Errorf("invalid web root")
 	}
 	if err = os.MkdirAll(filepath.Dir(web), 0755); err != nil {
-		return report, err
+		return err
 	}
 	stage, err := os.MkdirTemp(filepath.Dir(web), ".web-stage-")
 	if err != nil {
-		return report, err
+		return err
 	}
 	defer os.RemoveAll(stage)
-	if err = c.normalizeLinks(p.Assets, p.Theme, p.SiteID); err != nil {
-		return report, err
-	}
-	for relative, data := range c.pages {
+
+	for relative, data := range pages {
 		if err = ctx.Err(); err != nil {
-			return report, err
+			return err
 		}
-		// stage is a private temporary tree; avoid per-file temp files and renames.
-		// This substantially reduces filesystem overhead for large publications.
 		path := filepath.Join(stage, filepath.FromSlash(relative))
 		if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return report, err
+			return err
 		}
 		if err = os.WriteFile(path, data, 0644); err != nil {
-			return report, err
+			return err
 		}
 	}
 
 	backup := web + ".previous"
 	if _, err = os.Stat(backup); err == nil {
-		return report, fmt.Errorf("上次发布备份仍存在: %s，请先检查恢复", backup)
+		return fmt.Errorf("上次发布备份仍存在: %s，请先检查恢复", backup)
 	}
 	hadWeb := false
 	if _, err = os.Stat(web); err == nil {
 		if err = os.Rename(web, backup); err != nil {
-			return report, err
+			return err
 		}
 		hadWeb = true
 	}
@@ -1012,12 +1160,12 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		if hadWeb {
 			_ = os.Rename(backup, web)
 		}
-		return report, err
+		return err
 	}
 	if hadWeb {
 		_ = os.RemoveAll(backup)
 	}
-	return report, nil
+	return nil
 }
 
 func sortRows(rows []Row, orderField string, category bool) {

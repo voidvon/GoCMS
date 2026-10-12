@@ -206,6 +206,9 @@ export type Language = {
   is_enabled: number
   sort_order: number
   path_prefix: string
+  site_mode?: string
+  domain?: string
+  output_dir?: string
 }
 
 export type LanguageInput = Omit<Language, "id">

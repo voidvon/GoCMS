@@ -44,11 +44,14 @@ type LanguageItem struct {
 	IsEnabled  int    `json:"is_enabled"`
 	SortOrder  int    `json:"sort_order"`
 	PathPrefix string `json:"path_prefix"`
+	SiteMode   string `json:"site_mode"`
+	Domain     string `json:"domain"`
+	OutputDir  string `json:"output_dir"`
 }
 
 func (s *Server) getLanguages(ctx context.Context) ([]LanguageItem, error) {
 	rows, err := s.database.QueryContext(ctx, `
-		SELECT "id", "code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix"
+		SELECT "id", "code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir"
 		FROM "`+db.LanguageTable+`"
 		ORDER BY "is_default" DESC, "sort_order" ASC, "id" ASC`)
 	if err != nil {
@@ -59,7 +62,7 @@ func (s *Server) getLanguages(ctx context.Context) ([]LanguageItem, error) {
 	var items []LanguageItem
 	for rows.Next() {
 		var item LanguageItem
-		if err := rows.Scan(&item.ID, &item.Code, &item.Name, &item.IsDefault, &item.IsFallback, &item.IsEnabled, &item.SortOrder, &item.PathPrefix); err != nil {
+		if err := rows.Scan(&item.ID, &item.Code, &item.Name, &item.IsDefault, &item.IsFallback, &item.IsEnabled, &item.SortOrder, &item.PathPrefix, &item.SiteMode, &item.Domain, &item.OutputDir); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -101,13 +104,16 @@ func (s *Server) adminLanguages(response http.ResponseWriter, request *http.Requ
 
 	case http.MethodPost:
 		var payload struct {
-			Code       string `json:"code"`
-			Name       string `json:"name"`
+			Code       string  `json:"code"`
+			Name       string  `json:"name"`
 			IsDefault  BoolInt `json:"is_default"`
 			IsFallback BoolInt `json:"is_fallback"`
 			IsEnabled  BoolInt `json:"is_enabled"`
-			SortOrder  int    `json:"sort_order"`
-			PathPrefix string `json:"path_prefix"`
+			SortOrder  int     `json:"sort_order"`
+			PathPrefix string  `json:"path_prefix"`
+			SiteMode   string  `json:"site_mode"`
+			Domain     string  `json:"domain"`
+			OutputDir  string  `json:"output_dir"`
 		}
 		if err := decodeRequest(request, &payload); err != nil {
 			http.Error(response, "invalid payload", http.StatusBadRequest)
@@ -117,6 +123,23 @@ func (s *Server) adminLanguages(response http.ResponseWriter, request *http.Requ
 		payload.Code = strings.TrimSpace(payload.Code)
 		payload.Name = strings.TrimSpace(payload.Name)
 		payload.PathPrefix = strings.Trim(strings.TrimSpace(payload.PathPrefix), "/")
+		payload.SiteMode = strings.ToLower(strings.TrimSpace(payload.SiteMode))
+		if payload.SiteMode != db.LanguageSiteModeStandalone {
+			payload.SiteMode = db.LanguageSiteModeSubdir
+		}
+		if payload.SiteMode == db.LanguageSiteModeStandalone {
+			payload.Domain = db.NormalizeDomain(payload.Domain)
+			payload.OutputDir = strings.TrimSpace(strings.Trim(payload.OutputDir, "/\\"))
+			if payload.OutputDir != "" {
+				if err := db.ValidateOutputDir(payload.OutputDir); err != nil {
+					http.Error(response, "invalid output_dir: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+		} else {
+			payload.Domain = ""
+			payload.OutputDir = ""
+		}
 
 		if payload.Code == "" || payload.Name == "" {
 			http.Error(response, "code and name are required", http.StatusBadRequest)
@@ -126,15 +149,18 @@ func (s *Server) adminLanguages(response http.ResponseWriter, request *http.Requ
 		if payload.IsDefault == 1 {
 			_, _ = s.database.ExecContext(request.Context(), `UPDATE "`+db.LanguageTable+`" SET "is_default" = 0`)
 			payload.IsEnabled = 1 // Default language must be enabled
+			payload.SiteMode = db.LanguageSiteModeSubdir
+			payload.Domain = ""
+			payload.OutputDir = ""
 		}
 		if payload.IsFallback == 1 {
 			_, _ = s.database.ExecContext(request.Context(), `UPDATE "`+db.LanguageTable+`" SET "is_fallback" = 0`)
 		}
 
 		res, err := s.database.ExecContext(request.Context(), `
-			INSERT INTO "`+db.LanguageTable+`" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix")
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			payload.Code, payload.Name, payload.IsDefault, payload.IsFallback, payload.IsEnabled, payload.SortOrder, payload.PathPrefix)
+			INSERT INTO "`+db.LanguageTable+`" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir")
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			payload.Code, payload.Name, payload.IsDefault, payload.IsFallback, payload.IsEnabled, payload.SortOrder, payload.PathPrefix, payload.SiteMode, payload.Domain, payload.OutputDir)
 		if err != nil {
 			http.Error(response, "duplicate language code or database error", http.StatusBadRequest)
 			return
@@ -162,13 +188,16 @@ func (s *Server) adminLanguageItem(response http.ResponseWriter, request *http.R
 	switch request.Method {
 	case http.MethodPut:
 		var payload struct {
-			Code       string `json:"code"`
-			Name       string `json:"name"`
+			Code       string  `json:"code"`
+			Name       string  `json:"name"`
 			IsDefault  BoolInt `json:"is_default"`
 			IsFallback BoolInt `json:"is_fallback"`
 			IsEnabled  BoolInt `json:"is_enabled"`
-			SortOrder  int    `json:"sort_order"`
-			PathPrefix string `json:"path_prefix"`
+			SortOrder  int     `json:"sort_order"`
+			PathPrefix string  `json:"path_prefix"`
+			SiteMode   string  `json:"site_mode"`
+			Domain     string  `json:"domain"`
+			OutputDir  string  `json:"output_dir"`
 		}
 		if err := decodeRequest(request, &payload); err != nil {
 			http.Error(response, "invalid payload", http.StatusBadRequest)
@@ -178,6 +207,23 @@ func (s *Server) adminLanguageItem(response http.ResponseWriter, request *http.R
 		payload.Code = strings.TrimSpace(payload.Code)
 		payload.Name = strings.TrimSpace(payload.Name)
 		payload.PathPrefix = strings.Trim(strings.TrimSpace(payload.PathPrefix), "/")
+		payload.SiteMode = strings.ToLower(strings.TrimSpace(payload.SiteMode))
+		if payload.SiteMode != db.LanguageSiteModeStandalone {
+			payload.SiteMode = db.LanguageSiteModeSubdir
+		}
+		if payload.SiteMode == db.LanguageSiteModeStandalone {
+			payload.Domain = db.NormalizeDomain(payload.Domain)
+			payload.OutputDir = strings.TrimSpace(strings.Trim(payload.OutputDir, "/\\"))
+			if payload.OutputDir != "" {
+				if err := db.ValidateOutputDir(payload.OutputDir); err != nil {
+					http.Error(response, "invalid output_dir: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+		} else {
+			payload.Domain = ""
+			payload.OutputDir = ""
+		}
 
 		if payload.Code == "" || payload.Name == "" {
 			http.Error(response, "code and name are required", http.StatusBadRequest)
@@ -187,6 +233,9 @@ func (s *Server) adminLanguageItem(response http.ResponseWriter, request *http.R
 		if payload.IsDefault == 1 {
 			_, _ = s.database.ExecContext(request.Context(), `UPDATE "`+db.LanguageTable+`" SET "is_default" = 0 WHERE "id" != ?`, id)
 			payload.IsEnabled = 1
+			payload.SiteMode = db.LanguageSiteModeSubdir
+			payload.Domain = ""
+			payload.OutputDir = ""
 		}
 		if payload.IsFallback == 1 {
 			_, _ = s.database.ExecContext(request.Context(), `UPDATE "`+db.LanguageTable+`" SET "is_fallback" = 0 WHERE "id" != ?`, id)
@@ -194,9 +243,9 @@ func (s *Server) adminLanguageItem(response http.ResponseWriter, request *http.R
 
 		if _, err := s.database.ExecContext(request.Context(), `
 			UPDATE "`+db.LanguageTable+`"
-			SET "code" = ?, "name" = ?, "is_default" = ?, "is_fallback" = ?, "is_enabled" = ?, "sort_order" = ?, "path_prefix" = ?
+			SET "code" = ?, "name" = ?, "is_default" = ?, "is_fallback" = ?, "is_enabled" = ?, "sort_order" = ?, "path_prefix" = ?, "site_mode" = ?, "domain" = ?, "output_dir" = ?
 			WHERE "id" = ?`,
-			payload.Code, payload.Name, payload.IsDefault, payload.IsFallback, payload.IsEnabled, payload.SortOrder, payload.PathPrefix, id); err != nil {
+			payload.Code, payload.Name, payload.IsDefault, payload.IsFallback, payload.IsEnabled, payload.SortOrder, payload.PathPrefix, payload.SiteMode, payload.Domain, payload.OutputDir, id); err != nil {
 			http.Error(response, "database error or duplicate code", http.StatusBadRequest)
 			return
 		}

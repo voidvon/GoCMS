@@ -8,6 +8,11 @@ import (
 
 const LanguageTable = "gocms_language"
 
+const (
+	LanguageSiteModeSubdir     = "subdir"
+	LanguageSiteModeStandalone = "standalone"
+)
+
 type LanguageItem struct {
 	ID         int64  `json:"id"`
 	Code       string `json:"code"`
@@ -17,6 +22,9 @@ type LanguageItem struct {
 	IsEnabled  int    `json:"is_enabled"`
 	SortOrder  int    `json:"sort_order"`
 	PathPrefix string `json:"path_prefix"`
+	SiteMode   string `json:"site_mode"`
+	Domain     string `json:"domain"`
+	OutputDir  string `json:"output_dir"`
 }
 
 // EnsureLanguages creates and migrates the language table.
@@ -30,7 +38,10 @@ func EnsureLanguages(ctx context.Context, database *sql.DB) error {
 			"is_fallback" INTEGER NOT NULL DEFAULT 0,
 			"is_enabled" INTEGER NOT NULL DEFAULT 1,
 			"sort_order" INTEGER NOT NULL DEFAULT 0,
-			"path_prefix" TEXT NOT NULL DEFAULT ''
+			"path_prefix" TEXT NOT NULL DEFAULT '',
+			"site_mode" TEXT NOT NULL DEFAULT 'subdir',
+			"domain" TEXT NOT NULL DEFAULT '',
+			"output_dir" TEXT NOT NULL DEFAULT ''
 		)`); err != nil {
 		return fmt.Errorf("create language table: %w", err)
 	}
@@ -41,6 +52,9 @@ func EnsureLanguages(ctx context.Context, database *sql.DB) error {
 		"is_enabled":  "INTEGER NOT NULL DEFAULT 1",
 		"sort_order":  "INTEGER NOT NULL DEFAULT 0",
 		"path_prefix": "TEXT NOT NULL DEFAULT ''",
+		"site_mode":   "TEXT NOT NULL DEFAULT 'subdir'",
+		"domain":      "TEXT NOT NULL DEFAULT ''",
+		"output_dir":  "TEXT NOT NULL DEFAULT ''",
 	} {
 		if err := ensureLanguageColumn(ctx, database, name, definition); err != nil {
 			return err
