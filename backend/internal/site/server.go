@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"gocms/internal/captcha"
 	"gocms/internal/db"
 	"gocms/internal/templateconfig"
 	"gocms/internal/templatelabel"
@@ -39,6 +40,7 @@ type Server struct {
 	sitePublications map[int64]*publication
 	updateMu         sync.Mutex
 	updateActive     bool
+	captcha          *captcha.Service
 }
 
 func New(database *sql.DB, siteRoot string) (*Server, error) {
@@ -79,10 +81,15 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 			return nil, err
 		}
 	}
+	captSvc, err := captcha.NewService()
+	if err != nil {
+		return nil, fmt.Errorf("create captcha service: %w", err)
+	}
 	return &Server{
 		database:  database,
 		siteRoot:  siteRoot,
 		fileServe: http.FileServer(http.Dir(siteRoot)),
+		captcha:   captSvc,
 	}, nil
 }
 
@@ -230,6 +237,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.contentJSON(response, request)
 	case "/api/messages", "/api/feedback":
 		s.feedbackSubmit(response, request)
+	case "/api/captcha", "/api/captcha/slide":
+		s.captchaSlide(response, request)
+	case "/api/captcha/check":
+		s.captchaCheck(response, request)
 	case "/search":
 		target := "/search.html"
 		if request.URL.RawQuery != "" {

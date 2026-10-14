@@ -87,8 +87,30 @@ func (s *Server) feedbackSubmit(response http.ResponseWriter, request *http.Requ
 		if reqField == "" {
 			continue
 		}
+		if reqField == "captcha" || reqField == "captcha_token" {
+			cToken := strings.TrimSpace(request.FormValue("captcha_token"))
+			if cToken == "" {
+				cToken = strings.TrimSpace(request.FormValue("token"))
+			}
+			if s.captcha == nil || !s.captcha.VerifyAndConsume(cToken) {
+				http.Error(response, "验证码校验失败或已过期，请重新验证", http.StatusBadRequest)
+				return
+			}
+			continue
+		}
 		if strings.TrimSpace(request.FormValue(reqField)) == "" {
 			http.Error(response, fmt.Sprintf("%s is required", reqField), http.StatusBadRequest)
+			return
+		}
+	}
+
+	captchaToken := strings.TrimSpace(request.FormValue("captcha_token"))
+	if captchaToken == "" {
+		captchaToken = strings.TrimSpace(request.FormValue("token"))
+	}
+	if captchaToken != "" {
+		if s.captcha == nil || !s.captcha.VerifyAndConsume(captchaToken) {
+			http.Error(response, "验证码校验失败或已过期，请重新验证", http.StatusBadRequest)
 			return
 		}
 	}
@@ -132,6 +154,7 @@ func (s *Server) feedbackSubmit(response http.ResponseWriter, request *http.Requ
 		"class_id": true, "bid": true, "title": true, "name": true,
 		"phone": true, "mobile": true, "fax": true, "email": true,
 		"address": true, "content": true, "saytext": true, "content_id": true,
+		"captcha_token": true, "token": true, "cf-turnstile-response": true,
 	}
 	extraData := make(map[string]any)
 	for key, values := range request.Form {
