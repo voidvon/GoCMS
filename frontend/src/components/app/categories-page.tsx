@@ -428,7 +428,7 @@ export function CategoriesPage() {
         cover_template: nextCoverTemplate,
         list_template: nextListTemplate,
         list_path: pageType === "cover" ? current.list_path : (!current.list_path ? "category" : current.list_path),
-        list_file_pattern: pageType === "list" && !current.list_file_pattern.includes("{id}") ? "{id}.html" : current.list_file_pattern,
+        list_file_pattern: pageType === "list" && !current.list_file_pattern.trim() ? "{id}.html" : current.list_file_pattern,
       }
     })
   }

@@ -1094,3 +1094,100 @@ func TestStandaloneLanguageSiteGeneration(t *testing.T) {
 }
 
 
+
+func TestListIndexFilePatternPagination(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_site_setting" ("key", "value") VALUES
+			('site_name', '测试站点'), ('site_url', 'https://example.test/')`); err != nil {
+		t.Fatal(err)
+	}
+	// Two list categories sharing the products directory: 131 keeps the {id}
+	// rule, 149 switches to the index.html rule.
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_category"
+			("id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id",
+			 "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path",
+			 "detail_file_pattern", "detail_template")
+		VALUES
+			(131, '产品', 0, 1, 2, 'list', 131, 'products', '{id}.html', 'category_list.html', '', 'content', '{id}.html', 'content_detail.html'),
+			(149, '控制系统', 0, 2, 2, 'list', 149, 'systems', 'index.html', 'category_list.html', '', 'content', '{id}.html', 'content_detail.html')`); err != nil {
+		t.Fatal(err)
+	}
+	// 5 items each => 3 pages with page_size 2.
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_content"
+			("id", "category_id", "route_key", "title", "summary", "body", "sort_order", "visible")
+		VALUES
+			(1, 149, 'a', 'A', '', '', 1, 1),
+			(2, 149, 'b', 'B', '', '', 2, 1),
+			(3, 149, 'c', 'C', '', '', 3, 1),
+			(4, 149, 'd', 'D', '', '', 4, 1),
+			(5, 149, 'e', 'E', '', '', 5, 1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	templates := filepath.Join(t.TempDir(), "templates")
+	writeTemplate(t, templates, "index.html", `home`)
+	writeTemplate(t, templates, "category_list.html",
+		`{{.category_name}}|page={{.list_page}}{{with listPagination .}}|pages={{range .PageLinks}}{{.Number}}={{.URL}};{{end}}{{end}}`)
+	writeTemplate(t, templates, "content_detail.html", `detail={{.title}}`)
+	writeTemplate(t, templates, "msg.html", `msg`)
+	writeTemplate(t, templates, "search.html", `search`)
+
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	publisher := Publisher{DB: database, Web: web, Templates: templates, Data: filepath.Join(root, "data")}
+	if _, err := publisher.Generate(ctx); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// index.html rule: page 1 is index.html, page 2+ is index-N.html, and the
+	// legacy {id}.html / {id}-N.html URLs stay published as aliases.
+	for _, want := range []string{
+		"systems/index.html",
+		"systems/index-2.html",
+		"systems/index-3.html",
+		"systems/149.html",
+		"systems/149-1.html",
+		"systems/149-2.html",
+		"systems/149-3.html",
+	} {
+		if _, err := os.Stat(filepath.Join(web, filepath.FromSlash(want))); err != nil {
+			t.Fatalf("%s should exist: %v", want, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(web, filepath.FromSlash("systems/index-1.html"))); !os.IsNotExist(err) {
+		t.Fatal("systems/index-1.html should not be generated")
+	}
+
+	// Page links must use the directory form for page 1 and index-N for the rest.
+	page1 := readGenerated(t, web, "systems/index.html")
+	wantLinks := "控制系统|page=1|pages=1=/systems/;2=/systems/index-2.html;3=/systems/index-3.html;"
+	if page1 != wantLinks {
+		t.Fatalf("index rule pagination mismatch:\n got %q\nwant %q", page1, wantLinks)
+	}
+	if page2 := readGenerated(t, web, "systems/index-2.html"); !strings.Contains(page2, "|page=2|") {
+		t.Fatalf("index-2.html should render page 2: %q", page2)
+	}
+
+	// The {id} rule is untouched.
+	if _, err := os.Stat(filepath.Join(web, filepath.FromSlash("products/131.html"))); err != nil {
+		t.Fatalf("products/131.html should exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(web, filepath.FromSlash("products/index.html"))); err != nil {
+		t.Fatalf("products/index.html alias should exist: %v", err)
+	}
+	idPage := readGenerated(t, web, "products/131.html")
+	if !strings.Contains(idPage, "1=/products/131.html;") {
+		t.Fatalf("id rule pagination changed: %q", idPage)
+	}
+}

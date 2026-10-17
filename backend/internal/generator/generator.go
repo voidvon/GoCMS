@@ -1332,7 +1332,7 @@ func (c *content) categoryListPattern(row Row) string {
 		}
 		return routing.DefaultCoverPattern
 	}
-	if normalized, err := routing.NormalizeFilePattern(pattern, false); err == nil {
+	if normalized, err := routing.NormalizeListFilePattern(pattern); err == nil {
 		return normalized
 	}
 	return routing.DefaultListPattern
@@ -1393,7 +1393,9 @@ func (c *content) categoryListURL(row Row, page int) string {
 		filename = strconv.Itoa(routeID) + ".html"
 	}
 	directory := c.categoryListDir(row)
-	if c.categoryPageType(row) == routing.PageTypeCover && isIndexFilename(filename) {
+	// A route whose first page renders as index.html is addressed through its
+	// directory ("/products/"), for both cover pages and paginated lists.
+	if isIndexFilename(filename) {
 		if directory == "" {
 			if c.langPrefix != "" {
 				return "/" + c.langPrefix + "/"
@@ -1424,6 +1426,9 @@ func (c *content) categoryListPagePath(row Row, page int) string {
 	var err error
 	if c.categoryPageType(row) == routing.PageTypeCover {
 		filename, err = routing.RenderCoverFilename(c.categoryListPattern(row), int64(routeID))
+	} else if pattern := c.categoryListPattern(row); page == 1 && routing.IsIndexFilename(pattern) {
+		// An index rule has no "-1" variant: page 1 is the directory index itself.
+		filename = pattern
 	} else {
 		filename, err = routing.RenderListPageFilename(c.categoryListPattern(row), int64(routeID), page)
 	}
@@ -1438,8 +1443,40 @@ func (c *content) categoryListPagePath(row Row, page int) string {
 }
 
 func isIndexFilename(value string) bool {
-	lower := strings.ToLower(value)
-	return lower == "index.html" || lower == "index.htm"
+	return routing.IsIndexFilename(value)
+}
+
+// legacyListPagePaths returns the pre-index.html paths of a list page
+// ("{id}.html" for the first page, "{id}-{page}.html" afterwards). They are
+// published as aliases so that switching a category to a fixed index filename
+// rule does not break already indexed URLs.
+func (c *content) legacyListPagePaths(row Row, page int) []string {
+	routeID := row.n("route_id")
+	if routeID == 0 {
+		routeID = row.n("id")
+	}
+	directory := c.categoryListDir(row)
+	paths := make([]string, 0, 2)
+	seen := make(map[string]bool, 2)
+	for _, render := range []func(string, int64, int) (string, error){
+		routing.RenderListFilename,
+		routing.RenderListPageFilename,
+	} {
+		filename, err := render(routing.DefaultListPattern, int64(routeID), page)
+		if err != nil {
+			continue
+		}
+		target := strings.Trim(directory+"/"+filename, "/")
+		if c.langPrefix != "" {
+			target = c.langPrefix + "/" + target
+		}
+		if target == "" || seen[target] {
+			continue
+		}
+		seen[target] = true
+		paths = append(paths, target)
+	}
+	return paths
 }
 
 func (c *content) contentURL(row Row) string {
@@ -2335,9 +2372,14 @@ func (c *content) buildForLang() error {
 			if err := c.pageTemplate(pagePath, c.categoryListTemplate(category), view); err != nil {
 				return err
 			}
+			for _, legacy := range c.legacyListPagePaths(category, page) {
+				if legacy != pagePath && c.pages[legacy] == nil {
+					c.pages[legacy] = c.pages[pagePath]
+				}
+			}
 			if page == 1 {
 				alias := strings.TrimPrefix(c.categoryListURL(category, 1), "/")
-				if alias != "" && !strings.HasSuffix(alias, "/") {
+				if alias != "" && !strings.HasSuffix(alias, "/") && c.pages[alias] == nil {
 					c.pages[alias] = c.pages[pagePath]
 				}
 				directory := c.categoryListDir(category)

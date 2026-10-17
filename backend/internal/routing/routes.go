@@ -85,6 +85,29 @@ func NormalizeCoverFilePattern(value string) (string, error) {
 	return normalizeFilePattern(value, false, false)
 }
 
+// NormalizeListFilePattern validates the filename rule of a paginated list
+// route. The rule either keeps the {id} placeholder ("{id}.html") or is an
+// index filename ("index.html"), in which case page 1 is published as
+// index.html and pages 2+ as index-2.html, index-3.html, … — the convention
+// the reference sites use. Other fixed names stay rejected so that a list
+// route cannot silently take over an unrelated page in a shared directory.
+func NormalizeListFilePattern(value string) (string, error) {
+	normalized, err := normalizeFilePattern(value, false, false)
+	if err != nil {
+		return "", err
+	}
+	if !strings.Contains(normalized, "{id}") && !IsIndexFilename(normalized) {
+		return "", fmt.Errorf("列表文件名规则必须包含 {id}，或使用 index.html")
+	}
+	return normalized, nil
+}
+
+// IsIndexFilename reports whether a filename addresses a directory index.
+func IsIndexFilename(value string) bool {
+	lower := strings.ToLower(strings.TrimSpace(value))
+	return lower == "index.html" || lower == "index.htm"
+}
+
 func normalizeFilePattern(value string, requireID, allowPage bool) (string, error) {
 	value = strings.TrimSpace(strings.ReplaceAll(value, `\`, "/"))
 	if value == "" {
@@ -149,7 +172,7 @@ func RenderDetailFilenameValue(pattern, value string) (string, error) {
 }
 
 func RenderListFilename(pattern string, categoryID int64, page int) (string, error) {
-	pattern, err := NormalizeFilePattern(pattern, false)
+	pattern, err := NormalizeListFilePattern(pattern)
 	if err != nil {
 		return "", err
 	}
@@ -165,7 +188,7 @@ func RenderListFilename(pattern string, categoryID int64, page int) (string, err
 }
 
 func RenderListPageFilename(pattern string, categoryID int64, page int) (string, error) {
-	pattern, err := NormalizeFilePattern(pattern, false)
+	pattern, err := NormalizeListFilePattern(pattern)
 	if err != nil {
 		return "", err
 	}
