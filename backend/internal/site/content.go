@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
-	"path"
 	"strconv"
 	"strings"
 
@@ -768,5 +767,5 @@ func (s *Server) contentDetailURL(ctx context.Context, categoryID int64, routeKe
 	if err != nil {
 		return "", err
 	}
-	return path.Join("/", directory, filename), nil
+	return routing.DetailURL(directory, filename), nil
 }

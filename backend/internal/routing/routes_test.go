@@ -90,6 +90,15 @@ func TestRouteValidation(t *testing.T) {
 	if _, err := RenderDetailFilenameValue("{id}/index.html", "a/b"); err == nil {
 		t.Fatal("detail value with slash accepted")
 	}
+	if got := DetailURL("products/steam-traps", "tdlv-thermodynamic-steam-trap/index.html"); got != "/products/steam-traps/tdlv-thermodynamic-steam-trap/" {
+		t.Fatalf("nested detail URL = %q", got)
+	}
+	if got := DetailURL("products/steam-traps", "tdlv-thermodynamic-steam-trap.html"); got != "/products/steam-traps/tdlv-thermodynamic-steam-trap.html" {
+		t.Fatalf("flat detail URL = %q", got)
+	}
+	if got := DetailURL("", "index.html"); got != "/index.html" {
+		t.Fatalf("root detail URL = %q", got)
+	}
 	if got, err := RenderCoverFilename("landing.html", 25); err != nil || got != "landing.html" {
 		t.Fatalf("cover route filename = %q, err=%v", got, err)
 	}

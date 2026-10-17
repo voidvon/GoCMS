@@ -136,6 +136,21 @@ func NormalizeDetailFilePattern(value string) (string, error) {
 	return value, nil
 }
 
+// DetailURL joins a detail directory and a rendered filename into a URL path.
+// An entry published as a directory index is addressed by its directory
+// ("/products/steam-traps/tdlv-thermodynamic-steam-trap/"), every other entry by
+// its file.
+func DetailURL(directory, filename string) string {
+	target := strings.Trim(strings.TrimSpace(filename), "/")
+	if directory = strings.Trim(strings.TrimSpace(directory), "/"); directory != "" {
+		target = directory + "/" + target
+	}
+	if slash := strings.LastIndexByte(target, '/'); slash >= 0 && IsIndexFilename(target[slash+1:]) {
+		target = target[:slash+1]
+	}
+	return "/" + target
+}
+
 func normalizeFilePattern(value string, requireID, allowPage bool) (string, error) {
 	value = strings.TrimSpace(strings.ReplaceAll(value, `\`, "/"))
 	if value == "" {

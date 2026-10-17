@@ -1479,16 +1479,23 @@ func (c *content) legacyListPagePaths(row Row, page int) []string {
 	return paths
 }
 
-// contentDetailTarget renders the page path of a content entry relative to the
-// site root, without the language prefix. A nested rule such as
-// "{id}/index.html" keeps the trailing directory index in the path.
-func (c *content) contentDetailTarget(row Row) string {
+// contentDetailFilename resolves the detail directory and the rendered filename
+// of a content entry.
+func (c *content) contentDetailFilename(row Row) (string, string) {
 	category := c.cat(row.n("category_id"))
 	filename, err := routing.RenderDetailFilenameValue(c.categoryDetailPattern(category), row["route_key"])
 	if err != nil {
 		filename = row["route_key"] + ".html"
 	}
-	return strings.Trim(c.categoryDetailDir(category)+"/"+filename, "/")
+	return c.categoryDetailDir(category), filename
+}
+
+// contentDetailTarget renders the page path of a content entry relative to the
+// site root, without the language prefix. A nested rule such as
+// "{id}/index.html" keeps the trailing directory index in the path.
+func (c *content) contentDetailTarget(row Row) string {
+	directory, filename := c.contentDetailFilename(row)
+	return strings.Trim(directory+"/"+filename, "/")
 }
 
 // contentPagePath is the generated file path of a content entry.
@@ -1501,11 +1508,8 @@ func (c *content) contentPagePath(row Row) string {
 }
 
 func (c *content) contentURL(row Row) string {
-	target := c.contentDetailTarget(row)
-	// An entry published as its own directory index is addressed by directory.
-	if slash := strings.LastIndexByte(target, '/'); slash >= 0 && isIndexFilename(target[slash+1:]) {
-		target = target[:slash+1]
-	}
+	directory, filename := c.contentDetailFilename(row)
+	target := strings.TrimPrefix(routing.DetailURL(directory, filename), "/")
 	if c.langPrefix != "" {
 		return "/" + c.langPrefix + "/" + target
 	}
