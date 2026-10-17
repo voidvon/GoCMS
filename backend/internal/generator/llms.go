@@ -111,7 +111,7 @@ func renderLLMS(ctx context.Context, base string, paths []string, open func(stri
 		if title == "" {
 			title = markdownText(path, 200)
 		}
-		source := base + (&url.URL{Path: "/" + path}).EscapedPath()
+		source := base + (&url.URL{Path: "/" + publicURL(path)}).EscapedPath()
 		fmt.Fprintf(&entries, "- [%s](<%s>)", title, source)
 		if description != "" {
 			fmt.Fprintf(&entries, ": %s", description)

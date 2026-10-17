@@ -104,7 +104,7 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 	}
 
 	guide := readGenerated(t, web, "llms.txt")
-	for _, want := range []string{"/entries/second.html", "/sections/1-2.html", "/landing/index.html"} {
+	for _, want := range []string{"/entries/second.html", "/sections/1-2.html", "/landing/"} {
 		if !strings.Contains(guide, want) {
 			t.Fatalf("llms missing %s", want)
 		}
@@ -1156,17 +1156,22 @@ func TestListIndexFilePatternPagination(t *testing.T) {
 		"systems/index.html",
 		"systems/index-2.html",
 		"systems/index-3.html",
-		"systems/149.html",
-		"systems/149-1.html",
-		"systems/149-2.html",
-		"systems/149-3.html",
 	} {
 		if _, err := os.Stat(filepath.Join(web, filepath.FromSlash(want))); err != nil {
 			t.Fatalf("%s should exist: %v", want, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(web, filepath.FromSlash("systems/index-1.html"))); !os.IsNotExist(err) {
-		t.Fatal("systems/index-1.html should not be generated")
+	// The old "{id}.html" / "{id}-{page}.html" URLs are not kept as aliases.
+	for _, gone := range []string{
+		"systems/index-1.html",
+		"systems/149.html",
+		"systems/149-1.html",
+		"systems/149-2.html",
+		"systems/149-3.html",
+	} {
+		if _, err := os.Stat(filepath.Join(web, filepath.FromSlash(gone))); !os.IsNotExist(err) {
+			t.Fatalf("%s should not be generated", gone)
+		}
 	}
 
 	// Page links must use the directory form for page 1 and index-N for the rest.
@@ -1251,10 +1256,10 @@ func TestDetailDirectoryFilePattern(t *testing.T) {
 	if body != want {
 		t.Fatalf("nested detail page mismatch:\n got %q\nwant %q", body, want)
 	}
-	// The flat URL stays published as an alias.
+	// The old flat URL is not kept around as an alias.
 	legacy := "products/steam-traps/ball-float/ftgs14-ball-float-steam-trap.html"
-	if _, err := os.Stat(filepath.Join(web, filepath.FromSlash(legacy))); err != nil {
-		t.Fatalf("%s should exist: %v", legacy, err)
+	if _, err := os.Stat(filepath.Join(web, filepath.FromSlash(legacy))); !os.IsNotExist(err) {
+		t.Fatalf("%s should not be generated", legacy)
 	}
 
 	// Flat rule is untouched and gets no nested directory.

@@ -181,7 +181,8 @@ func renderSitemapHTML(urls []string) []byte {
 	var b strings.Builder
 	b.WriteString(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>网站地图</title><ul>`)
 	for _, value := range urls {
-		b.WriteString(`<li><a href="` + esc("/"+value) + `">` + esc(value) + `</a></li>`)
+		public := publicURL(value)
+		b.WriteString(`<li><a href="` + esc("/"+public) + `">` + esc(public) + `</a></li>`)
 	}
 	b.WriteString("</ul></html>")
 	return []byte(b.String())
@@ -191,7 +192,7 @@ func renderSitemapXML(base string, urls []string) []byte {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`)
 	for _, value := range urls {
-		b.WriteString("<url><loc>" + esc(base+"/"+value) + "</loc></url>")
+		b.WriteString("<url><loc>" + esc(base+"/"+publicURL(value)) + "</loc></url>")
 	}
 	b.WriteString("</urlset>")
 	return []byte(b.String())

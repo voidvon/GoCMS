@@ -49,7 +49,7 @@ func TestGenerateSitemapFromPublishedPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(html), `href="/index.html"`) || !strings.Contains(string(html), `href="/catalog/item.htm"`) || strings.Contains(string(html), "old html map") || strings.Contains(string(html), "Sitemap.xml") {
+	if !strings.Contains(string(html), `href="/"`) || !strings.Contains(string(html), `href="/catalog/item.htm"`) || strings.Contains(string(html), "old html map") || strings.Contains(string(html), "Sitemap.xml") {
 		t.Fatalf("unexpected html sitemap: %s", html)
 	}
 
@@ -62,5 +62,20 @@ func TestGenerateSitemapFromPublishedPages(t *testing.T) {
 	}
 	if !strings.Contains(string(xml), "https://example.com/catalog/item.htm") || strings.Contains(string(xml), "ignored.js") || strings.Contains(string(xml), "Sitemap.xml") {
 		t.Fatalf("unexpected xml sitemap: %s", xml)
+	}
+}
+
+func TestPublicURLUsesDirectoryForm(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"index.html", ""},
+		{"products/steam-traps/index.html", "products/steam-traps/"},
+		{"ar/products/index.html", "ar/products/"},
+		{"products/index-2.html", "products/index-2.html"},
+		{"products/steam-traps/tdlv-thermodynamic-steam-trap/index.html", "products/steam-traps/tdlv-thermodynamic-steam-trap/"},
+		{"msg.html", "msg.html"},
+	} {
+		if got := publicURL(tc.in); got != tc.want {
+			t.Fatalf("publicURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

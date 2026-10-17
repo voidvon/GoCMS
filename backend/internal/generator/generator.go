@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -1446,37 +1447,16 @@ func isIndexFilename(value string) bool {
 	return routing.IsIndexFilename(value)
 }
 
-// legacyListPagePaths returns the pre-index.html paths of a list page
-// ("{id}.html" for the first page, "{id}-{page}.html" afterwards). They are
-// published as aliases so that switching a category to a fixed index filename
-// rule does not break already indexed URLs.
-func (c *content) legacyListPagePaths(row Row, page int) []string {
-	routeID := row.n("route_id")
-	if routeID == 0 {
-		routeID = row.n("id")
+// publicURL converts a generated page path into the address a visitor sees. A
+// page published as a directory index is addressed by its directory
+// ("products/steam-traps/index.html" -> "products/steam-traps/", "index.html"
+// -> ""), everything else keeps its filename.
+func publicURL(pagePath string) string {
+	directory, filename := path.Split(pagePath)
+	if !isIndexFilename(filename) {
+		return pagePath
 	}
-	directory := c.categoryListDir(row)
-	paths := make([]string, 0, 2)
-	seen := make(map[string]bool, 2)
-	for _, render := range []func(string, int64, int) (string, error){
-		routing.RenderListFilename,
-		routing.RenderListPageFilename,
-	} {
-		filename, err := render(routing.DefaultListPattern, int64(routeID), page)
-		if err != nil {
-			continue
-		}
-		target := strings.Trim(directory+"/"+filename, "/")
-		if c.langPrefix != "" {
-			target = c.langPrefix + "/" + target
-		}
-		if target == "" || seen[target] {
-			continue
-		}
-		seen[target] = true
-		paths = append(paths, target)
-	}
-	return paths
+	return directory
 }
 
 // contentDetailFilename resolves the detail directory and the rendered filename
@@ -1514,22 +1494,6 @@ func (c *content) contentURL(row Row) string {
 		return "/" + c.langPrefix + "/" + target
 	}
 	return "/" + target
-}
-
-// legacyContentPath returns the pre-directory detail path ("{id}.html") so that
-// already published URLs keep working after a category switches to the
-// "{id}/index.html" rule.
-func (c *content) legacyContentPath(row Row) string {
-	category := c.cat(row.n("category_id"))
-	filename, err := routing.RenderDetailFilenameValue(routing.DefaultDetailPattern, row["route_key"])
-	if err != nil {
-		return ""
-	}
-	target := strings.Trim(c.categoryDetailDir(category)+"/"+filename, "/")
-	if c.langPrefix != "" {
-		return c.langPrefix + "/" + target
-	}
-	return target
 }
 
 func (c *content) listRoot(category Row) Row {
@@ -2390,9 +2354,6 @@ func (c *content) buildForLang() error {
 		if err := c.pageTemplate(pagePath, c.categoryDetailTemplate(category), view); err != nil {
 			return err
 		}
-		if legacy := c.legacyContentPath(item); legacy != "" && legacy != pagePath && c.pages[legacy] == nil {
-			c.pages[legacy] = c.pages[pagePath]
-		}
 	}
 
 	for _, category := range c.tables["gocms_category"] {
@@ -2415,11 +2376,6 @@ func (c *content) buildForLang() error {
 			pagePath := c.categoryListPagePath(category, page)
 			if err := c.pageTemplate(pagePath, c.categoryListTemplate(category), view); err != nil {
 				return err
-			}
-			for _, legacy := range c.legacyListPagePaths(category, page) {
-				if legacy != pagePath && c.pages[legacy] == nil {
-					c.pages[legacy] = c.pages[pagePath]
-				}
 			}
 			if page == 1 {
 				alias := strings.TrimPrefix(c.categoryListURL(category, 1), "/")

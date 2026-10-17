@@ -60,7 +60,7 @@ func TestLLMSMetadataAndURL(t *testing.T) {
 		return io.NopCloser(strings.NewReader(`<title>A</title><body><title>Wrong</title>`)), nil
 	}
 	body, err := renderLLMS(context.Background(), "https://example.test/", []string{"index.html"}, open)
-	if err != nil || !strings.Contains(string(body), "[A](<https://example.test/index.html>)") {
+	if err != nil || !strings.Contains(string(body), "[A](<https://example.test/>)") {
 		t.Fatalf("%s: %v", body, err)
 	}
 	if _, err := renderLLMS(context.Background(), "javascript:alert(1)", nil, open); err == nil {
