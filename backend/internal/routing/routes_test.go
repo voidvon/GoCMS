@@ -63,6 +63,33 @@ func TestRouteValidation(t *testing.T) {
 	if got, err := RenderListPageFilename("index.html", 131, 2); err != nil || got != "index-2.html" {
 		t.Fatalf("index list page 2 = %q, err=%v", got, err)
 	}
+	if got, err := NormalizeDetailFilePattern("{id}/index.html"); err != nil || got != "{id}/index.html" {
+		t.Fatalf("nested detail filename = %q, err=%v", got, err)
+	}
+	if got, err := NormalizeDetailFilePattern("/{id}/index.html/"); err == nil || got != "" {
+		t.Fatalf("detail filename with edge slashes = %q, err=%v", got, err)
+	}
+	if _, err := NormalizeDetailFilePattern("index.html"); err == nil {
+		t.Fatal("detail filename without {id} accepted")
+	}
+	if _, err := NormalizeDetailFilePattern("{id}//index.html"); err == nil {
+		t.Fatal("detail filename with empty segment accepted")
+	}
+	if _, err := NormalizeDetailFilePattern("{id}/../index.html"); err == nil {
+		t.Fatal("detail filename with parent segment accepted")
+	}
+	if _, err := NormalizeDetailFilePattern("{id}/a?b.html"); err == nil {
+		t.Fatal("detail filename with URL character accepted")
+	}
+	if got, err := RenderDetailFilenameValue("{id}/index.html", "sx80-process-controller"); err != nil || got != "sx80-process-controller/index.html" {
+		t.Fatalf("nested detail render = %q, err=%v", got, err)
+	}
+	if got, err := RenderDetailFilenameValue("{id}.html", "sx80-process-controller"); err != nil || got != "sx80-process-controller.html" {
+		t.Fatalf("flat detail render = %q, err=%v", got, err)
+	}
+	if _, err := RenderDetailFilenameValue("{id}/index.html", "a/b"); err == nil {
+		t.Fatal("detail value with slash accepted")
+	}
 	if got, err := RenderCoverFilename("landing.html", 25); err != nil || got != "landing.html" {
 		t.Fatalf("cover route filename = %q, err=%v", got, err)
 	}

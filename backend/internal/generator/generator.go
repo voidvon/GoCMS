@@ -1361,7 +1361,7 @@ func (c *content) categoryDetailPattern(row Row) string {
 	if pattern == "" {
 		pattern = routing.DefaultDetailPattern
 	}
-	if normalized, err := routing.NormalizeFilePattern(pattern, false); err == nil {
+	if normalized, err := routing.NormalizeDetailFilePattern(pattern); err == nil {
 		return normalized
 	}
 	return routing.DefaultDetailPattern
@@ -1479,17 +1479,53 @@ func (c *content) legacyListPagePaths(row Row, page int) []string {
 	return paths
 }
 
-func (c *content) contentURL(row Row) string {
+// contentDetailTarget renders the page path of a content entry relative to the
+// site root, without the language prefix. A nested rule such as
+// "{id}/index.html" keeps the trailing directory index in the path.
+func (c *content) contentDetailTarget(row Row) string {
 	category := c.cat(row.n("category_id"))
 	filename, err := routing.RenderDetailFilenameValue(c.categoryDetailPattern(category), row["route_key"])
 	if err != nil {
 		filename = row["route_key"] + ".html"
 	}
-	target := strings.Trim(c.categoryDetailDir(category)+"/"+filename, "/")
+	return strings.Trim(c.categoryDetailDir(category)+"/"+filename, "/")
+}
+
+// contentPagePath is the generated file path of a content entry.
+func (c *content) contentPagePath(row Row) string {
+	target := c.contentDetailTarget(row)
+	if c.langPrefix != "" {
+		return c.langPrefix + "/" + target
+	}
+	return target
+}
+
+func (c *content) contentURL(row Row) string {
+	target := c.contentDetailTarget(row)
+	// An entry published as its own directory index is addressed by directory.
+	if slash := strings.LastIndexByte(target, '/'); slash >= 0 && isIndexFilename(target[slash+1:]) {
+		target = target[:slash+1]
+	}
 	if c.langPrefix != "" {
 		return "/" + c.langPrefix + "/" + target
 	}
 	return "/" + target
+}
+
+// legacyContentPath returns the pre-directory detail path ("{id}.html") so that
+// already published URLs keep working after a category switches to the
+// "{id}/index.html" rule.
+func (c *content) legacyContentPath(row Row) string {
+	category := c.cat(row.n("category_id"))
+	filename, err := routing.RenderDetailFilenameValue(routing.DefaultDetailPattern, row["route_key"])
+	if err != nil {
+		return ""
+	}
+	target := strings.Trim(c.categoryDetailDir(category)+"/"+filename, "/")
+	if c.langPrefix != "" {
+		return c.langPrefix + "/" + target
+	}
+	return target
 }
 
 func (c *content) listRoot(category Row) Row {
@@ -2346,8 +2382,12 @@ func (c *content) buildForLang() error {
 			view["next_url"] = esc(c.contentURL(sameCategory[index+1]))
 			view["next_title"] = esc(sameCategory[index+1]["title"])
 		}
-		if err := c.pageTemplate(strings.TrimPrefix(c.contentURL(item), "/"), c.categoryDetailTemplate(category), view); err != nil {
+		pagePath := c.contentPagePath(item)
+		if err := c.pageTemplate(pagePath, c.categoryDetailTemplate(category), view); err != nil {
 			return err
+		}
+		if legacy := c.legacyContentPath(item); legacy != "" && legacy != pagePath && c.pages[legacy] == nil {
+			c.pages[legacy] = c.pages[pagePath]
 		}
 	}
 

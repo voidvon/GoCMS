@@ -777,7 +777,7 @@ func (s *Server) normalizeCategoryRoutes(ctx context.Context, siteID, id int64, 
 	if payload.DetailPath, err = routing.NormalizeDirectory(payload.DetailPath); err != nil {
 		return fmt.Errorf("详情目录无效: %w", err)
 	}
-	if payload.DetailFilePattern, err = routing.NormalizeFilePattern(payload.DetailFilePattern, false); err != nil {
+	if payload.DetailFilePattern, err = routing.NormalizeDetailFilePattern(payload.DetailFilePattern); err != nil {
 		return fmt.Errorf("详情文件名规则无效: %w", err)
 	}
 	if payload.ListTemplate, err = templateconfig.NormalizePath(payload.ListTemplate); err != nil {

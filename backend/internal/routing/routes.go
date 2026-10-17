@@ -108,6 +108,34 @@ func IsIndexFilename(value string) bool {
 	return lower == "index.html" || lower == "index.htm"
 }
 
+// NormalizeDetailFilePattern validates the filename rule of a content detail
+// route. Besides a plain filename ("{id}.html") the rule may nest every entry
+// inside its own directory ("{id}/index.html"), which publishes
+// /products/steam-traps/tdlv-thermodynamic-steam-trap/ — the convention the
+// reference sites use. Each path segment must be a valid filename on its own.
+func NormalizeDetailFilePattern(value string) (string, error) {
+	value = strings.TrimSpace(strings.ReplaceAll(value, `\`, "/"))
+	if value == "" {
+		return "", fmt.Errorf("文件名规则不能为空")
+	}
+	if strings.HasPrefix(value, "/") || strings.HasSuffix(value, "/") {
+		return "", fmt.Errorf("文件名规则不能以斜杠开头或结尾")
+	}
+	segments := strings.Split(value, "/")
+	for index, segment := range segments {
+		normalized, err := normalizeFilePattern(segment, false, false)
+		if err != nil {
+			return "", err
+		}
+		segments[index] = normalized
+	}
+	value = strings.Join(segments, "/")
+	if !strings.Contains(value, "{id}") {
+		return "", fmt.Errorf("文件名规则必须包含 {id}")
+	}
+	return value, nil
+}
+
 func normalizeFilePattern(value string, requireID, allowPage bool) (string, error) {
 	value = strings.TrimSpace(strings.ReplaceAll(value, `\`, "/"))
 	if value == "" {
@@ -160,7 +188,7 @@ func RenderDetailFilename(pattern string, contentID int64) (string, error) {
 }
 
 func RenderDetailFilenameValue(pattern, value string) (string, error) {
-	pattern, err := NormalizeFilePattern(pattern, false)
+	pattern, err := NormalizeDetailFilePattern(pattern)
 	if err != nil {
 		return "", err
 	}

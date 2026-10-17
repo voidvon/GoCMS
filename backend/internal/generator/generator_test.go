@@ -1191,3 +1191,81 @@ func TestListIndexFilePatternPagination(t *testing.T) {
 		t.Fatalf("id rule pagination changed: %q", idPage)
 	}
 }
+
+func TestDetailDirectoryFilePattern(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_site_setting" ("key", "value") VALUES
+			('site_name', '测试站点'), ('site_url', 'https://example.test/')`); err != nil {
+		t.Fatal(err)
+	}
+	// Category 181 keeps the flat {id}.html rule, 182 nests each entry.
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_category"
+			("id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id",
+			 "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path",
+			 "detail_file_pattern", "detail_template")
+		VALUES
+			(181, '蒸汽疏水阀', 0, 1, 10, 'list', 181, 'products/steam-traps', 'index.html', 'category_list.html', '', 'products/steam-traps', '{id}.html', 'content_detail.html'),
+			(182, '浮球式蒸汽疏水阀', 0, 2, 10, 'list', 182, 'products/steam-traps/ball-float', 'index.html', 'category_list.html', '', 'products/steam-traps/ball-float', '{id}/index.html', 'content_detail.html')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`
+		INSERT INTO "gocms_content"
+			("id", "category_id", "route_key", "title", "summary", "body", "sort_order", "visible")
+		VALUES
+			(900, 181, 'tdlv-thermodynamic-steam-trap', '平', '', '', 1, 1),
+			(901, 182, 'ftgs14-ball-float-steam-trap', '球', '', '', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	templates := filepath.Join(t.TempDir(), "templates")
+	writeTemplate(t, templates, "index.html", `home`)
+	writeTemplate(t, templates, "category_list.html", `list={{.category_name}}`)
+	writeTemplate(t, templates, "content_detail.html", `detail={{.title}} url={{.content_url}}`)
+	writeTemplate(t, templates, "msg.html", `msg`)
+	writeTemplate(t, templates, "search.html", `search`)
+
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	publisher := Publisher{DB: database, Web: web, Templates: templates, Data: filepath.Join(root, "data")}
+	if _, err := publisher.Generate(ctx); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Nested rule: the page lives at <detail_path>/<route_key>/index.html.
+	nested := "products/steam-traps/ball-float/ftgs14-ball-float-steam-trap/index.html"
+	if _, err := os.Stat(filepath.Join(web, filepath.FromSlash(nested))); err != nil {
+		t.Fatalf("%s should exist: %v", nested, err)
+	}
+	body := readGenerated(t, web, nested)
+	want := "detail=球 url=/products/steam-traps/ball-float/ftgs14-ball-float-steam-trap/"
+	if body != want {
+		t.Fatalf("nested detail page mismatch:\n got %q\nwant %q", body, want)
+	}
+	// The flat URL stays published as an alias.
+	legacy := "products/steam-traps/ball-float/ftgs14-ball-float-steam-trap.html"
+	if _, err := os.Stat(filepath.Join(web, filepath.FromSlash(legacy))); err != nil {
+		t.Fatalf("%s should exist: %v", legacy, err)
+	}
+
+	// Flat rule is untouched and gets no nested directory.
+	flat := "products/steam-traps/tdlv-thermodynamic-steam-trap.html"
+	if _, err := os.Stat(filepath.Join(web, filepath.FromSlash(flat))); err != nil {
+		t.Fatalf("%s should exist: %v", flat, err)
+	}
+	if _, err := os.Stat(filepath.Join(web, filepath.FromSlash("products/steam-traps/tdlv-thermodynamic-steam-trap/index.html"))); !os.IsNotExist(err) {
+		t.Fatal("flat rule should not create a nested directory")
+	}
+	if got := readGenerated(t, web, flat); got != "detail=平 url=/products/steam-traps/tdlv-thermodynamic-steam-trap.html" {
+		t.Fatalf("flat detail page changed: %q", got)
+	}
+}
