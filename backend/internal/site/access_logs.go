@@ -46,6 +46,8 @@ type accessLogConfig struct {
 	mu            sync.RWMutex
 	refreshedAt   time.Time
 	hosts         map[string]accessLogCacheEntry
+	referers      map[string]int64
+	referersAt    time.Time
 }
 
 func newAccessLogConfig() *accessLogConfig {
@@ -53,6 +55,7 @@ func newAccessLogConfig() *accessLogConfig {
 		location:      time.Local,
 		retentionDays: defaultAccessLogRetentionDays,
 		hosts:         map[string]accessLogCacheEntry{},
+		referers:      map[string]int64{},
 	}
 }
 
@@ -199,9 +202,14 @@ func (s *Server) recordAccessLog(request *http.Request, result *accessResponse) 
 	if refererHost != "" {
 		// A referer from the very host being served is always internal, even
 		// when that host is not (yet) recorded as a domain of the site.
-		if refererHost == normalizeAccessLogHost(requestHost(request)) || domains[refererHost] {
+		switch {
+		case refererHost == normalizeAccessLogHost(requestHost(request)), domains[refererHost]:
 			refererKind = "internal"
-		} else {
+		case s.accessLogRefererSiteID(ctx, refererHost) == siteID:
+			// Standalone language domains and wildcard aliases resolve to the
+			// same site and are therefore internal referers too.
+			refererKind = "internal"
+		default:
 			refererKind = "external"
 		}
 	}
@@ -256,20 +264,6 @@ func (s *Server) accessLogSite(ctx context.Context, request *http.Request) (int6
 			domains[normalized] = true
 		}
 	}
-	// Standalone language domains are bound to the same site and must count as
-	// internal referers as well.
-	rows, queryErr := s.database.QueryContext(ctx, `SELECT COALESCE("domain", '') FROM "`+db.LanguageTable+`" WHERE "site_id" = ?`, site.ID)
-	if queryErr == nil {
-		for rows.Next() {
-			var domain string
-			if scanErr := rows.Scan(&domain); scanErr == nil {
-				if normalized := normalizeAccessLogHost(domain); normalized != "" {
-					domains[normalized] = true
-				}
-			}
-		}
-		_ = rows.Close()
-	}
 	if host == "" {
 		host = normalizeAccessLogHost(site.Domain)
 	}
@@ -283,6 +277,37 @@ func (s *Server) accessLogSite(ctx context.Context, request *http.Request) (int6
 		cache.mu.Unlock()
 	}
 	return site.ID, domains
+}
+
+// accessLogRefererSiteID resolves the site owning a referer host. Unlike the
+// request host lookup it never falls back to the default site: an unknown host
+// must stay unknown so that external referers are not counted as internal.
+func (s *Server) accessLogRefererSiteID(ctx context.Context, host string) int64 {
+	cache := s.accessLogs
+	if cache == nil || host == "" {
+		return 0
+	}
+	cache.mu.RLock()
+	resolved, ok := cache.referers[host]
+	fresh := time.Since(cache.referersAt) < accessLogSiteCacheTTL
+	cache.mu.RUnlock()
+	if ok && fresh {
+		return resolved
+	}
+
+	var siteID int64
+	if site, err := db.GetSiteByHost(ctx, s.database, host); err == nil && site != nil {
+		siteID = site.ID
+	}
+
+	cache.mu.Lock()
+	if cache.referers == nil || time.Since(cache.referersAt) >= accessLogSiteCacheTTL || len(cache.referers) >= accessLogSiteCacheLimit {
+		cache.referers = map[string]int64{}
+		cache.referersAt = time.Now()
+	}
+	cache.referers[host] = siteID
+	cache.mu.Unlock()
+	return siteID
 }
 
 func normalizeAccessLogHost(value string) string {

@@ -60,7 +60,7 @@ func TestAccessLogRecordsPublicTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A standalone language domain owned by the same site must count as internal.
-	if _, err := database.Exec(`UPDATE "gocms_language" SET "site_mode" = 'domain', "domain" = 'cn.example.test' WHERE "code" = 'zh-CN'`); err != nil {
+	if _, err := database.Exec(`UPDATE "gocms_language" SET "site_mode" = 'standalone', "domain" = 'cn.example.test' WHERE "code" = 'zh-CN'`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -466,5 +466,57 @@ func TestAccessLogDisabledWithoutDatabase(t *testing.T) {
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 without a database", response.Code)
+	}
+}
+
+func TestAccessLogRefererSiteResolution(t *testing.T) {
+	server, database, _, siteDir := newSiteAdminTestServer(t)
+	if err := os.WriteFile(filepath.Join(siteDir, "index.html"), []byte("<html><body>home</body></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE "gocms_site" SET "domain" = 'example.test' WHERE "is_default" = 1`); err != nil {
+		t.Fatal(err)
+	}
+	// Standalone language domain of the same site, and a second site of the
+	// same install that must stay external.
+	if _, err := database.Exec(`UPDATE "gocms_language" SET "site_mode" = 'standalone', "domain" = 'cn.example.test' WHERE "code" = 'zh-CN'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO "gocms_site" ("name", "code", "domain", "is_default") VALUES ('Other', 'other', 'other.test', 0)`); err != nil {
+		t.Fatal(err)
+	}
+
+	visit := func(referer string) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Host = "example.test"
+		request.Header.Set("Referer", referer)
+		request.Header.Set("User-Agent", accessLogChromeUA)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", response.Code)
+		}
+	}
+	visit("https://cn.example.test/")
+	visit("https://other.test/")
+	visit("https://www.spiraxsteam.com/")
+
+	kindFor := func(refererHost string) string {
+		t.Helper()
+		var kind string
+		if err := database.QueryRow(`SELECT "referer_kind" FROM "`+db.AccessLogTable+`" WHERE "referer_host" = ?`, refererHost).Scan(&kind); err != nil {
+			t.Fatal(err)
+		}
+		return kind
+	}
+	if kind := kindFor("cn.example.test"); kind != "internal" {
+		t.Errorf("独立语言域名 referer = %q, want internal", kind)
+	}
+	if kind := kindFor("other.test"); kind != "external" {
+		t.Errorf("其他站点 referer = %q, want external", kind)
+	}
+	if kind := kindFor("spiraxsteam.com"); kind != "external" {
+		t.Errorf("外部域名 referer = %q, want external", kind)
 	}
 }
