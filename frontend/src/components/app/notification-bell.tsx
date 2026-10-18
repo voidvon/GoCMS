@@ -13,6 +13,8 @@ import type { AdminView } from "@/lib/admin-router"
 type NotificationBellProps = {
   siteId: number
   onNavigate: (view: AdminView) => void
+  /** Where the panel opens: beside the trigger in the sidebar, below it on mobile. */
+  panelSide?: "bottom" | "right"
 }
 
 // Where a notification of a given kind sends the reader.
@@ -26,7 +28,7 @@ const notificationViews: Record<string, AdminView> = {
 // Background work that fails (a message that could not be pushed to Feishu, for
 // example) files a notification here, so it is visible from every page instead
 // of hiding inside the affected record.
-export function NotificationBell({ siteId, onNavigate }: NotificationBellProps) {
+export function NotificationBell({ siteId, onNavigate, panelSide = "bottom" }: NotificationBellProps) {
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<AdminNotification[]>([])
   const [unread, setUnread] = useState(0)
@@ -125,7 +127,7 @@ export function NotificationBell({ siteId, onNavigate }: NotificationBellProps) 
           </span>
         ) : null}
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-0">
+      <PopoverContent side={panelSide} align={panelSide === "right" ? "start" : "end"} className="w-80 p-0">
         <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
           <span className="text-sm font-medium">后台通知</span>
           {unread > 0 ? (

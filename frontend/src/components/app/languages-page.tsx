@@ -30,6 +30,13 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import {
   Table,
@@ -42,7 +49,16 @@ import {
 import { ConfirmDialog, InlineAlert } from "@/components/app/app-ui"
 
 export function LanguagesPage() {
-  const { languages, refreshLanguages, loading } = useLanguage()
+  const {
+    languages,
+    refreshLanguages,
+    loading,
+    activeLang,
+    setActiveLang,
+    resetActiveLang,
+    adminLang,
+    currentLanguage,
+  } = useLanguage()
   const [error, setError] = useState("")
   const [successMsg, setSuccessMsg] = useState("")
 
@@ -184,9 +200,12 @@ export function LanguagesPage() {
     }
   }
 
+  const enabledLanguages = languages.filter((lang) => lang.is_enabled === 1)
+  const adminDefaultName = languages.find((lang) => lang.code === adminLang)?.name || adminLang
+
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={openCreate}>
           <Plus className="size-4 mr-2" />
           新增语言
@@ -195,6 +214,46 @@ export function LanguagesPage() {
           <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} />
           刷新
         </Button>
+        {/* The backend display language is switched here and nowhere else. */}
+        {enabledLanguages.length > 1 && (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">后台显示语言</span>
+            <Select
+              value={activeLang}
+              onValueChange={(val) => {
+                if (val) setActiveLang(val)
+              }}
+            >
+              <SelectTrigger size="sm" className="w-44" aria-label="后台显示语言">
+                <Monitor className="size-3.5 shrink-0 text-muted-foreground" />
+                <SelectValue>{currentLanguage?.name || activeLang}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {enabledLanguages.map((lang) => (
+                  <SelectItem key={lang.code} value={lang.code}>
+                    <div className="flex items-center gap-1.5">
+                      <span>{lang.name}</span>
+                      {lang.is_admin_default === 1 && (
+                        <span className="text-[10px] text-muted-foreground">(后台默认)</span>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {activeLang !== adminLang && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs text-muted-foreground"
+                title={`恢复为后台默认语言：${adminDefaultName}`}
+                onClick={() => resetActiveLang()}
+              >
+                跟随后台默认
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {error && <InlineAlert>{error}</InlineAlert>}
@@ -513,7 +572,7 @@ export function LanguagesPage() {
               <div>
                 <Label htmlFor="is-admin-default" className="text-sm font-medium">设为后台显示语言</Label>
                 <p className="text-xs text-muted-foreground">
-                  后台的分类列表与内容列表默认按该语言显示，方便维护人员使用自己的母语；管理员仍可在顶栏临时切换。
+                  后台的分类列表与内容列表默认按该语言显示，方便维护人员使用自己的母语；管理员仍可在本页顶部临时切换自己浏览器使用的语言。
                 </p>
               </div>
               <Switch

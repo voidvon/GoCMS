@@ -23,7 +23,7 @@ import {
 } from "lucide-react"
 
 import { logout, type AdminUser } from "@/lib/api"
-import { LanguageProvider, useLanguage } from "@/lib/language-context"
+import { LanguageProvider } from "@/lib/language-context"
 import { SiteProvider, useSite } from "@/lib/site-context"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -332,7 +332,10 @@ function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarP
             <p className="text-xs text-muted-foreground">内容管理</p>
           </div>}
         </div>
-        <ScrollArea className="mt-6 min-h-0 flex-1" contentClassName="pb-4">
+        <div className={cn("mt-3 shrink-0", collapsed ? "flex justify-center" : "px-1")}>
+          <SiteControls onNavigate={onNavigate} collapsed={collapsed} />
+        </div>
+        <ScrollArea className="mt-3 min-h-0 flex-1" contentClassName="pb-4">
           <Navigation user={user} activeView={activeView} onNavigate={onNavigate} collapsed={collapsed} />
         </ScrollArea>
         <div className="shrink-0 border-t pt-4">
@@ -515,7 +518,16 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
                     GoCMS 后台
                   </SheetTitle>
                 </SheetHeader>
-                <ScrollArea className="mt-6 min-h-0 flex-1" contentClassName="pr-2">
+                <div className="mt-3 px-2">
+                  <SiteControls
+                    onNavigate={(view) => {
+                      navigate(view)
+                      setMobileOpen(false)
+                    }}
+                    panelSide="bottom"
+                  />
+                </div>
+                <ScrollArea className="mt-4 min-h-0 flex-1" contentClassName="pr-2">
                   {mobileNavigation}
                 </ScrollArea>
                 <div className="mt-6 border-t pt-4">
@@ -535,12 +547,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
               <p className="hidden text-xs text-muted-foreground sm:block">{meta.description}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <LanguageSwitcher />
-            <SiteSwitcher onNavigate={navigate} />
-            <NotificationBell siteId={activeSiteId} onNavigate={navigate} />
-            <HeaderActionsSlot className="flex items-center gap-2" />
-          </div>
+          <HeaderActionsSlot className="flex items-center gap-2" />
         </header>
         <main className="min-h-0 flex-1 overflow-auto p-4 sm:p-6 lg:overflow-hidden">
           <div className="mx-auto h-full w-full max-w-screen-2xl min-h-0">
@@ -552,57 +559,35 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
   )
 }
 
-function LanguageSwitcher() {
-  const { languages, activeLang, setActiveLang, resetActiveLang, adminLang } = useLanguage()
-  const enabled = languages.filter((lang) => lang.is_enabled === 1)
-  if (enabled.length < 2) return null
-
-  const active = enabled.find((lang) => lang.code === activeLang) || enabled[0]
-  const adminDefault = enabled.find((lang) => lang.code === adminLang)
-
+// Site switching and the notification bell live under the brand in the sidebar:
+// they belong to the whole backend session, not to the current page, and the
+// header stays reserved for page actions. The admin display language is no
+// longer switched here — that happens on the 多语言 page.
+function SiteControls({
+  onNavigate,
+  collapsed = false,
+  panelSide = "right",
+}: {
+  onNavigate: (view: AdminView) => void
+  collapsed?: boolean
+  panelSide?: "bottom" | "right"
+}) {
+  const { activeSiteId } = useSite()
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button variant="outline" size="sm" className="h-8 gap-2 px-2.5 text-xs font-normal">
-            <Languages className="h-3.5 w-3.5 text-primary" />
-            <span className="hidden max-w-[100px] truncate font-medium sm:inline">
-              {active?.name || activeLang}
-            </span>
-            <ChevronsUpDown className="h-3 w-3 opacity-50" />
-          </Button>
-        }
-      />
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">后台显示语言</DropdownMenuLabel>
-          {enabled.map((lang) => (
-            <DropdownMenuItem
-              key={lang.code}
-              className="flex items-center justify-between text-xs cursor-pointer"
-              onClick={() => setActiveLang(lang.code)}
-            >
-              <span className="truncate">{lang.name}</span>
-              {lang.code === activeLang && (
-                <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4">当前</Badge>
-              )}
-            </DropdownMenuItem>
-          ))}
-        </DropdownMenuGroup>
-        {adminDefault && activeLang !== adminDefault.code ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => resetActiveLang()}>
-              跟随后台默认（{adminDefault.name}）
-            </DropdownMenuItem>
-          </>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <div className={cn("flex min-w-0 items-center gap-1", collapsed && "flex-col")}>
+      <SiteSwitcher onNavigate={onNavigate} collapsed={collapsed} />
+      <NotificationBell siteId={activeSiteId} onNavigate={onNavigate} panelSide={panelSide} />
+    </div>
   )
 }
 
-function SiteSwitcher({ onNavigate }: { onNavigate: (view: AdminView) => void }) {
+function SiteSwitcher({
+  onNavigate,
+  collapsed = false,
+}: {
+  onNavigate: (view: AdminView) => void
+  collapsed?: boolean
+}) {
   const { sites, activeSite, setActiveSite } = useSite()
   if (!sites || sites.length === 0) return null
 
@@ -610,16 +595,30 @@ function SiteSwitcher({ onNavigate }: { onNavigate: (view: AdminView) => void })
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="outline" size="sm" className="h-8 gap-2 px-2.5 text-xs font-normal">
-            <Globe className="h-3.5 w-3.5 text-primary" />
-            <span className="max-w-[120px] truncate font-medium sm:max-w-[160px]">
-              {activeSite?.name || "选择站点"}
-            </span>
-            <ChevronsUpDown className="h-3 w-3 opacity-50" />
+          <Button
+            variant="outline"
+            size={collapsed ? "icon" : "sm"}
+            className={cn(
+              collapsed
+                ? "size-8 shrink-0"
+                : "h-8 min-w-0 flex-1 justify-start gap-2 px-2.5 text-xs font-normal",
+            )}
+            aria-label={`切换管理站点（当前：${activeSite?.name || "未选择"}）`}
+            title={collapsed ? activeSite?.name || "切换管理站点" : undefined}
+          >
+            <Globe className="h-3.5 w-3.5 shrink-0 text-primary" />
+            {!collapsed && (
+              <>
+                <span className="min-w-0 flex-1 truncate text-left font-medium">
+                  {activeSite?.name || "选择站点"}
+                </span>
+                <ChevronsUpDown className="h-3 w-3 shrink-0 opacity-50" />
+              </>
+            )}
           </Button>
         }
       />
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent side={collapsed ? "right" : "bottom"} align="start" className="w-56">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">切换管理站点</DropdownMenuLabel>
           {sites.map((s) => (
