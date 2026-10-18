@@ -470,6 +470,9 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 				if s.legacyLanguagePrefixRedirect(response, request, matched) {
 					return
 				}
+				if s.serveSiteNotFound(response, request, matched, relPath) {
+					return
+				}
 				if !matched.IsDefault && matched.ID > 1 {
 					// Non-default sub-sites must never fall through to default site's files in siteRoot
 					http.NotFound(response, request)
@@ -485,6 +488,39 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 func fileExistsInDir(dir, name string) bool {
 	stat, err := os.Stat(filepath.Join(dir, name))
 	return err == nil && !stat.IsDir()
+}
+
+// serveSiteNotFound answers a request whose file does not exist with the 404
+// page the generator wrote for that site, preferring the language directory the
+// request was aimed at (/es/... uses es/404.html). It reports whether a page was
+// served; the caller falls back to the plain text 404 otherwise. API paths keep
+// the plain response so callers never receive HTML.
+func (s *Server) serveSiteNotFound(response http.ResponseWriter, request *http.Request, site *db.Site, relPath string) bool {
+	if strings.HasPrefix(strings.ToLower(request.URL.Path), "/api/") {
+		return false
+	}
+	prefix := ""
+	if segments := strings.Split(relPath, "/"); len(segments) > 1 && segments[0] != "" && segments[0] != ".." {
+		prefix = segments[0]
+	}
+	for _, dir := range s.siteServingDirs(site) {
+		candidates := make([]string, 0, 2)
+		if prefix != "" {
+			candidates = append(candidates, filepath.Join(dir, filepath.FromSlash(prefix), "404.html"))
+		}
+		candidates = append(candidates, filepath.Join(dir, "404.html"))
+		for _, candidate := range candidates {
+			page, err := os.ReadFile(candidate)
+			if err != nil || len(page) == 0 {
+				continue
+			}
+			response.Header().Set("Content-Type", "text/html; charset=utf-8")
+			response.WriteHeader(http.StatusNotFound)
+			_, _ = response.Write(page)
+			return true
+		}
+	}
+	return false
 }
 
 func positiveInt(value string, fallback int) int {

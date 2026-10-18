@@ -24,6 +24,9 @@ const (
 	RoleHomeIndex = "home_index"
 	RoleMessage   = "message"
 	RoleSearch    = "search"
+	// RoleNotFound is optional: themes without a 404 template keep the plain
+	// server response instead of failing validation or publishing.
+	RoleNotFound = "notfound"
 )
 
 const (
@@ -47,6 +50,7 @@ type Assignment struct {
 var defaults = []Assignment{
 	{Key: RoleMessage, Label: "留言模板", Dimension: DimensionPublic, DimensionName: "公共模板", TemplatePath: "msg.html", SortOrder: 20},
 	{Key: RoleSearch, Label: "搜索模板", Dimension: DimensionPublic, DimensionName: "公共模板", TemplatePath: "search.html", SortOrder: 30},
+	{Key: RoleNotFound, Label: "404 模板", Dimension: DimensionPublic, DimensionName: "公共模板", TemplatePath: "404.html", SortOrder: 40},
 }
 
 type queryer interface {

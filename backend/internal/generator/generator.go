@@ -2400,9 +2400,11 @@ func (c *content) buildForLang() error {
 
 	msgPath := "msg.html"
 	searchPath := "search.html"
+	notFoundPath := "404.html"
 	if c.langPrefix != "" {
 		msgPath = c.langPrefix + "/msg.html"
 		searchPath = c.langPrefix + "/search.html"
+		notFoundPath = c.langPrefix + "/404.html"
 	}
 	if err := c.page(msgPath, templateconfig.RoleMessage, Row{"home_url": c.homeURL(), "lang": c.lang}); err != nil {
 		return err
@@ -2410,7 +2412,27 @@ func (c *content) buildForLang() error {
 	if err := c.page(searchPath, templateconfig.RoleSearch, Row{"home_url": c.homeURL(), "lang": c.lang}); err != nil {
 		return err
 	}
+	if err := c.notFoundPage(notFoundPath, Row{"home_url": c.homeURL(), "lang": c.lang}); err != nil {
+		return err
+	}
 	return nil
+}
+
+// notFoundPage renders the optional 404 template. A theme that ships no 404 page
+// simply keeps the server's plain response, so a missing file is not an error.
+func (c *content) notFoundPage(pagePath string, row Row) error {
+	templatePath, ok := c.assignments[templateconfig.RoleNotFound]
+	if !ok || strings.TrimSpace(templatePath) == "" {
+		return nil
+	}
+	normalized, err := templateconfig.NormalizePath(templatePath)
+	if err != nil {
+		return nil
+	}
+	if _, ok := c.templates[normalized]; !ok {
+		return nil
+	}
+	return c.pageTemplate(pagePath, normalized, row)
 }
 
 func min(left, right int) int {

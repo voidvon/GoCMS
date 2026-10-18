@@ -60,6 +60,7 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 	writeTemplate(t, templates, "index.html", `home={{setting "site_name"}} {{label "HOME-BANNER" .}} nav={{range navigation .}}{{.Name}}={{.URL}};{{end}}`)
 	writeTemplate(t, templates, "msg.html", `message`)
 	writeTemplate(t, templates, "search.html", `search`)
+	writeTemplate(t, templates, "404.html", `not-found lang={{.lang}} home={{.home_url}}`)
 	writeTemplate(t, templates, "lists/section.html", `list={{.category_name}} page={{.list_page}}/{{.content_count}} items={{range listItems .}}{{label "item-card" .}}{{.Title}}={{.URL}};{{end}}{{with listPagination .}}pages={{.Pages}} current={{.Page}}{{end}}`)
 	writeTemplate(t, templates, "details/item.html", `detail={{.title}} category={{.category_name}} root={{.category_root_name}} body={{.body}} previous={{.previous_url}} next={{.next_url}} related={{range relatedItems . 2}}{{.Title}}={{.URL}};{{end}}`)
 	writeTemplate(t, templates, "covers/landing.html", `cover={{.category_name}} children={{range listChildren .}}{{.Name}}={{.URL}};{{end}}`)
@@ -75,13 +76,28 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 		t.Fatalf("visible content count = %d, want 4", report.Contents)
 	}
 	for _, relative := range []string{
-		"index.html", "msg.html", "search.html", "sections/1.html", "sections/1-1.html", "sections/1-2.html",
+		"index.html", "msg.html", "search.html", "404.html", "sections/1.html", "sections/1-1.html", "sections/1-2.html",
 		"sections/index.html", "entries/first.html", "entries/second.html", "entries/third.html",
 		"other/2.html", "other/index.html", "other-entries/item-other.html", "landing/index.html", "Sitemap.xml",
 	} {
 		if _, err := os.Stat(filepath.Join(web, filepath.FromSlash(relative))); err != nil {
 			t.Fatalf("missing generated page %s: %v", relative, err)
 		}
+	}
+	if body := readGenerated(t, web, "404.html"); !strings.Contains(body, "not-found") {
+		t.Fatalf("404 page body = %q", body)
+	}
+	// 主题没有 404 模板时仍可发布，只是不生成 404 页面。
+	if err := os.Remove(filepath.Join(templates, "404.html")); err != nil {
+		t.Fatal(err)
+	}
+	secondWeb := filepath.Join(t.TempDir(), "web")
+	second := Publisher{DB: database, Web: secondWeb, Templates: templates, Data: filepath.Join(root, "data")}
+	if _, err := second.Generate(ctx); err != nil {
+		t.Fatalf("generate without 404 template: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(secondWeb, "404.html")); !os.IsNotExist(err) {
+		t.Fatalf("404 page generated without template: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(web, "entries/hidden.html")); !os.IsNotExist(err) {
 		t.Fatalf("hidden content was published: %v", err)
@@ -331,6 +347,7 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 	writeTemplate(t, templates, "index.html", `site={{setting "site_name"}} lang={{currentLang}} langs={{range languages .}}{{.Code}}:{{.URL}};{{end}} nav={{range navigation .}}{{.Name}}={{.URL}};{{end}} catalog={{range catalogCategories .}}{{.Name}}={{.URL}};{{end}}`)
 	writeTemplate(t, templates, "msg.html", `msg lang={{currentLang}}`)
 	writeTemplate(t, templates, "search.html", `search lang={{currentLang}}`)
+	writeTemplate(t, templates, "404.html", `not-found lang={{currentLang}} home={{.home_url}}`)
 	writeTemplate(t, templates, "lists/news.html", `cat={{.category_name}} items={{range listItems .}}{{.Title}}={{.URL}};{{end}}`)
 	writeTemplate(t, templates, "details/news.html", `title={{.title}} home={{.home_url}} lang={{.lang}}`)
 
@@ -387,6 +404,15 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 	guide := readGenerated(t, web, "llms.txt")
 	if !strings.Contains(guide, "https://example.test/news/first.html") || !strings.Contains(guide, "https://example.test/en/news/first.html") {
 		t.Fatalf("unexpected multilingual llms: %s", guide)
+	}
+	// 404 页面按语言生成，语言目录优先于站点根目录。
+	zhNotFound := readGenerated(t, web, "404.html")
+	if !strings.Contains(zhNotFound, "not-found lang=zh-CN") || !strings.Contains(zhNotFound, "home=/") {
+		t.Fatalf("unexpected zh 404 page: %s", zhNotFound)
+	}
+	enNotFound := readGenerated(t, web, "en/404.html")
+	if !strings.Contains(enNotFound, "not-found lang=en") || !strings.Contains(enNotFound, "home=/en/") {
+		t.Fatalf("unexpected en 404 page: %s", enNotFound)
 	}
 	// 3. Verify sitemap has both languages
 	sitemap := readGenerated(t, web, "Sitemap.xml")

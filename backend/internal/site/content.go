@@ -516,9 +516,15 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 		args = append(args, categoryID)
 	}
 	if query != "" {
-		where += ` AND ("title" LIKE ? OR "summary" LIKE ? OR "body" LIKE ? OR "code" LIKE ?)`
+		// Match the base language plus the translations of the requested language
+		// only, so searching in one language never returns content that merely has
+		// a matching translation elsewhere.
+		where += ` AND ("title" LIKE ? OR "summary" LIKE ? OR "body" LIKE ? OR "code" LIKE ?` +
+			` OR EXISTS (SELECT 1 FROM "` + db.ContentTranslationTable + `" t` +
+			` WHERE t."content_id" = "gocms_content"."id" AND t."lang" = ?` +
+			` AND (t."title" LIKE ? OR t."summary" LIKE ? OR t."body" LIKE ?)))`
 		pattern := "%" + query + "%"
-		args = append(args, pattern, pattern, pattern, pattern)
+		args = append(args, pattern, pattern, pattern, pattern, lang, pattern, pattern, pattern)
 	}
 	var total int64
 	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "gocms_content" WHERE `+where, args...).Scan(&total); err != nil {

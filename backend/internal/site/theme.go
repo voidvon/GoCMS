@@ -461,6 +461,9 @@ func (s *Server) validateThemeTemplates(definition themepkg.Definition, siteIDOp
 	}
 	paths := make(map[string]struct{})
 	paths[definition.HomeTemplate()] = struct{}{}
+	// The 404 template is optional: a theme without one is still valid and keeps
+	// the plain server response.
+	optional := make(map[string]struct{})
 	if s.database != nil {
 		assignments, err := templateconfig.ListForSite(context.Background(), s.database, siteID)
 		if err != nil {
@@ -468,6 +471,9 @@ func (s *Server) validateThemeTemplates(definition themepkg.Definition, siteIDOp
 		}
 		for _, assignment := range assignments {
 			paths[assignment.TemplatePath] = struct{}{}
+			if assignment.Key == templateconfig.RoleNotFound {
+				optional[assignment.TemplatePath] = struct{}{}
+			}
 		}
 		var categoryTable int
 		if err := s.database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'gocms_category'`).Scan(&categoryTable); err != nil {
@@ -504,6 +510,9 @@ func (s *Server) validateThemeTemplates(definition themepkg.Definition, siteIDOp
 		}
 	}
 	for templatePath := range paths {
+		if _, ok := optional[templatePath]; ok {
+			continue
+		}
 		if _, _, err := readThemeFile(definition.TemplatesRoot, ".html", templatePath); err != nil {
 			return fmt.Errorf("主题缺少模板 %q: %w", templatePath, err)
 		}
