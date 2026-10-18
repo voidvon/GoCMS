@@ -270,6 +270,15 @@ export type MessageItem = {
   content_id: number
   ip?: string
   extra_data?: Record<string, any>
+  notification_status?: "pending" | "sent" | "failed" | "disabled"
+  notification_error?: string
+  notified_at?: string
+}
+
+// Feishu (Lark) custom-bot notification settings for the current site.
+export type MessageWebhookSettings = {
+  enabled: boolean
+  webhook_url: string
 }
 
 export type MessagePage = {
@@ -738,6 +747,24 @@ export function updateMessageState(id: number, state: number) {
 export function deleteMessage(id: number) {
   return request<{ ok: boolean }>(`/api/admin/messages/${id}`, {
     method: "DELETE",
+  })
+}
+
+export function getMessageWebhook() {
+  return request<MessageWebhookSettings>("/api/admin/messages/webhook")
+}
+
+export function saveMessageWebhook(data: MessageWebhookSettings) {
+  return request<MessageWebhookSettings>("/api/admin/messages/webhook", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  })
+}
+
+export function testMessageWebhook(webhookUrl: string) {
+  return request<{ ok: boolean }>("/api/admin/messages/webhook/test", {
+    method: "POST",
+    body: JSON.stringify({ webhook_url: webhookUrl }),
   })
 }
 

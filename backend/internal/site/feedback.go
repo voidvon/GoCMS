@@ -15,21 +15,24 @@ import (
 )
 
 type FeedbackItem struct {
-	ID        int64          `json:"id"`
-	ClassID   int64          `json:"class_id"`
-	ClassName string         `json:"class_name,omitempty"`
-	Title     string         `json:"title"`
-	Name      string         `json:"name"`
-	Phone     string         `json:"phone"`
-	Mobile    string         `json:"mobile"`
-	Email     string         `json:"email"`
-	Address   string         `json:"address"`
-	Content   string         `json:"content"`
-	CreatedAt string         `json:"created_at"`
-	State     int64          `json:"state"`
-	ContentID int64          `json:"content_id"`
-	IP        string         `json:"ip"`
-	ExtraData map[string]any `json:"extra_data"`
+	ID                 int64          `json:"id"`
+	ClassID            int64          `json:"class_id"`
+	ClassName          string         `json:"class_name,omitempty"`
+	Title              string         `json:"title"`
+	Name               string         `json:"name"`
+	Phone              string         `json:"phone"`
+	Mobile             string         `json:"mobile"`
+	Email              string         `json:"email"`
+	Address            string         `json:"address"`
+	Content            string         `json:"content"`
+	CreatedAt          string         `json:"created_at"`
+	State              int64          `json:"state"`
+	ContentID          int64          `json:"content_id"`
+	IP                 string         `json:"ip"`
+	ExtraData          map[string]any `json:"extra_data"`
+	NotificationStatus string         `json:"notification_status"`
+	NotificationError  string         `json:"notification_error"`
+	NotifiedAt         string         `json:"notified_at"`
 }
 
 type FeedbackClassItem struct {
@@ -172,16 +175,32 @@ func (s *Server) feedbackSubmit(response http.ResponseWriter, request *http.Requ
 	ip := clientIP(request)
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	_, err = s.database.ExecContext(request.Context(), `
+	result, err := s.database.ExecContext(request.Context(), `
 		INSERT INTO "gocms_message"
-		("site_id", "class_id", "title", "name", "phone", "mobile", "fax", "email", "address", "content", "created_at", "state", "content_id", "extra_data", "ip")
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+		("site_id", "class_id", "title", "name", "phone", "mobile", "fax", "email", "address", "content", "created_at", "state", "content_id", "extra_data", "ip", "notification_status")
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'pending')`,
 		siteID, classID, title, name, phone, mobile, fax, email, address, content, now, contentID, string(extraBytes), ip)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(response, http.StatusCreated, map[string]any{"ok": true})
+
+	// Notify after answering: the Feishu push happens in the background so a
+	// slow or unreachable webhook cannot delay the visitor or fail the submit.
+	if messageID, idErr := result.LastInsertId(); idErr == nil && messageID > 0 {
+		go s.notifyMessageCreated(messageID, messageNotification{
+			SiteID:    siteID,
+			ClassID:   classID,
+			Title:     title,
+			Name:      name,
+			Phone:     firstNonEmptyText(phone, mobile),
+			Email:     email,
+			Content:   content,
+			IP:        ip,
+			CreatedAt: now,
+		})
+	}
 }
 
 func clientIP(request *http.Request) string {
@@ -248,7 +267,9 @@ func (s *Server) adminFeedbacks(response http.ResponseWriter, request *http.Requ
 		       COALESCE(m."title", ''), COALESCE(m."name", ''), COALESCE(m."phone", ''),
 		       COALESCE(m."mobile", ''), COALESCE(m."email", ''), COALESCE(m."address", ''),
 		       COALESCE(m."content", ''), COALESCE(m."created_at", ''), COALESCE(m."state", 0),
-		       COALESCE(m."content_id", 0), COALESCE(m."ip", ''), COALESCE(m."extra_data", '{}')
+		       COALESCE(m."content_id", 0), COALESCE(m."ip", ''), COALESCE(m."extra_data", '{}'),
+		       COALESCE(m."notification_status", ''), COALESCE(m."notification_error", ''),
+		       COALESCE(m."notified_at", '')
 		FROM "gocms_message" m
 		LEFT JOIN "` + db.FeedbackClassTable + `" c ON c."id" = m."class_id"
 		WHERE ` + whereSQL + `
@@ -268,13 +289,15 @@ func (s *Server) adminFeedbacks(response http.ResponseWriter, request *http.Requ
 		var extraJSON string
 		if err := rows.Scan(&item.ID, &item.ClassID, &item.ClassName, &item.Title, &item.Name, &item.Phone,
 			&item.Mobile, &item.Email, &item.Address, &item.Content, &item.CreatedAt, &item.State,
-			&item.ContentID, &item.IP, &extraJSON); err != nil {
+			&item.ContentID, &item.IP, &extraJSON, &item.NotificationStatus, &item.NotificationError,
+			&item.NotifiedAt); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
 		// Message rows are stored as the server's wall clock (the feedback
 		// endpoint and the EmpireCMS importer both write local time).
 		item.CreatedAt = timestamps.Local(item.CreatedAt)
+		item.NotifiedAt = timestamps.Local(item.NotifiedAt)
 		_ = json.Unmarshal([]byte(extraJSON), &item.ExtraData)
 		if item.ExtraData == nil {
 			item.ExtraData = make(map[string]any)

@@ -33,7 +33,10 @@ func EnsureMessages(ctx context.Context, database *sql.DB) error {
 			"state" INTEGER NOT NULL DEFAULT 0,
 			"content_id" INTEGER NOT NULL DEFAULT 0,
 			"extra_data" TEXT NOT NULL DEFAULT '{}',
-			"ip" TEXT NOT NULL DEFAULT ''
+			"ip" TEXT NOT NULL DEFAULT '',
+			"notification_status" TEXT NOT NULL DEFAULT '',
+			"notification_error" TEXT NOT NULL DEFAULT '',
+			"notified_at" TEXT NOT NULL DEFAULT ''
 		)`); err != nil {
 		return fmt.Errorf("create unified message table: %w", err)
 	}
@@ -78,12 +81,18 @@ func EnsureMessages(ctx context.Context, database *sql.DB) error {
 		}
 	}
 
-	// Seamless migration for existing gocms_message tables
+	// Seamless migration for existing gocms_message tables. The notification
+	// columns track the Feishu (Lark) webhook push for each message; they
+	// default to an empty status so rows stored before the webhook existed are
+	// not reported as still queued.
 	for name, definition := range map[string]string{
-		"site_id":    "INTEGER NOT NULL DEFAULT 1",
-		"class_id":   "INTEGER NOT NULL DEFAULT 1",
-		"extra_data": "TEXT NOT NULL DEFAULT '{}'",
-		"ip":         "TEXT NOT NULL DEFAULT ''",
+		"site_id":             "INTEGER NOT NULL DEFAULT 1",
+		"class_id":            "INTEGER NOT NULL DEFAULT 1",
+		"extra_data":          "TEXT NOT NULL DEFAULT '{}'",
+		"ip":                  "TEXT NOT NULL DEFAULT ''",
+		"notification_status": "TEXT NOT NULL DEFAULT ''",
+		"notification_error":  "TEXT NOT NULL DEFAULT ''",
+		"notified_at":         "TEXT NOT NULL DEFAULT ''",
 	} {
 		if err := ensureMessageColumn(ctx, database, name, definition); err != nil {
 			return err

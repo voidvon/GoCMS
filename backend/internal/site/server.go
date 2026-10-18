@@ -43,6 +43,9 @@ type Server struct {
 	captcha          *captcha.Service
 	accessLogs       *accessLogConfig
 	legacyPrefixes   *legacyPrefixCache
+	// feishuClient overrides the HTTP client used for Feishu webhook pushes
+	// (tests point it at a local server); nil means the default client.
+	feishuClient *http.Client
 }
 
 func New(database *sql.DB, siteRoot string) (*Server, error) {
@@ -194,6 +197,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminMedia(response, request)
 	case "/api/admin/messages", "/api/admin/feedback":
 		s.adminFeedbacks(response, request)
+	case "/api/admin/messages/webhook", "/api/admin/feedback/webhook":
+		s.adminMessageWebhook(response, request)
+	case "/api/admin/messages/webhook/test", "/api/admin/feedback/webhook/test":
+		s.adminMessageWebhookTest(response, request)
 	case "/api/admin/feedback/batch-delete":
 		s.adminFeedbackBatchDelete(response, request)
 	case "/api/admin/feedback-classes":

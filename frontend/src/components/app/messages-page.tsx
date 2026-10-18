@@ -37,11 +37,28 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog, IconButton, InlineAlert } from "@/components/app/app-ui"
+import { MessageWebhookDialog } from "@/components/app/message-webhook-dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { PaginatedTable } from "@/components/app/paginated-table"
 import { TimeText } from "@/components/app/time-text"
 
 const pageSize = 20
+
+// Mirrors the notification_status values recorded by the Feishu webhook push.
+function notificationStatusLabel(status?: string) {
+  switch (status) {
+    case "sent":
+      return "已发送"
+    case "failed":
+      return "发送失败"
+    case "disabled":
+      return "未启用通知"
+    case "pending":
+      return "等待发送"
+    default:
+      return "无记录"
+  }
+}
 
 export function MessagesPage() {
   const [activeTab, setActiveTab] = useState("feedbacks")
@@ -334,20 +351,23 @@ export function MessagesPage() {
             </div>
           ) : null}
 
-          <TabsList size="sm" className="ml-auto">
-            <TabsTrigger value="feedbacks" className="gap-2">
-              <Inbox className="size-4" />
-              反馈信息列表
-            </TabsTrigger>
-            <TabsTrigger value="classes" className="gap-2">
-              <MessageSquare className="size-4" />
-              反馈分类管理
-            </TabsTrigger>
-            <TabsTrigger value="fields" className="gap-2">
-              <Settings2 className="size-4" />
-              反馈字段管理
-            </TabsTrigger>
-          </TabsList>
+          <div className="ml-auto flex items-center gap-2">
+            <TabsList size="sm">
+              <TabsTrigger value="feedbacks" className="gap-2">
+                <Inbox className="size-4" />
+                反馈信息列表
+              </TabsTrigger>
+              <TabsTrigger value="classes" className="gap-2">
+                <MessageSquare className="size-4" />
+                反馈分类管理
+              </TabsTrigger>
+              <TabsTrigger value="fields" className="gap-2">
+                <Settings2 className="size-4" />
+                反馈字段管理
+              </TabsTrigger>
+            </TabsList>
+            <MessageWebhookDialog />
+          </div>
         </div>
 
         {/* Tab 1: Feedback Records */}
@@ -641,6 +661,21 @@ export function MessagesPage() {
                   <p className="text-xs text-muted-foreground">联系地址</p>
                   <p className="mt-1">{viewingItem.address || "未填写"}</p>
                 </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-3 py-2 text-sm">
+                <span className="text-xs text-muted-foreground">飞书通知</span>
+                <span className="font-medium">
+                  {notificationStatusLabel(viewingItem.notification_status)}
+                </span>
+                {viewingItem.notification_status === "sent" && viewingItem.notified_at ? (
+                  <span className="text-xs text-muted-foreground">
+                    <TimeText value={viewingItem.notified_at} />
+                  </span>
+                ) : null}
+                {viewingItem.notification_status === "failed" && viewingItem.notification_error ? (
+                  <span className="text-xs text-destructive">{viewingItem.notification_error}</span>
+                ) : null}
               </div>
 
               {/* Extra Custom Fields */}

@@ -99,6 +99,20 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 - 保留策略：默认保留 3 天，服务启动时及之后每 30 分钟清理过期记录；用 `-access-log-days` 调整保留天数。自然日边界默认跟随系统时区，可用 `-timezone Asia/Shanghai` 指定 IANA 时区；时间戳按 UTC 存储与传输，界面统一按浏览器所在时区显示。
 - 接口：`GET /api/admin/access-logs`（分页明细，`page`、`page_size`，过滤参数同页面）、`GET /api/admin/access-logs/errors`（按路径与状态归并）、`DELETE /api/admin/access-logs`（按同一组过滤参数清理）；`GET /api/admin/stats` 的 `access` 字段提供仪表盘指标。
 
+## 留言通知
+
+前台通过 `/api/messages`、`/api/feedback` 提交的留言，可以按站点推送到飞书（Feishu）或国际版 Lark 的群自定义机器人。
+
+- 配置入口：后台「反馈信息列表 → 通知设置」，填写机器人 Webhook 地址并开启通知；同一后台可切换站点，各站点互不影响。
+- 地址校验：必须是 `https`，域名 `open.feishu.cn` 或 `open.larksuite.com`，路径以 `/open-apis/bot/v2/hook/` 开头且带 token；保存时会去掉多余的查询串和锚点。
+- 推送内容为文本消息，包含站点、分类、标题、姓名、电话、邮箱、留言正文（截断到 2000 字）、来源 IP 和提交时间。
+- 推送在留言入库并响应访客之后于后台 goroutine 中执行（8 秒超时），Webhook 不可达或超时都不会拖慢或影响访客提交。
+- 每条留言记录推送结果：`notification_status` 取 `pending`（已入库待推送）、`sent`、`failed`、`disabled`（未启用），失败原因写入 `notification_error`（截断到 500 字），成功时间写入 `notified_at`；留言详情弹窗展示这些字段。升级前已存在的历史留言状态为空，表示从未排队推送。
+- 配置保存在 `gocms_site_setting` 的 `message_webhook_url` 和 `message_webhook_enabled` 两个键下，属于站点级设置，不影响静态发布。
+- 权限：沿用留言模块的 `messages` 权限；未登录或无权访问该站点的账号无法读写通知设置。
+- 接口：`GET /api/admin/messages/webhook`（读取设置）、`PUT /api/admin/messages/webhook`（保存，可只传 `enabled` 或 `webhook_url`）、`POST /api/admin/messages/webhook/test`（发送测试消息，不传地址则用已保存的地址）。
+- 已知限制：未实现机器人的签名校验，也未提供失败重发按钮；若机器人开启了「签名校验」，请先关闭，否则推送会以飞书返回的错误原因记录为发送失败。
+
 ## 时间显示
 
 后台所有时间都按访问者浏览器所在时区渲染，不再显示服务器时区或 UTC。
