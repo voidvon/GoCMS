@@ -530,14 +530,46 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "gocms_content" WHERE `+where, args...).Scan(&total); err != nil {
 		return ContentPage{}, err
 	}
-	args = append(args, pageSize, (page-1)*pageSize)
-	rows, err := s.database.QueryContext(ctx, `
+
+	// 搜索时按相关性排序，译文（当前语言）与基准字段同等参与，因为页面展示的就是译文。
+	// 译文列用子查询重命名，避免与基准表的同名列冲突。
+	from := `"gocms_content"`
+	orderBy := `"sort_order" ASC, "id" DESC`
+	joinArgs := []any{}
+	orderArgs := []any{}
+	if query != "" {
+		title := `COALESCE(NULLIF(tr."t_title", ''), "gocms_content"."title")`
+		summary := `COALESCE(NULLIF(tr."t_summary", ''), "gocms_content"."summary")`
+		from += ` LEFT JOIN (SELECT "content_id" AS "cid", "title" AS "t_title", "summary" AS "t_summary"` +
+			` FROM "` + db.ContentTranslationTable + `" WHERE "lang" = ?) tr` +
+			` ON tr."cid" = "gocms_content"."id"`
+		orderBy = `CASE` +
+			` WHEN LOWER(` + title + `) = LOWER(?) THEN 60` +
+			` WHEN LOWER(` + title + `) LIKE LOWER(?) THEN 50` +
+			` WHEN LOWER(` + title + `) LIKE LOWER(?) THEN 40` +
+			` WHEN LOWER("code") LIKE LOWER(?) THEN 30` +
+			` WHEN LOWER(` + summary + `) LIKE LOWER(?) THEN 20` +
+			` ELSE 10 END DESC,` +
+			` INSTR(LOWER(` + title + `), LOWER(?)) ASC, "sort_order" ASC, "id" DESC`
+		pattern := "%" + query + "%"
+		joinArgs = append(joinArgs, lang)
+		orderArgs = append(orderArgs, query, query+"%", pattern, pattern, pattern, query)
+	}
+
+	// 占位符顺序必须与语句文本一致：JOIN → WHERE → ORDER BY → LIMIT/OFFSET。
+	selectArgs := make([]any, 0, len(joinArgs)+len(args)+len(orderArgs)+2)
+	selectArgs = append(selectArgs, joinArgs...)
+	selectArgs = append(selectArgs, args...)
+	selectArgs = append(selectArgs, orderArgs...)
+	selectArgs = append(selectArgs, pageSize, (page-1)*pageSize)
+	statement := `
 		SELECT "id", COALESCE("route_key", ''), COALESCE("category_id", 0), COALESCE("title", ''),
 		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
 		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("keywords", ''), COALESCE("description", ''),
 		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0),
 		       COALESCE("model_id", 1), COALESCE("extra_data", '{}')
-		FROM "gocms_content" WHERE `+where+` ORDER BY "sort_order" ASC, "id" DESC LIMIT ? OFFSET ?`, args...)
+		FROM ` + from + ` WHERE ` + where + ` ORDER BY ` + orderBy + ` LIMIT ? OFFSET ?`
+	rows, err := s.database.QueryContext(ctx, statement, selectArgs...)
 	if err != nil {
 		return ContentPage{}, err
 	}

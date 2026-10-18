@@ -106,3 +106,51 @@ func TestSearchMatchesRequestedLanguageTranslations(t *testing.T) {
 		t.Fatalf("empty query total = %d, want 2", all.Total)
 	}
 }
+
+// TestSearchRanksByRelevance 验证搜索结果按相关性排序：
+// 标题完全匹配 > 标题前缀 > 标题包含 > 编码 > 摘要 > 正文，
+// 而不是按 sort_order（下面刻意把 sort_order 排成相反顺序）。
+func TestSearchRanksByRelevance(t *testing.T) {
+	server, database, _ := newCategoryTestServer(t)
+	ctx := context.Background()
+
+	seed := []struct {
+		id        int64
+		routeKey  string
+		title     string
+		code      string
+		summary   string
+		body      string
+		sortOrder int
+	}{
+		{1, "body-only", "Thermal efficiency services", "", "steam services", "long body text ... bsa mention", 1},
+		{2, "summary-only", "Sugar refining", "", "bsa steam solutions for sugar refining", "body", 2},
+		{3, "code-only", "Packaged heat exchanger", "BSA-100", "summary", "body", 3},
+		{4, "title-contains", "Spirax Sarco BSA3T Bellows Sealed Stop Valve", "", "summary", "body", 4},
+		{5, "title-prefix", "BSA1T Bellows Sealed Stop Valve", "", "summary", "body", 5},
+		{6, "title-exact", "bsa", "", "summary", "body", 9},
+	}
+	for _, row := range seed {
+		if _, err := database.ExecContext(ctx, `
+			INSERT INTO "gocms_content" ("id", "site_id", "category_id", "route_key", "title", "code", "summary", "body", "visible", "sort_order")
+			VALUES (?, 1, 0, ?, ?, ?, ?, ?, 1, ?)`,
+			row.id, row.routeKey, row.title, row.code, row.summary, row.body, row.sortOrder); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result := searchRequest(t, server, "/api/search?q=bsa&page_size=20")
+	got := make([]int64, 0, len(result.Items))
+	for _, item := range result.Items {
+		got = append(got, item.ID)
+	}
+	want := []int64{6, 5, 4, 3, 2, 1}
+	if len(got) != len(want) {
+		t.Fatalf("search order = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("search order = %v, want %v", got, want)
+		}
+	}
+}
