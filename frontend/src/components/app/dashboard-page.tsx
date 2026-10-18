@@ -182,7 +182,7 @@ export function DashboardPage() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">错误与死链</CardTitle>
-            <CardDescription>按命中次数排序的错误地址，可直接判断需要修复的链接</CardDescription>
+            <CardDescription>按最近出现时间倒序排列，最新触发的错误排在最前</CardDescription>
           </CardHeader>
           <CardContent className="px-0">
             {topErrors.length === 0 ? (

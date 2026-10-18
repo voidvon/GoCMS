@@ -191,6 +191,9 @@ func TestAccessLogAdminEndpoints(t *testing.T) {
 	now := time.Now()
 	today := now.In(time.Local).Format("2006-01-02")
 	recentUTC := now.UTC().Format("2006-01-02 15:04:05")
+	// Distinct timestamps so the dashboard's newest-first error ordering is
+	// observable: /b is the most frequent error, /c is the most recent one.
+	earlierUTC := now.Add(-3 * time.Hour).UTC().Format("2006-01-02 15:04:05")
 	oldUTC := now.AddDate(0, 0, -2).UTC().Format("2006-01-02 15:04:05")
 	oldDay := now.AddDate(0, 0, -2).In(time.Local).Format("2006-01-02")
 
@@ -233,8 +236,8 @@ func TestAccessLogAdminEndpoints(t *testing.T) {
 	}
 
 	insert(accessLogRow{siteID: 1, path: "/a", status: 200})
-	insert(accessLogRow{siteID: 1, path: "/b", status: 404, refererKind: "internal", ip: "203.0.113.11"})
-	insert(accessLogRow{siteID: 1, path: "/b", status: 404, refererKind: "internal", ip: "203.0.113.12"})
+	insert(accessLogRow{siteID: 1, path: "/b", status: 404, refererKind: "internal", ip: "203.0.113.11", visitedAt: earlierUTC})
+	insert(accessLogRow{siteID: 1, path: "/b", status: 404, refererKind: "internal", ip: "203.0.113.12", visitedAt: earlierUTC})
 	insert(accessLogRow{siteID: 1, path: "/c", status: 500, agentKind: "bot", agentLabel: "Googlebot", deviceKind: "other"})
 	insert(accessLogRow{siteID: 1, path: "/old", status: 200, dayKey: oldDay, visitedAt: oldUTC})
 	insert(accessLogRow{siteID: secondID, path: "/x", status: 404})
@@ -310,6 +313,8 @@ func TestAccessLogAdminEndpoints(t *testing.T) {
 	if errors.Total != 2 || len(errors.Items) != 2 {
 		t.Fatalf("error groups = %+v, want 2 groups", errors)
 	}
+	// The error-group endpoint stays ranked by hit count (the traffic log's
+	// "worst first" view); only the dashboard summary ranks by newest first.
 	if errors.Items[0].Path != "/b" || errors.Items[0].Status != 404 || errors.Items[0].Hits != 2 || errors.Items[0].InternalHits != 2 {
 		t.Fatalf("first error group = %+v, want /b 404 with 2 internal hits", errors.Items[0])
 	}
@@ -352,8 +357,10 @@ func TestAccessLogAdminEndpoints(t *testing.T) {
 	if len(stats.Access.TopPages) == 0 || stats.Access.TopPages[0].Path != "/a" {
 		t.Errorf("stats top pages = %+v, want /a first", stats.Access.TopPages)
 	}
-	if len(stats.Access.TopErrors) == 0 || stats.Access.TopErrors[0].Path != "/b" {
-		t.Errorf("stats top errors = %+v, want /b first", stats.Access.TopErrors)
+	// Newest first: /c was visited just now, /b three hours ago, even though /b
+	// has more hits.
+	if len(stats.Access.TopErrors) < 2 || stats.Access.TopErrors[0].Path != "/c" || stats.Access.TopErrors[1].Path != "/b" {
+		t.Errorf("stats top errors = %+v, want newest /c first then /b", stats.Access.TopErrors)
 	}
 	if len(stats.Access.StatusBreakdown) != 2 {
 		t.Errorf("stats status breakdown = %+v, want 404 and 500", stats.Access.StatusBreakdown)

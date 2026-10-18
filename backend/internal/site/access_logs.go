@@ -845,7 +845,8 @@ func (s *Server) accessLogSummary(ctx context.Context, siteID int64) (AccessLogS
 				ORDER BY x."id" DESC LIMIT 1), 'none')
 		FROM "`+db.AccessLogTable+`" l
 		WHERE l."site_id" = ? AND l."status" >= 400
-		GROUP BY l."path", l."status" ORDER BY COUNT(*) DESC, MAX(l."visited_at") DESC LIMIT ?`, siteID, accessLogTopErrorsLimit)
+		GROUP BY l."path", l."status"
+		ORDER BY MAX(l."visited_at") DESC, COUNT(*) DESC LIMIT ?`, siteID, accessLogTopErrorsLimit)
 	if err != nil {
 		return summary, err
 	}
