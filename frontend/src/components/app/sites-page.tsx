@@ -572,7 +572,7 @@ export function SitesPage() {
 
       {/* Site Parameters / Global Settings Dialog */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+        <DialogContent className="max-w-2xl flex flex-col">
           <DialogHeader>
             <DialogTitle>站点参数配置 - {settingsSite?.name}</DialogTitle>
             <DialogDescription>

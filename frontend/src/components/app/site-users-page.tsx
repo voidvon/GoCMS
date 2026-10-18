@@ -378,7 +378,7 @@ export function SiteUsersPage() {
           }
         }}
       >
-        <DialogContent showCloseButton={!busy} className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+        <DialogContent showCloseButton={!busy} className="overflow-y-auto sm:max-w-4xl">
           {viewingGroupMembers ? (
             <div className="space-y-4">
               <DialogHeader>
@@ -640,7 +640,7 @@ export function SiteUsersPage() {
           if (!open && !busy) setSessionUser(null)
         }}
       >
-        <DialogContent showCloseButton={!busy} className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent showCloseButton={!busy} className="overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>登录会话设置</DialogTitle>
             <DialogDescription>调整登录数量或撤销用户的登录会话。</DialogDescription>
@@ -708,7 +708,7 @@ export function SiteUsersPage() {
           if (!open && !busy) setAssignUser(null)
         }}
       >
-        <DialogContent showCloseButton={!busy} className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent showCloseButton={!busy} className="overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>设置VIP</DialogTitle>
             <DialogDescription>
@@ -804,7 +804,7 @@ export function SiteUsersPage() {
           if (!open && !busy) setGroupForm(null)
         }}
       >
-        <DialogContent showCloseButton={!busy} className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent showCloseButton={!busy} className="overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{groupForm?.id ? "编辑会员组" : "新增会员组"}</DialogTitle>
             <DialogDescription>

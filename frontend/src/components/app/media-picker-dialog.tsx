@@ -71,8 +71,8 @@ export function MediaPickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden sm:max-w-3xl">
-        <ScrollArea className="max-h-[calc(100dvh-4rem)]" contentClassName="space-y-4 pr-2">
+      <DialogContent className="flex flex-col overflow-hidden sm:max-w-3xl">
+        <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-4 pr-2">
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription>{description}</DialogDescription>

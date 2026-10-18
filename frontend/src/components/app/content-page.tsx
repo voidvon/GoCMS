@@ -1656,8 +1656,8 @@ export function ContentPage({ user }: { user: AdminUser }) {
       </PaginatedTable>
 
       <Dialog open={editorOpen} onOpenChange={closeEditor}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden sm:max-w-5xl">
-          <ScrollArea className="max-h-[calc(100dvh-4rem)]" contentClassName="space-y-4 pr-2">
+        <DialogContent className="flex flex-col overflow-hidden sm:max-w-5xl">
+          <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-4 pr-2">
             {editorLoading ? (
               <><DialogHeader><DialogTitle>编辑内容</DialogTitle><DialogDescription>正在加载内容。</DialogDescription></DialogHeader><div className="flex h-32 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div></>
             ) : <ContentEditor canReview={canReview} key={`${editing?.id ?? "new"}-${activeLang}`} content={formContent} categories={categories} models={models} modelFields={modelFields} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}

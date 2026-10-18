@@ -430,7 +430,7 @@ export function UsersPage({ currentUserID }: { currentUserID: number }) {
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-4xl">
+        <DialogContent className="overflow-y-auto sm:max-w-4xl">
           <DialogHeader>
             <div className="flex flex-wrap items-center justify-between gap-3 pr-6">
               <div>
@@ -563,7 +563,7 @@ export function UsersPage({ currentUserID }: { currentUserID: number }) {
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="overflow-y-auto sm:max-w-lg">
           {account && (
             <form
               className="space-y-4"
@@ -801,7 +801,7 @@ export function UsersPage({ currentUserID }: { currentUserID: number }) {
           }
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="overflow-y-auto sm:max-w-2xl">
           {group && (
             <form
               className="space-y-4"

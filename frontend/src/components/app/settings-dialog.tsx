@@ -79,8 +79,8 @@ export function SettingsDialog() {
       >
         <Settings />
       </DialogTrigger>
-      <DialogContent className="max-h-[85svh] gap-0 overflow-hidden p-0 sm:max-w-2xl">
-        <ScrollArea className="max-h-[85svh]" contentClassName="pr-2">
+      <DialogContent className="flex flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <ScrollArea className="min-h-0 flex-1" contentClassName="pr-2">
           <div className="border-b px-5 py-4">
           <DialogTitle>设置</DialogTitle>
           <DialogDescription className="sr-only">查看 GoCMS 设置和版本信息</DialogDescription>

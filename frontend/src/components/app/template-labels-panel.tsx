@@ -136,14 +136,14 @@ function BuiltinTemplateTagsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-4xl overflow-hidden">
+      <DialogContent className="flex max-w-4xl flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>系统内置标签语法参考</DialogTitle>
           <DialogDescription>发布器原生支持的函数与全局标签语法，可在模板中按需调用。</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="flex min-h-0 flex-1 flex-col space-y-4">
           <SearchField value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索内置标签、函数名或说明" />
-          <ScrollArea className="h-[calc(100dvh-14rem)] pr-2" contentClassName="space-y-3">
+          <ScrollArea className="min-h-0 flex-1 pr-2" contentClassName="space-y-3">
             <div className="grid gap-3 md:grid-cols-2">
               {filteredTags.map((tag) => (
                 <section key={tag.name} className="space-y-2.5 rounded-lg border p-3.5 text-xs">
@@ -984,12 +984,12 @@ export function TemplateLabelsPanel() {
 
       {/* 分类管理弹窗 */}
       <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden sm:max-w-lg">
+        <DialogContent className="flex flex-col overflow-hidden sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>管理标签模板分类</DialogTitle>
             <DialogDescription>按用途或模型整理标签模板。</DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[calc(100dvh-12rem)]" contentClassName="space-y-4 pr-2">
+          <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-4 pr-2">
             <form className="space-y-3 rounded-lg border p-3" onSubmit={(event) => void saveCategory(event)}>
               <p className="text-sm font-medium">{editingCategory ? "编辑分类" : "新增分类"}</p>
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_6rem]">

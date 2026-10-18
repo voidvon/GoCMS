@@ -435,12 +435,12 @@ export function TemplateVariablesPanel() {
       </div>
 
       <Dialog open={categoryDialogOpen} onOpenChange={setCategoryDialogOpen}>
-        <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-hidden sm:max-w-lg">
+        <DialogContent className="flex flex-col overflow-hidden sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>公共模板变量分类</DialogTitle>
             <DialogDescription>按用途组织整理可复用的公共模板变量片段。</DialogDescription>
           </DialogHeader>
-          <ScrollArea className="max-h-[calc(100dvh-12rem)]" contentClassName="space-y-4 pr-2">
+          <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-4 pr-2">
             <form className="space-y-3 rounded-lg border p-3" onSubmit={(event) => void saveCategory(event)}>
               <p className="text-sm font-medium">{editingCategory ? "编辑分类" : "新增分类"}</p>
               <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_6rem]">

@@ -404,7 +404,7 @@ export function ModelsPage() {
       {/* Dialog: Edit / Create System Model */}
       <Dialog open={modelDialogOpen} onOpenChange={setModelDialogOpen}>
         {editingModel ? (
-          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogContent className="max-w-4xl flex flex-col">
             <DialogHeader>
               <DialogTitle>{editingModel.id ? "编辑系统模型" : "新建系统模型"}</DialogTitle>
               <DialogDescription>
@@ -460,8 +460,8 @@ export function ModelsPage() {
 
               <div className="space-y-2 flex-1 flex flex-col min-h-0">
                 <Label className="font-semibold">字段录入项配置 (前后台发布字段)</Label>
-                <div className="rounded-lg border flex-1 overflow-hidden">
-                  <ScrollArea className="h-[46vh]">
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
+                  <ScrollArea className="min-h-0 flex-1">
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -649,7 +649,7 @@ export function ModelsPage() {
         }}
       >
         {managingTable ? (
-          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
+          <DialogContent className="max-w-4xl flex flex-col">
             <DialogHeader>
               <DialogTitle>
                 数据表字段管理：{managingTable.name} ({managingTable.table_name})
@@ -685,7 +685,7 @@ export function ModelsPage() {
                     共 {fieldsForManagingTable.length} 个字段
                   </span>
                 </div>
-                <ScrollArea className="max-h-[55vh] rounded-md border">
+                <ScrollArea className="min-h-0 flex-1 rounded-md border">
                   <Table>
                     <TableHeader>
                       <TableRow>
