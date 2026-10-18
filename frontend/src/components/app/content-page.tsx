@@ -40,6 +40,7 @@ import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
 import { RichTextEditor } from "@/components/app/rich-text-editor"
 import { flattenCategoryTree } from "@/lib/category-tree"
 import { cn } from "@/lib/utils"
+import { formatWallDate } from "@/lib/time"
 
 function buildInitialContentTranslations(
   content: ContentInput,
@@ -151,10 +152,6 @@ const emptyContent: ContentInput = {
 
 function categoryName(categories: CategoryItem[], categoryID: number) {
   return categories.find((category) => category.id === categoryID)?.name ?? "未分类"
-}
-
-function formatDate(value: string) {
-  return value ? value.slice(0, 10).replaceAll("-", "/") : "暂无日期"
 }
 
 function dateTimeInput(value: string) {
@@ -1632,7 +1629,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{categoryName(categories, item.category_id)}</TableCell>
-                  <TableCell className="text-muted-foreground">{formatDate(item.published_at)}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatWallDate(item.published_at) || "暂无日期"}</TableCell>
                   <TableCell>
                     <div className="flex gap-1.5 text-xs">
                       <span>{item.visible ? "公开" : "隐藏"}</span>

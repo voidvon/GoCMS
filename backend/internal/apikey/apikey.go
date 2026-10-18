@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"gocms/internal/db"
+	"gocms/internal/timestamps"
 )
 
 const (
@@ -375,12 +376,12 @@ func List(ctx context.Context, database *sql.DB, adminID *int64) ([]ApiKey, erro
 	for rows.Next() {
 		var item ApiKey
 		var (
-			expiresAt   sql.NullString
-			revokedAt   sql.NullString
-			revokedBy   sql.NullInt64
-			createdBy   sql.NullInt64
-			lastUsedAt  sql.NullString
-			lastUsedIP  sql.NullString
+			expiresAt  sql.NullString
+			revokedAt  sql.NullString
+			revokedBy  sql.NullInt64
+			createdBy  sql.NullInt64
+			lastUsedAt sql.NullString
+			lastUsedIP sql.NullString
 		)
 		if err := rows.Scan(
 			&item.ID,
@@ -418,6 +419,7 @@ func List(ctx context.Context, database *sql.DB, adminID *int64) ([]ApiKey, erro
 		}
 		item.LastUsedIP = lastUsedIP.String
 		item.Status = resolveStatus(item.RevokedAt, item.ExpiresAt)
+		normalizeTimes(&item)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -425,6 +427,25 @@ func List(ctx context.Context, database *sql.DB, adminID *int64) ([]ApiKey, erro
 	}
 
 	return items, nil
+}
+
+// normalizeTimes rewrites the stored wall clocks as RFC3339 UTC instants. The
+// admin frontend renders every timestamp in the time zone of the viewer, so the
+// API must not hand out a bare "2006-01-02 15:04:05" string.
+func normalizeTimes(key *ApiKey) {
+	key.CreatedAt = timestamps.UTC(key.CreatedAt)
+	key.UpdatedAt = timestamps.UTC(key.UpdatedAt)
+	key.ExpiresAt = normalizeTimePtr(key.ExpiresAt)
+	key.RevokedAt = normalizeTimePtr(key.RevokedAt)
+	key.LastUsedAt = normalizeTimePtr(key.LastUsedAt)
+}
+
+func normalizeTimePtr(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	normalized := timestamps.UTC(*value)
+	return &normalized
 }
 
 func GetByID(ctx context.Context, database *sql.DB, id int64) (*ApiKey, error) {
@@ -501,6 +522,7 @@ func GetByID(ctx context.Context, database *sql.DB, id int64) (*ApiKey, error) {
 	}
 	item.LastUsedIP = lastUsedIP.String
 	item.Status = resolveStatus(item.RevokedAt, item.ExpiresAt)
+	normalizeTimes(&item)
 
 	return &item, nil
 }
@@ -710,6 +732,7 @@ func ListEvents(ctx context.Context, database *sql.DB, apiKeyID int64) ([]ApiKey
 		} else {
 			event.Metadata = map[string]any{}
 		}
+		event.CreatedAt = timestamps.UTC(event.CreatedAt)
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {

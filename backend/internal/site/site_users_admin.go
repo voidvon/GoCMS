@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"gocms/internal/auth"
+	"gocms/internal/timestamps"
 )
 
 type siteUserAdminItem struct {
@@ -236,6 +237,12 @@ func (s *Server) listSiteUsers(w http.ResponseWriter, r *http.Request, siteID in
 				exp := rawVipExpiresAt.String
 				x.VipExpiresAt = &exp
 			}
+		}
+		x.CreatedAt = timestamps.UTC(x.CreatedAt)
+		x.LastLoginAt = timestamps.UTC(x.LastLoginAt)
+		if x.VipExpiresAt != nil {
+			expires := timestamps.UTC(*x.VipExpiresAt)
+			x.VipExpiresAt = &expires
 		}
 		items = append(items, x)
 	}

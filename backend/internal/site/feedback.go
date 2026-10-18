@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gocms/internal/db"
+	"gocms/internal/timestamps"
 )
 
 type FeedbackItem struct {
@@ -271,6 +272,9 @@ func (s *Server) adminFeedbacks(response http.ResponseWriter, request *http.Requ
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
+		// Message rows are stored as the server's wall clock (the feedback
+		// endpoint and the EmpireCMS importer both write local time).
+		item.CreatedAt = timestamps.Local(item.CreatedAt)
 		_ = json.Unmarshal([]byte(extraJSON), &item.ExtraData)
 		if item.ExtraData == nil {
 			item.ExtraData = make(map[string]any)
@@ -417,6 +421,7 @@ func (s *Server) adminFeedbackClasses(response http.ResponseWriter, request *htt
 				http.Error(response, "database error", http.StatusInternalServerError)
 				return
 			}
+			item.CreatedAt = timestamps.Local(item.CreatedAt)
 			item.FieldsConfig = json.RawMessage(cfgJSON)
 			item.MustFields = json.RawMessage(mustJSON)
 			items = append(items, item)

@@ -22,6 +22,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gocms/internal/timestamps"
 )
 
 const (
@@ -359,6 +361,7 @@ func scanMedia(scanner mediaScanner) (MediaAsset, error) {
 		&asset.ID, &asset.SiteID, &asset.Kind, &asset.URL, &asset.OriginalName, &asset.MimeType, &asset.SizeBytes,
 		&asset.Width, &asset.Height, &asset.SHA256, &asset.Status, &asset.UploadedBy, &asset.CreatedAt,
 	)
+	asset.CreatedAt = timestamps.UTC(asset.CreatedAt)
 	return asset, err
 }
 

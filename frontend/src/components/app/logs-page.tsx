@@ -22,6 +22,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { InlineAlert } from "@/components/app/app-ui"
 import { PaginatedTable } from "@/components/app/paginated-table"
+import { TimeText } from "@/components/app/time-text"
+import { localDayStart } from "@/lib/time"
 
 const pageSize = 30
 
@@ -90,11 +92,11 @@ export function LogsPage({ user }: { user: AdminUser }) {
   }, [page, filter, revision, tab])
 
   async function handleClear() {
-    if (!before || !window.confirm(`确认删除 ${before} 之前的操作和登录日志吗？`)) return
+    if (!before || !window.confirm(`确认删除 ${before} 00:00（本地时间）之前的操作和登录日志吗？`)) return
     setClearing(true)
     setError("")
     try {
-      await clearLogs(before)
+      await clearLogs(localDayStart(before))
       setRevision((value) => value + 1)
       setBefore("")
     } catch (e) {
@@ -177,7 +179,7 @@ export function LogsPage({ user }: { user: AdminUser }) {
         </div>
 
         <p className="shrink-0 text-sm text-muted-foreground">
-          时间为 UTC。操作日志记录通过权限检查后的写操作；登录日志记录成功、失败和限流结果。发布任务结果请到网站发布查看。
+          时间按你所在时区显示，鼠标悬停可查看完整时间。操作日志记录通过权限检查后的写操作；登录日志记录成功、失败和限流结果。发布任务结果请到网站发布查看。
         </p>
 
         {error ? <InlineAlert className="shrink-0">{error}</InlineAlert> : null}
@@ -197,7 +199,7 @@ export function LogsPage({ user }: { user: AdminUser }) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="pl-4 whitespace-nowrap">时间（UTC）</TableHead>
+                  <TableHead className="pl-4 whitespace-nowrap">时间</TableHead>
                   <TableHead className="whitespace-nowrap">账号</TableHead>
                   <TableHead className="whitespace-nowrap">操作</TableHead>
                   <TableHead className="whitespace-nowrap">对象</TableHead>
@@ -221,7 +223,7 @@ export function LogsPage({ user }: { user: AdminUser }) {
                 ) : (
                   items.map((item) => (
                     <TableRow key={item.id}>
-                      <TableCell className="pl-4 whitespace-nowrap">{item.created_at}</TableCell>
+                      <TableCell className="pl-4 whitespace-nowrap"><TimeText value={item.created_at} /></TableCell>
                       <TableCell className="whitespace-nowrap font-medium">{item.username}</TableCell>
                       <TableCell className="whitespace-nowrap">
                         {({ POST: "提交", PUT: "修改", PATCH: "修改", DELETE: "删除" } as Record<string, string>)[item.method] ?? item.method}
@@ -247,7 +249,7 @@ export function LogsPage({ user }: { user: AdminUser }) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="pl-4 whitespace-nowrap">时间（UTC）</TableHead>
+                    <TableHead className="pl-4 whitespace-nowrap">时间</TableHead>
                     <TableHead className="whitespace-nowrap">账号</TableHead>
                     <TableHead className="whitespace-nowrap">结果</TableHead>
                     <TableHead className="pr-4 whitespace-nowrap">IP</TableHead>
@@ -269,7 +271,7 @@ export function LogsPage({ user }: { user: AdminUser }) {
                   ) : (
                     loginItems.map((item) => (
                       <TableRow key={item.id}>
-                        <TableCell className="pl-4 whitespace-nowrap">{item.created_at}</TableCell>
+                        <TableCell className="pl-4 whitespace-nowrap"><TimeText value={item.created_at} /></TableCell>
                         <TableCell className="whitespace-nowrap font-medium">{item.username}</TableCell>
                         <TableCell className="whitespace-nowrap">
                           <span className={item.success ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}>
@@ -290,7 +292,7 @@ export function LogsPage({ user }: { user: AdminUser }) {
       {user.is_super && (
         <div className="flex shrink-0 flex-wrap items-end gap-2 rounded-md border p-3">
           <label className="space-y-1 text-sm">
-            <span className="block">清理该日期之前的日志（UTC）</span>
+            <span className="block">清理该日期之前的日志</span>
             <Input type="date" value={before} onChange={(e) => setBefore(e.target.value)} />
           </label>
           <Button variant="destructive" disabled={clearing || !before} onClick={() => void handleClear()}>

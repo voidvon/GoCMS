@@ -33,6 +33,7 @@ import { HeaderActions } from "@/components/app/header-actions"
 import { showSuccess } from "@/components/app/admin-notifications"
 import { useSite } from "@/lib/site-context"
 import { cn } from "@/lib/utils"
+import { TimeText } from "@/components/app/time-text"
 
 type TemplateGroupKey = "home" | "cover" | "list" | "content" | "public"
 type TemplateSection = TemplateGroupKey | "tags" | "tempvars" | "custom"
@@ -49,11 +50,6 @@ function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function formatModifiedAt(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN")
 }
 
 function emptyTemplateGroup(key: TemplateGroupKey): ThemeTemplateGroup {
@@ -196,7 +192,7 @@ function FileBrowser({ files, selectedPath, search, content, draft, loading, err
         <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b px-4 py-2">
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
             <span className="truncate font-mono text-xs font-medium">{(content?.path ?? selectedPath) || "选择模板"}</span>
-            {content && <span className="text-[11px] text-muted-foreground">{formatBytes(content.size)} · 更新于 {formatModifiedAt(content.modified_at)}</span>}
+            {content && <span className="text-[11px] text-muted-foreground">{formatBytes(content.size)} · 更新于 <TimeText value={content.modified_at} /></span>}
           </div>
           <div className="flex items-center gap-1">
             <Button variant="outline" size="sm" onClick={onSave} disabled={!content || loading || saving}><Save />{saving ? "保存中" : "保存"}</Button>
@@ -254,7 +250,7 @@ function SingleTemplateEditor({
           </div>
           {content && (
             <span className="text-[11px] text-muted-foreground">
-              {formatBytes(content.size)} · 更新于 {formatModifiedAt(content.modified_at)}
+              {formatBytes(content.size)} · 更新于 <TimeText value={content.modified_at} />
             </span>
           )}
         </div>
@@ -545,7 +541,7 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
           <div className="flex min-h-11 shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-b px-4 py-2">
             <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
               <span className="truncate font-mono text-xs font-medium">{activePath || "选择文件"}</span>
-              {activeFile && <span className="text-[11px] text-muted-foreground">{formatBytes(activeFile.size)} · 更新于 {formatModifiedAt(activeFile.modified_at)}</span>}
+              {activeFile && <span className="text-[11px] text-muted-foreground">{formatBytes(activeFile.size)} · 更新于 <TimeText value={activeFile.modified_at} /></span>}
             </div>
             <div className="flex items-center gap-1">
               {activeKind !== "image" && <Button variant="outline" size="sm" onClick={() => void saveFile()} disabled={!content || busy !== "" || loading}><Save />{busy === "save" ? "保存中" : "保存"}</Button>}

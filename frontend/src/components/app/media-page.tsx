@@ -7,16 +7,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmDialog, InlineAlert, SearchField } from "@/components/app/app-ui"
 import { PaginatedTable } from "@/components/app/paginated-table"
+import { TimeText } from "@/components/app/time-text"
 
 const pageSize = 20
 
 function fileSize(bytes: number) {
   return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
-}
-
-function uploadDate(value: string) {
-  const date = new Date(value.includes("T") ? value : `${value.replace(" ", "T")}Z`)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN")
 }
 
 function MediaDetails({ asset, onClose, onDeleted }: {
@@ -82,7 +78,7 @@ function MediaDetails({ asset, onClose, onDeleted }: {
           <div><dt className="text-muted-foreground">格式 / 大小</dt><dd>{asset.mime_type} · {fileSize(asset.size_bytes)}</dd></div>
           <div><dt className="text-muted-foreground">尺寸</dt><dd>{asset.width} × {asset.height}</dd></div>
           <div><dt className="text-muted-foreground">上传人</dt><dd className="break-all">{asset.uploaded_by || "未知"}</dd></div>
-          <div><dt className="text-muted-foreground">上传时间</dt><dd>{uploadDate(asset.created_at)}</dd></div>
+          <div><dt className="text-muted-foreground">上传时间</dt><dd><TimeText value={asset.created_at} /></dd></div>
         </dl>
         <div className="space-y-2">
           <p className="text-sm font-medium">访问地址</p>
@@ -246,7 +242,7 @@ export function MediaPage() {
                   <TableCell className="text-muted-foreground">{fileSize(asset.size_bytes)}</TableCell>
                   <TableCell className="text-muted-foreground">{asset.width} × {asset.height}</TableCell>
                   <TableCell className="max-w-40 truncate text-muted-foreground" title={asset.uploaded_by}>{asset.uploaded_by || "未知"}</TableCell>
-                  <TableCell className="text-muted-foreground">{uploadDate(asset.created_at)}</TableCell>
+                  <TableCell className="text-muted-foreground"><TimeText value={asset.created_at} /></TableCell>
                   <TableCell className="pr-4 text-right">
                     <Button variant="ghost" size="sm" onClick={() => setSelected(asset)}>详情</Button>
                   </TableCell>

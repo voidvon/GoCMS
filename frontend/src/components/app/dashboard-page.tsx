@@ -14,7 +14,7 @@ import {
 
 import { getStats, type AccessLogMetrics, type AdminStats } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
-import { formatVisitedAt } from "@/lib/utils"
+import { TimeText } from "@/components/app/time-text"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -212,7 +212,7 @@ export function DashboardPage() {
                         </TableCell>
                         <TableCell className="text-right font-medium">{formatNumber(item.hits)}</TableCell>
                         <TableCell className="text-right text-muted-foreground">{formatNumber(item.internal_hits)}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{formatVisitedAt(item.last_visited_at)}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground"><TimeText value={item.last_visited_at} /></TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSystemModelsAndFieldsManagement(t *testing.T) {
@@ -136,6 +137,31 @@ func TestCustomFeedbackSystem(t *testing.T) {
 	}
 	if !strings.Contains(resp.Body.String(), "大宗采购询盘") {
 		t.Fatalf("admin feedback query did not find item: %s", resp.Body.String())
+	}
+
+	// Message rows are stored as the server wall clock and must reach the admin
+	// frontend as RFC3339 UTC instants so it can render the viewer's zone.
+	var storedCreatedAt string
+	if err := database.QueryRow(`SELECT "created_at" FROM "gocms_message" WHERE "name" = '王经理'`).Scan(&storedCreatedAt); err != nil {
+		t.Fatalf("query feedback created_at: %v", err)
+	}
+	var listed struct {
+		Items []struct {
+			CreatedAt string `json:"created_at"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Items) != 1 {
+		t.Fatalf("unexpected feedback items: %d", len(listed.Items))
+	}
+	local, err := time.ParseInLocation("2006-01-02 15:04:05", storedCreatedAt, time.Local)
+	if err != nil {
+		t.Fatalf("stored feedback timestamp %q: %v", storedCreatedAt, err)
+	}
+	if want := local.UTC().Format(time.RFC3339); listed.Items[0].CreatedAt != want {
+		t.Fatalf("feedback timestamp %q, want %q", listed.Items[0].CreatedAt, want)
 	}
 
 	// 4. Missing required field should be rejected

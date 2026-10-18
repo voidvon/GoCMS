@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { InlineAlert } from "@/components/app/app-ui"
 import { showSuccess } from "@/components/app/admin-notifications"
 import { useSite } from "@/lib/site-context"
+import { TimeText } from "@/components/app/time-text"
 
 function SitemapRow({
   format,
@@ -242,7 +243,7 @@ export function PublishPage() {
             </div>
           )}
           {report && report.finished && !report.finished.startsWith("0001") && (
-            <p className="text-xs text-muted-foreground">最近完成：{new Date(report.finished).toLocaleString("zh-CN")}</p>
+            <p className="text-xs text-muted-foreground">最近完成：<TimeText value={report.finished} mode="datetime" /></p>
           )}
         </CardContent>
       </Card>

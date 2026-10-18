@@ -2,11 +2,14 @@ package site
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"gocms/internal/timestamps"
 )
 
 type operationResponse struct {
@@ -133,6 +136,7 @@ func (s *Server) adminOperationLogs(w http.ResponseWriter, r *http.Request) {
 			accountError(w, err)
 			return
 		}
+		item.CreatedAt = timestamps.UTC(item.CreatedAt)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -182,6 +186,7 @@ func (s *Server) adminLoginLogs(w http.ResponseWriter, r *http.Request) {
 			accountError(w, err)
 			return
 		}
+		x.CreatedAt = timestamps.UTC(x.CreatedAt)
 		items = append(items, x)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -200,12 +205,13 @@ func (s *Server) adminClearLogs(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Before string `json:"before"`
 	}
-	if err := decodeRequest(r, &input); err != nil || len(input.Before) != 10 {
-		accountInputError(w, "日期格式必须为 YYYY-MM-DD")
+	if err := decodeRequest(r, &input); err != nil {
+		accountInputError(w, "请求格式无效")
 		return
 	}
-	if _, err := time.Parse("2006-01-02", input.Before); err != nil {
-		accountInputError(w, "日期格式必须为 YYYY-MM-DD")
+	cutoff, err := parseLogCutoff(input.Before)
+	if err != nil {
+		accountInputError(w, err.Error())
 		return
 	}
 	tx, err := s.database.BeginTx(r.Context(), nil)
@@ -214,12 +220,12 @@ func (s *Server) adminClearLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(r.Context(), `DELETE FROM gocms_admin_operation WHERE created_at < datetime(?, '+1 day')`, input.Before); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM gocms_admin_operation WHERE created_at < ?`, cutoff); err != nil {
 		accountError(w, err)
 		return
 	}
 	// Recent records also enforce login throttling; cleanup must not unlock it.
-	if _, err := tx.ExecContext(r.Context(), `DELETE FROM gocms_admin_login WHERE created_at < datetime(?, '+1 day') AND created_at < datetime('now', '-15 minutes')`, input.Before); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM gocms_admin_login WHERE created_at < ? AND created_at < datetime('now', '-15 minutes')`, cutoff); err != nil {
 		accountError(w, err)
 		return
 	}
@@ -228,4 +234,21 @@ func (s *Server) adminClearLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// parseLogCutoff accepts the RFC3339 instant the admin UI sends, computed from
+// the operator's own time zone, and keeps the historical YYYY-MM-DD meaning of
+// "before the end of that UTC day".
+func parseLogCutoff(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", errors.New("请选择日期")
+	}
+	if day, err := time.Parse("2006-01-02", trimmed); err == nil {
+		return day.AddDate(0, 0, 1).Format("2006-01-02 15:04:05"), nil
+	}
+	if instant, err := time.Parse(time.RFC3339, trimmed); err == nil {
+		return instant.UTC().Format("2006-01-02 15:04:05"), nil
+	}
+	return "", errors.New("日期格式必须为 YYYY-MM-DD 或 RFC3339 时间")
 }

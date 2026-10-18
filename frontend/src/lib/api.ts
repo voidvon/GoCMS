@@ -102,7 +102,7 @@ export type AccessLogPageStat = {
   path: string
   visits: number
   unique_ips: number
-  // RFC3339 UTC instant; render with formatVisitedAt.
+  // RFC3339 UTC instant; render with the shared TimeText component.
   last_visited_at: string
 }
 
@@ -112,7 +112,7 @@ export type AccessLogErrorStat = {
   hits: number
   unique_ips: number
   internal_hits: number
-  // RFC3339 UTC instant; render with formatVisitedAt.
+  // RFC3339 UTC instant; render with the shared TimeText component.
   last_visited_at: string
   last_referer: string
   last_referer_kind: string
@@ -145,7 +145,7 @@ export type AccessLogItem = {
   agent_kind: string
   agent_label: string
   device_kind: string
-  // RFC3339 UTC instant; render with formatVisitedAt.
+  // RFC3339 UTC instant; render with the shared TimeText component.
   visited_at: string
 }
 

@@ -49,32 +49,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ConfirmDialog, InlineAlert } from "@/components/app/app-ui"
-
-function formatRelativeTime(dateStr?: string | null) {
-  if (!dateStr) return "尚未使用"
-  const date = new Date(dateStr)
-  if (Number.isNaN(date.getTime())) return dateStr
-  const now = new Date()
-  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000)
-  if (diffSec < 60) return "刚刚"
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)} 分钟前`
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} 小时前`
-  if (diffSec < 2592000) return `${Math.floor(diffSec / 86400)} 天前`
-  return date.toLocaleDateString("zh-CN")
-}
-
-function formatDate(dateStr?: string | null) {
-  if (!dateStr) return "-"
-  const date = new Date(dateStr)
-  if (Number.isNaN(date.getTime())) return dateStr
-  return date.toLocaleString("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
+import { TimeText } from "@/components/app/time-text"
 
 function getStatusBadge(status: ApiKey["status"]) {
   switch (status) {
@@ -322,19 +297,17 @@ export function ApiKeysPage() {
                       </TableCell>
                       <TableCell>{getStatusBadge(item.status)}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {item.last_used_at ? (
-                          <span title={`IP: ${item.last_used_ip || "未知"}`}>
-                            {formatRelativeTime(item.last_used_at)}
-                          </span>
-                        ) : (
-                          "尚未使用"
-                        )}
+                        <TimeText
+                          value={item.last_used_at}
+                          placeholder="尚未使用"
+                          hint={`IP: ${item.last_used_ip || "未知"}`}
+                        />
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {item.expires_at ? formatDate(item.expires_at) : "永久"}
+                        <TimeText value={item.expires_at} placeholder="永久" />
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground">
-                        {formatDate(item.created_at)}
+                        <TimeText value={item.created_at} />
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1.5">
@@ -601,7 +574,7 @@ export function ApiKeysPage() {
                   {eventsList.map((evt) => (
                     <TableRow key={evt.id}>
                       <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                        {formatDate(evt.created_at)}
+                        <TimeText value={evt.created_at} />
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
                         {evt.event_type === "created" ? (

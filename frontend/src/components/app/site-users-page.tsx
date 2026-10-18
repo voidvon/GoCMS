@@ -32,6 +32,8 @@ import {
 } from "@/components/ui/dialog"
 import { InlineAlert } from "@/components/app/app-ui"
 import { useSite } from "@/lib/site-context"
+import { TimeText } from "@/components/app/time-text"
+import { parseInstant } from "@/lib/time"
 
 
 export function SiteUsersPage() {
@@ -243,16 +245,14 @@ export function SiteUsersPage() {
                   </td>
                   <td className="whitespace-nowrap p-3 text-xs">
                     {item.vip_expires_at ? (
-                      <span className="text-muted-foreground">
-                        {item.vip_expires_at.slice(0, 16).replace("T", " ")}
-                      </span>
+                      <TimeText className="text-muted-foreground" value={item.vip_expires_at} />
                     ) : item.is_vip ? (
                       <Badge variant="secondary" className="text-xs">永久有效</Badge>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
                   </td>
-                  <td className="whitespace-nowrap p-3 text-xs text-muted-foreground">{item.last_login_at || "尚未登录"}</td>
+                  <td className="whitespace-nowrap p-3 text-xs text-muted-foreground"><TimeText value={item.last_login_at} placeholder="尚未登录" /></td>
                   <td className="space-x-2 whitespace-nowrap p-3 text-right">
                     <Button
                       size="sm"
@@ -430,7 +430,7 @@ export function SiteUsersPage() {
                           <td className="p-3">{m.display_name || "—"}</td>
                           <td className="p-3 whitespace-nowrap">
                             {m.expires_at ? (
-                              <span className="text-xs">到期：{m.expires_at}</span>
+                              <span className="text-xs">到期：<TimeText value={m.expires_at} /></span>
                             ) : (
                               <Badge variant="secondary" className="text-xs">永久有效</Badge>
                             )}
@@ -445,7 +445,7 @@ export function SiteUsersPage() {
                                 setAssignUser(m.id)
                                 setAssignGroup(viewingGroupMembers.id)
                                 setExpiryBase(new Date())
-                                const date = m.expires_at ? new Date(m.expires_at) : null
+                                const date = parseInstant(m.expires_at)
                                 setExpires(
                                   date && !Number.isNaN(date.getTime())
                                     ? new Date(date.getTime() - date.getTimezoneOffset() * 60000)

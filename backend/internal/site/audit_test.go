@@ -2,6 +2,7 @@ package site
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -70,6 +71,26 @@ func TestOperationLogs(t *testing.T) {
 	r = categoryRequest(t, s, token, "GET", "/api/admin/logs?username=gocms", "")
 	if r.Code != 200 || !strings.Contains(r.Body.String(), `"total":2`) || strings.Contains(r.Body.String(), "private") {
 		t.Fatalf("bad logs: %s", r.Body.String())
+	}
+	var listed struct {
+		Items []struct {
+			CreatedAt string `json:"created_at"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(r.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Items) != 2 {
+		t.Fatalf("unexpected log items: %d", len(listed.Items))
+	}
+	for _, item := range listed.Items {
+		parsed, err := time.Parse(time.RFC3339, item.CreatedAt)
+		if err != nil || !strings.HasSuffix(item.CreatedAt, "Z") {
+			t.Fatalf("log timestamp %q is not an RFC3339 UTC instant: %v", item.CreatedAt, err)
+		}
+		if time.Since(parsed) > time.Hour {
+			t.Fatalf("log timestamp %q is not recent", item.CreatedAt)
+		}
 	}
 	r = categoryRequest(t, s, token, "GET", "/api/admin/logs?username=missing", "")
 	if !strings.Contains(r.Body.String(), `"total":0`) {
@@ -177,5 +198,35 @@ func TestMultiSiteAuditLogIsolation(t *testing.T) {
 	var s2Count int
 	if err := database.QueryRow(`SELECT COUNT(*) FROM gocms_admin_operation WHERE site_id = ?`, site2ID).Scan(&s2Count); err != nil || s2Count != 0 {
 		t.Fatalf("expected 0 site 2 ops remaining, got %d, err: %v", s2Count, err)
+	}
+}
+
+func TestParseLogCutoff(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{in: "2026-10-18", want: "2026-10-19 00:00:00"},
+		{in: " 2026-10-18 ", want: "2026-10-19 00:00:00"},
+		{in: "2026-10-18T08:30:00+08:00", want: "2026-10-18 00:30:00"},
+		{in: "2026-10-18T00:30:00Z", want: "2026-10-18 00:30:00"},
+		{in: "", wantErr: true},
+		{in: "18/10/2026", wantErr: true},
+	}
+	for _, testCase := range cases {
+		got, err := parseLogCutoff(testCase.in)
+		if testCase.wantErr {
+			if err == nil {
+				t.Fatalf("parseLogCutoff(%q) = %q, want error", testCase.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("parseLogCutoff(%q): %v", testCase.in, err)
+		}
+		if got != testCase.want {
+			t.Fatalf("parseLogCutoff(%q) = %q, want %q", testCase.in, got, testCase.want)
+		}
 	}
 }

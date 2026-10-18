@@ -39,12 +39,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog, IconButton, InlineAlert } from "@/components/app/app-ui"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { PaginatedTable } from "@/components/app/paginated-table"
+import { TimeText } from "@/components/app/time-text"
 
 const pageSize = 20
-
-function formatDate(value: string) {
-  return value ? value.slice(0, 16).replace("T", " ") : "暂无日期"
-}
 
 export function MessagesPage() {
   const [activeTab, setActiveTab] = useState("feedbacks")
@@ -438,7 +435,7 @@ export function MessagesPage() {
                           <p className="text-xs text-muted-foreground">{item.phone}</p>
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
-                          {formatDate(item.created_at)}
+                          <TimeText value={item.created_at} placeholder="暂无日期" />
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
                           {item.ip || "—"}
@@ -623,7 +620,7 @@ export function MessagesPage() {
             <DialogHeader>
               <DialogTitle>{viewingItem.title}</DialogTitle>
               <DialogDescription>
-                {viewingItem.name || "未填写联系人"} · {formatDate(viewingItem.created_at)} · IP: {viewingItem.ip || "未知"}
+                {viewingItem.name || "未填写联系人"} · <TimeText value={viewingItem.created_at} placeholder="暂无日期" /> · IP: {viewingItem.ip || "未知"}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 text-sm">
