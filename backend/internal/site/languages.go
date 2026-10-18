@@ -47,11 +47,15 @@ type LanguageItem struct {
 	SiteMode   string `json:"site_mode"`
 	Domain     string `json:"domain"`
 	OutputDir  string `json:"output_dir"`
+	// IsAdminDefault marks the language the admin backend displays by default in
+	// category and content lists. It is independent from IsDefault (the primary
+	// site language rendered at the site root).
+	IsAdminDefault int `json:"is_admin_default"`
 }
 
 func (s *Server) getLanguages(ctx context.Context) ([]LanguageItem, error) {
 	rows, err := s.database.QueryContext(ctx, `
-		SELECT "id", "code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir"
+		SELECT "id", "code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir", "is_admin_default"
 		FROM "`+db.LanguageTable+`"
 		ORDER BY "is_default" DESC, "sort_order" ASC, "id" ASC`)
 	if err != nil {
@@ -62,7 +66,7 @@ func (s *Server) getLanguages(ctx context.Context) ([]LanguageItem, error) {
 	var items []LanguageItem
 	for rows.Next() {
 		var item LanguageItem
-		if err := rows.Scan(&item.ID, &item.Code, &item.Name, &item.IsDefault, &item.IsFallback, &item.IsEnabled, &item.SortOrder, &item.PathPrefix, &item.SiteMode, &item.Domain, &item.OutputDir); err != nil {
+		if err := rows.Scan(&item.ID, &item.Code, &item.Name, &item.IsDefault, &item.IsFallback, &item.IsEnabled, &item.SortOrder, &item.PathPrefix, &item.SiteMode, &item.Domain, &item.OutputDir, &item.IsAdminDefault); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -88,6 +92,18 @@ func (s *Server) getDefaultAndFallbackLang(ctx context.Context) (defaultCode str
 	return defaultCode, fallbackCode
 }
 
+// ensureAdminDisplayLanguage keeps exactly one admin display language: when no
+// language carries the flag, the primary site language takes over again.
+func (s *Server) ensureAdminDisplayLanguage(ctx context.Context) {
+	var count int
+	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "`+db.LanguageTable+`" WHERE "is_admin_default" = 1`).Scan(&count); err != nil || count > 0 {
+		return
+	}
+	_, _ = s.database.ExecContext(ctx, `
+		UPDATE "`+db.LanguageTable+`" SET "is_admin_default" = 1
+		WHERE "is_default" = 1 AND "id" = (SELECT MIN("id") FROM "`+db.LanguageTable+`" WHERE "is_default" = 1)`)
+}
+
 func (s *Server) adminLanguages(response http.ResponseWriter, request *http.Request) {
 	if !s.requireAdmin(response, request) {
 		return
@@ -104,16 +120,17 @@ func (s *Server) adminLanguages(response http.ResponseWriter, request *http.Requ
 
 	case http.MethodPost:
 		var payload struct {
-			Code       string  `json:"code"`
-			Name       string  `json:"name"`
-			IsDefault  BoolInt `json:"is_default"`
-			IsFallback BoolInt `json:"is_fallback"`
-			IsEnabled  BoolInt `json:"is_enabled"`
-			SortOrder  int     `json:"sort_order"`
-			PathPrefix string  `json:"path_prefix"`
-			SiteMode   string  `json:"site_mode"`
-			Domain     string  `json:"domain"`
-			OutputDir  string  `json:"output_dir"`
+			Code           string  `json:"code"`
+			Name           string  `json:"name"`
+			IsDefault      BoolInt `json:"is_default"`
+			IsFallback     BoolInt `json:"is_fallback"`
+			IsEnabled      BoolInt `json:"is_enabled"`
+			SortOrder      int     `json:"sort_order"`
+			PathPrefix     string  `json:"path_prefix"`
+			SiteMode       string  `json:"site_mode"`
+			Domain         string  `json:"domain"`
+			OutputDir      string  `json:"output_dir"`
+			IsAdminDefault BoolInt `json:"is_admin_default"`
 		}
 		if err := decodeRequest(request, &payload); err != nil {
 			http.Error(response, "invalid payload", http.StatusBadRequest)
@@ -156,17 +173,22 @@ func (s *Server) adminLanguages(response http.ResponseWriter, request *http.Requ
 		if payload.IsFallback == 1 {
 			_, _ = s.database.ExecContext(request.Context(), `UPDATE "`+db.LanguageTable+`" SET "is_fallback" = 0`)
 		}
+		if payload.IsAdminDefault == 1 {
+			_, _ = s.database.ExecContext(request.Context(), `UPDATE "`+db.LanguageTable+`" SET "is_admin_default" = 0`)
+			payload.IsEnabled = 1 // Admin display language must stay usable
+		}
 
 		res, err := s.database.ExecContext(request.Context(), `
-			INSERT INTO "`+db.LanguageTable+`" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir")
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			payload.Code, payload.Name, payload.IsDefault, payload.IsFallback, payload.IsEnabled, payload.SortOrder, payload.PathPrefix, payload.SiteMode, payload.Domain, payload.OutputDir)
+			INSERT INTO "`+db.LanguageTable+`" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir", "is_admin_default")
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			payload.Code, payload.Name, payload.IsDefault, payload.IsFallback, payload.IsEnabled, payload.SortOrder, payload.PathPrefix, payload.SiteMode, payload.Domain, payload.OutputDir, payload.IsAdminDefault)
 		if err != nil {
 			http.Error(response, "duplicate language code or database error", http.StatusBadRequest)
 			return
 		}
 
 		newID, _ := res.LastInsertId()
+		s.ensureAdminDisplayLanguage(request.Context())
 		s.invalidateAllPublications()
 		writeJSON(response, http.StatusCreated, map[string]any{"ok": true, "id": newID})
 
@@ -188,16 +210,17 @@ func (s *Server) adminLanguageItem(response http.ResponseWriter, request *http.R
 	switch request.Method {
 	case http.MethodPut:
 		var payload struct {
-			Code       string  `json:"code"`
-			Name       string  `json:"name"`
-			IsDefault  BoolInt `json:"is_default"`
-			IsFallback BoolInt `json:"is_fallback"`
-			IsEnabled  BoolInt `json:"is_enabled"`
-			SortOrder  int     `json:"sort_order"`
-			PathPrefix string  `json:"path_prefix"`
-			SiteMode   string  `json:"site_mode"`
-			Domain     string  `json:"domain"`
-			OutputDir  string  `json:"output_dir"`
+			Code           string  `json:"code"`
+			Name           string  `json:"name"`
+			IsDefault      BoolInt `json:"is_default"`
+			IsFallback     BoolInt `json:"is_fallback"`
+			IsEnabled      BoolInt `json:"is_enabled"`
+			SortOrder      int     `json:"sort_order"`
+			PathPrefix     string  `json:"path_prefix"`
+			SiteMode       string  `json:"site_mode"`
+			Domain         string  `json:"domain"`
+			OutputDir      string  `json:"output_dir"`
+			IsAdminDefault BoolInt `json:"is_admin_default"`
 		}
 		if err := decodeRequest(request, &payload); err != nil {
 			http.Error(response, "invalid payload", http.StatusBadRequest)
@@ -240,28 +263,33 @@ func (s *Server) adminLanguageItem(response http.ResponseWriter, request *http.R
 		if payload.IsFallback == 1 {
 			_, _ = s.database.ExecContext(request.Context(), `UPDATE "`+db.LanguageTable+`" SET "is_fallback" = 0 WHERE "id" != ?`, id)
 		}
+		if payload.IsAdminDefault == 1 {
+			_, _ = s.database.ExecContext(request.Context(), `UPDATE "`+db.LanguageTable+`" SET "is_admin_default" = 0 WHERE "id" != ?`, id)
+			payload.IsEnabled = 1 // Admin display language must stay usable
+		}
 
 		if _, err := s.database.ExecContext(request.Context(), `
 			UPDATE "`+db.LanguageTable+`"
-			SET "code" = ?, "name" = ?, "is_default" = ?, "is_fallback" = ?, "is_enabled" = ?, "sort_order" = ?, "path_prefix" = ?, "site_mode" = ?, "domain" = ?, "output_dir" = ?
+			SET "code" = ?, "name" = ?, "is_default" = ?, "is_fallback" = ?, "is_enabled" = ?, "sort_order" = ?, "path_prefix" = ?, "site_mode" = ?, "domain" = ?, "output_dir" = ?, "is_admin_default" = ?
 			WHERE "id" = ?`,
-			payload.Code, payload.Name, payload.IsDefault, payload.IsFallback, payload.IsEnabled, payload.SortOrder, payload.PathPrefix, payload.SiteMode, payload.Domain, payload.OutputDir, id); err != nil {
+			payload.Code, payload.Name, payload.IsDefault, payload.IsFallback, payload.IsEnabled, payload.SortOrder, payload.PathPrefix, payload.SiteMode, payload.Domain, payload.OutputDir, payload.IsAdminDefault, id); err != nil {
 			http.Error(response, "database error or duplicate code", http.StatusBadRequest)
 			return
 		}
+		s.ensureAdminDisplayLanguage(request.Context())
 		s.invalidateAllPublications()
 		writeJSON(response, http.StatusOK, map[string]any{"ok": true})
 
 	case http.MethodDelete:
-		var isDefault, isFallback int
+		var isDefault, isFallback, isAdminDefault int
 		err := s.database.QueryRowContext(request.Context(), `
-			SELECT "is_default", "is_fallback" FROM "`+db.LanguageTable+`" WHERE "id" = ?`, id).Scan(&isDefault, &isFallback)
+			SELECT "is_default", "is_fallback", "is_admin_default" FROM "`+db.LanguageTable+`" WHERE "id" = ?`, id).Scan(&isDefault, &isFallback, &isAdminDefault)
 		if err == sql.ErrNoRows {
 			http.Error(response, "language not found", http.StatusNotFound)
 			return
 		}
-		if isDefault == 1 || isFallback == 1 {
-			http.Error(response, "cannot delete default or fallback language", http.StatusBadRequest)
+		if isDefault == 1 || isFallback == 1 || isAdminDefault == 1 {
+			http.Error(response, "cannot delete default, fallback or admin display language", http.StatusBadRequest)
 			return
 		}
 

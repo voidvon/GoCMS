@@ -212,6 +212,8 @@ export type Content = {
   visible: number
   model_id?: number
   extra_data?: Record<string, any>
+  /** Language the API rendered this item in. */
+  lang?: string
   is_fallback?: boolean
   fallback_lang?: string
   translations?: Record<string, ContentTranslationItem>
@@ -307,6 +309,7 @@ export type Language = {
   id: number
   code: string
   name: string
+  /** Primary site language: generated at the site root and used as the base language. */
   is_default: number
   is_fallback: number
   is_enabled: number
@@ -315,6 +318,8 @@ export type Language = {
   site_mode?: string
   domain?: string
   output_dir?: string
+  /** Language the admin backend shows by default in category and content lists. */
+  is_admin_default: number
 }
 
 export type LanguageInput = Omit<Language, "id">
@@ -384,6 +389,8 @@ export type CategoryItem = {
   model_id?: number
   link_url?: string
   nav_position?: string
+  /** Language the API rendered this category in. */
+  lang?: string
   is_fallback?: boolean
   fallback_lang?: string
   translations?: Record<string, CategoryTranslationItem>

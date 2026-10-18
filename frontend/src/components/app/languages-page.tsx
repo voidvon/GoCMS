@@ -1,6 +1,7 @@
 import { useState } from "react"
 import {
   LoaderCircle,
+  Monitor,
   Pencil,
   Plus,
   RefreshCw,
@@ -56,6 +57,7 @@ export function LanguagesPage() {
     is_enabled: 1,
     is_default: 0,
     is_fallback: 0,
+    is_admin_default: 0,
     site_mode: "subdir",
     domain: "",
     output_dir: "",
@@ -75,6 +77,7 @@ export function LanguagesPage() {
       is_enabled: 1,
       is_default: 0,
       is_fallback: 0,
+      is_admin_default: 0,
       site_mode: "subdir",
       domain: "",
       output_dir: "",
@@ -93,6 +96,7 @@ export function LanguagesPage() {
       is_enabled: lang.is_enabled,
       is_default: lang.is_default,
       is_fallback: lang.is_fallback,
+      is_admin_default: lang.is_admin_default ?? 0,
       site_mode: lang.site_mode || "subdir",
       domain: lang.domain || "",
       output_dir: lang.output_dir || "",
@@ -154,6 +158,20 @@ export function LanguagesPage() {
     }
   }
 
+  async function handleSetAdminDefault(lang: Language) {
+    try {
+      await updateLanguage(lang.id, {
+        ...lang,
+        is_admin_default: 1,
+        is_enabled: 1,
+      })
+      setSuccessMsg(`已将 ${lang.name} 设为后台显示语言`)
+      await refreshLanguages()
+    } catch (err: any) {
+      setError(err?.message || "设置后台显示语言失败")
+    }
+  }
+
   async function handleDelete() {
     if (!deletingId) return
     try {
@@ -188,10 +206,10 @@ export function LanguagesPage() {
                 <TableHead className="w-[140px]">语言代码</TableHead>
                 <TableHead>语言名称</TableHead>
                 <TableHead>路径前缀</TableHead>
-                <TableHead>主站 / 兜底角色</TableHead>
+                <TableHead>语言角色</TableHead>
                 <TableHead className="w-[100px]">状态</TableHead>
                 <TableHead className="w-[80px]">排序</TableHead>
-                <TableHead className="w-[240px] text-right">操作</TableHead>
+                <TableHead className="w-[300px] text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -241,13 +259,19 @@ export function LanguagesPage() {
                             主站语言
                           </Badge>
                         ) : null}
+                        {lang.is_admin_default === 1 ? (
+                          <Badge variant="outline" className="gap-1 text-sky-600 border-sky-500/30 bg-sky-500/10">
+                            <Monitor className="size-3" />
+                            后台显示
+                          </Badge>
+                        ) : null}
                         {lang.is_fallback === 1 ? (
                           <Badge variant="outline" className="gap-1 text-amber-600 border-amber-500/30 bg-amber-500/10">
                             <ShieldCheck className="size-3" />
                             兜底语言
                           </Badge>
                         ) : null}
-                        {lang.is_default !== 1 && lang.is_fallback !== 1 && (
+                        {lang.is_default !== 1 && lang.is_fallback !== 1 && lang.is_admin_default !== 1 && (
                           <span className="text-xs text-muted-foreground">副语言</span>
                         )}
                       </div>
@@ -272,9 +296,20 @@ export function LanguagesPage() {
                             size="sm"
                             className="h-8 text-xs text-blue-600 hover:text-blue-700"
                             onClick={() => handleSetDefault(lang)}
-                            title="设为主站语言"
+                            title="设为站点主站语言（生成在网站根目录 /）"
                           >
                             设为主站
+                          </Button>
+                        )}
+                        {lang.is_admin_default !== 1 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 text-xs text-sky-600 hover:text-sky-700"
+                            onClick={() => handleSetAdminDefault(lang)}
+                            title="设为后台显示语言（分类与内容列表默认按该语言显示）"
+                          >
+                            设为后台
                           </Button>
                         )}
                         {lang.is_fallback !== 1 && (
@@ -301,9 +336,15 @@ export function LanguagesPage() {
                           variant="ghost"
                           size="icon"
                           className="size-8 text-destructive hover:text-destructive"
-                          disabled={lang.is_default === 1}
+                          disabled={lang.is_default === 1 || lang.is_admin_default === 1}
                           onClick={() => setDeletingId(lang.id)}
-                          title={lang.is_default === 1 ? "主站语言不可删除" : "删除语言"}
+                          title={
+                            lang.is_default === 1
+                              ? "主站语言不可删除"
+                              : lang.is_admin_default === 1
+                                ? "后台显示语言不可删除"
+                                : "删除语言"
+                          }
                         >
                           <Trash2 className="size-3.5" />
                         </Button>
@@ -321,7 +362,7 @@ export function LanguagesPage() {
           <DialogHeader>
             <DialogTitle>{editingLang ? "编辑语言" : "新增语言"}</DialogTitle>
             <DialogDescription>
-              配置语言信息。主站语言在根目录展示，其他语言在配置的路径前缀下展示。
+              配置语言信息。主站语言在根目录展示，其他语言在配置的路径前缀下展示；后台显示语言决定分类与内容列表默认展示哪种语言。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -443,14 +484,16 @@ export function LanguagesPage() {
                 id="is-enabled"
                 checked={formData.is_enabled === 1}
                 onCheckedChange={(checked) => setFormData({ ...formData, is_enabled: checked ? 1 : 0 })}
-                disabled={formData.is_default === 1}
+                disabled={formData.is_default === 1 || formData.is_admin_default === 1}
               />
             </div>
 
             <div className="flex items-center justify-between border-t pt-3">
               <div>
-                <Label htmlFor="is-default" className="text-sm font-medium">设为主站语言</Label>
-                <p className="text-xs text-muted-foreground">主站语言的内容直接展示在网站根路径(/)</p>
+                <Label htmlFor="is-default" className="text-sm font-medium">设为站点主站语言</Label>
+                <p className="text-xs text-muted-foreground">
+                  主站语言的内容直接展示在网站根路径(/)；它同时是内容基准语言，主站语言的标题/名称必填。
+                </p>
               </div>
               <Switch
                 id="is-default"
@@ -463,6 +506,26 @@ export function LanguagesPage() {
                     path_prefix: checked ? "" : formData.path_prefix,
                   })
                 }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between border-t pt-3">
+              <div>
+                <Label htmlFor="is-admin-default" className="text-sm font-medium">设为后台显示语言</Label>
+                <p className="text-xs text-muted-foreground">
+                  后台的分类列表与内容列表默认按该语言显示，方便维护人员使用自己的母语；管理员仍可在顶栏临时切换。
+                </p>
+              </div>
+              <Switch
+                id="is-admin-default"
+                checked={formData.is_admin_default === 1}
+                onCheckedChange={(checked) =>
+                  setFormData({
+                    ...formData,
+                    is_admin_default: checked ? 1 : 0,
+                    is_enabled: checked ? 1 : formData.is_enabled,
+                  })
+                }
               />
             </div>
 

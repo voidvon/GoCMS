@@ -231,3 +231,90 @@ func TestStandaloneLanguageSiteAPI(t *testing.T) {
 	}
 }
 
+func TestLanguageAdminDisplayFlag(t *testing.T) {
+	server, _, token := newLanguageTestServer(t)
+
+	// 1. The seeded primary site language is also the initial admin display language.
+	res := adminRequest(t, server, token, http.MethodGet, "/api/admin/languages", "")
+	var items []LanguageItem
+	if err := json.Unmarshal(res.Body.Bytes(), &items); err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Code != "zh-CN" || items[0].IsAdminDefault != 1 {
+		t.Fatalf("expected seeded admin display language zh-CN, got %+v", items)
+	}
+
+	// 2. A new secondary language is not the admin display language by default.
+	res = adminRequest(t, server, token, http.MethodPost, "/api/admin/languages", `{"code":"en","name":"English","is_default":false,"is_fallback":false,"is_enabled":true,"sort_order":20,"path_prefix":"en"}`)
+	if res.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on create, got %d: %s", res.Code, res.Body.String())
+	}
+	var enID int64
+	for i := range items {
+		if items[i].Code == "en" {
+			enID = items[i].ID
+		}
+	}
+	res = adminRequest(t, server, token, http.MethodGet, "/api/admin/languages", "")
+	_ = json.Unmarshal(res.Body.Bytes(), &items)
+	for _, item := range items {
+		if item.Code == "en" {
+			enID = item.ID
+			if item.IsAdminDefault != 0 {
+				t.Fatalf("expected new language not to be the admin display language: %+v", item)
+			}
+		}
+	}
+	if enID == 0 {
+		t.Fatal("expected created language id")
+	}
+
+	// 3. Marking another language keeps the primary site language untouched and
+	//    clears the previous admin display language. A disabled admin display
+	//    language is re-enabled.
+	updatePayload := fmt.Sprintf(`{"code":"en","name":"English","is_default":false,"is_fallback":false,"is_enabled":false,"sort_order":20,"path_prefix":"en","is_admin_default":true}`)
+	res = adminRequest(t, server, token, http.MethodPut, fmt.Sprintf("/api/admin/languages/%d", enID), updatePayload)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200 on update, got %d: %s", res.Code, res.Body.String())
+	}
+	res = adminRequest(t, server, token, http.MethodGet, "/api/admin/languages", "")
+	_ = json.Unmarshal(res.Body.Bytes(), &items)
+	for _, item := range items {
+		switch item.Code {
+		case "en":
+			if item.IsAdminDefault != 1 || item.IsEnabled != 1 {
+				t.Fatalf("expected en to be the enabled admin display language: %+v", item)
+			}
+		case "zh-CN":
+			if item.IsDefault != 1 {
+				t.Fatalf("expected zh-CN to stay the primary site language: %+v", item)
+			}
+			if item.IsAdminDefault != 0 {
+				t.Fatalf("expected zh-CN to no longer be the admin display language: %+v", item)
+			}
+		}
+	}
+
+	// 4. The admin display language cannot be deleted.
+	res = adminRequest(t, server, token, http.MethodDelete, fmt.Sprintf("/api/admin/languages/%d", enID), "")
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when deleting the admin display language, got %d: %s", res.Code, res.Body.String())
+	}
+
+	// 5. Clearing the flag falls back to the primary site language.
+	res = adminRequest(t, server, token, http.MethodPut, fmt.Sprintf("/api/admin/languages/%d", enID), `{"code":"en","name":"English","is_default":false,"is_fallback":false,"is_enabled":true,"sort_order":20,"path_prefix":"en"}`)
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected 200 on update, got %d: %s", res.Code, res.Body.String())
+	}
+	res = adminRequest(t, server, token, http.MethodGet, "/api/admin/languages", "")
+	_ = json.Unmarshal(res.Body.Bytes(), &items)
+	var adminDefaultCodes []string
+	for _, item := range items {
+		if item.IsAdminDefault == 1 {
+			adminDefaultCodes = append(adminDefaultCodes, item.Code)
+		}
+	}
+	if len(adminDefaultCodes) != 1 || adminDefaultCodes[0] != "zh-CN" {
+		t.Fatalf("expected zh-CN to take over the admin display language, got %v", adminDefaultCodes)
+	}
+}

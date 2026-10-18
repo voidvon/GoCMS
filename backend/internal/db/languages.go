@@ -25,6 +25,10 @@ type LanguageItem struct {
 	SiteMode   string `json:"site_mode"`
 	Domain     string `json:"domain"`
 	OutputDir  string `json:"output_dir"`
+	// IsAdminDefault marks the language the admin backend shows by default in
+	// category and content lists. It is independent from IsDefault, which marks
+	// the primary site language generated at the site root.
+	IsAdminDefault int `json:"is_admin_default"`
 }
 
 // EnsureLanguages creates and migrates the language table.
@@ -41,20 +45,22 @@ func EnsureLanguages(ctx context.Context, database *sql.DB) error {
 			"path_prefix" TEXT NOT NULL DEFAULT '',
 			"site_mode" TEXT NOT NULL DEFAULT 'subdir',
 			"domain" TEXT NOT NULL DEFAULT '',
-			"output_dir" TEXT NOT NULL DEFAULT ''
+			"output_dir" TEXT NOT NULL DEFAULT '',
+			"is_admin_default" INTEGER NOT NULL DEFAULT 0
 		)`); err != nil {
 		return fmt.Errorf("create language table: %w", err)
 	}
 
 	for name, definition := range map[string]string{
-		"is_default":  "INTEGER NOT NULL DEFAULT 0",
-		"is_fallback": "INTEGER NOT NULL DEFAULT 0",
-		"is_enabled":  "INTEGER NOT NULL DEFAULT 1",
-		"sort_order":  "INTEGER NOT NULL DEFAULT 0",
-		"path_prefix": "TEXT NOT NULL DEFAULT ''",
-		"site_mode":   "TEXT NOT NULL DEFAULT 'subdir'",
-		"domain":      "TEXT NOT NULL DEFAULT ''",
-		"output_dir":  "TEXT NOT NULL DEFAULT ''",
+		"is_default":       "INTEGER NOT NULL DEFAULT 0",
+		"is_fallback":      "INTEGER NOT NULL DEFAULT 0",
+		"is_enabled":       "INTEGER NOT NULL DEFAULT 1",
+		"sort_order":       "INTEGER NOT NULL DEFAULT 0",
+		"path_prefix":      "TEXT NOT NULL DEFAULT ''",
+		"site_mode":        "TEXT NOT NULL DEFAULT 'subdir'",
+		"domain":           "TEXT NOT NULL DEFAULT ''",
+		"output_dir":       "TEXT NOT NULL DEFAULT ''",
+		"is_admin_default": "INTEGER NOT NULL DEFAULT 0",
 	} {
 		if err := ensureLanguageColumn(ctx, database, name, definition); err != nil {
 			return err
@@ -68,9 +74,24 @@ func EnsureLanguages(ctx context.Context, database *sql.DB) error {
 	}
 	if count == 0 {
 		if _, err := database.ExecContext(ctx, `
-			INSERT INTO "`+LanguageTable+`" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix")
-			VALUES ('zh-CN', '简体中文', 1, 1, 1, 10, '')`); err != nil {
+			INSERT INTO "`+LanguageTable+`" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "is_admin_default")
+			VALUES ('zh-CN', '简体中文', 1, 1, 1, 10, '', 1)`); err != nil {
 			return fmt.Errorf("seed default language: %w", err)
+		}
+	}
+
+	// Older installs merged the primary site language with the language the
+	// backend displays. Backfill the admin display language from the primary
+	// site language so existing behaviour is preserved until it is changed.
+	var adminDefaultCount int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "`+LanguageTable+`" WHERE "is_admin_default" = 1`).Scan(&adminDefaultCount); err != nil {
+		return fmt.Errorf("check admin default language: %w", err)
+	}
+	if adminDefaultCount == 0 {
+		if _, err := database.ExecContext(ctx, `
+			UPDATE "`+LanguageTable+`" SET "is_admin_default" = 1
+			WHERE "is_default" = 1 AND "id" = (SELECT MIN("id") FROM "`+LanguageTable+`" WHERE "is_default" = 1)`); err != nil {
+			return fmt.Errorf("backfill admin default language: %w", err)
 		}
 	}
 

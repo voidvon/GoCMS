@@ -66,6 +66,12 @@ function buildInitialCategoryTranslations(
     }
   }
 
+  // The list may be rendered in the admin display language instead of the
+  // primary site language, so only trust the rendered fields for the primary
+  // language. Every other language comes from the translations payload.
+  const renderedInDefaultLang = !category.lang || category.lang === defaultLang
+  if (!renderedInDefaultLang) return output
+
   if (!output[defaultLang]) {
     output[defaultLang] = {
       name: category.name || "",
@@ -307,13 +313,13 @@ export function CategoriesPage() {
   const [deleting, setDeleting] = useState<CategoryItem | null>(null)
   const [deleteSaving, setDeleteSaving] = useState(false)
 
-  const { languages, defaultLang, fallbackLang, refreshLanguages } = useLanguage()
+  const { languages, defaultLang, fallbackLang, activeLang, refreshLanguages } = useLanguage()
 
   const enabledLanguages: Language[] = useMemo(() => {
     const list = languages.filter((l) => l.is_enabled === 1)
     return list.length > 0
       ? list
-      : [{ id: 1, code: defaultLang || "zh-CN", name: "默认语言", is_default: 1, is_enabled: 1, is_fallback: 0, sort_order: 0, path_prefix: "" }]
+      : [{ id: 1, code: defaultLang || "zh-CN", name: "默认语言", is_default: 1, is_enabled: 1, is_fallback: 0, is_admin_default: 1, sort_order: 0, path_prefix: "" }]
   }, [languages, defaultLang])
 
   const [categoryActiveTab, setCategoryActiveTab] = useState("base")
@@ -358,7 +364,7 @@ export function CategoriesPage() {
   const parentOptions = useMemo(() => flattenCategoryTree(categories, editing?.id), [categories, editing?.id])
 
   async function refreshCategories() {
-    const nextCategories = await getCategories(defaultLang)
+    const nextCategories = await getCategories(activeLang)
     setCategories(nextCategories)
     setExpanded((current) => {
       const availableIDs = new Set(nextCategories.map((category) => category.id))
@@ -369,7 +375,7 @@ export function CategoriesPage() {
 
   useEffect(() => {
     let active = true
-    Promise.all([getCategories(defaultLang), getThemeFiles(), getSystemModels()])
+    Promise.all([getCategories(activeLang), getThemeFiles(), getSystemModels()])
       .then(([nextCategories, theme, nextModels]) => {
         if (!active) return
         setCategories(nextCategories)
@@ -401,7 +407,7 @@ export function CategoriesPage() {
     return () => {
       active = false
     }
-  }, [defaultLang, enabledLanguages])
+  }, [defaultLang, activeLang, enabledLanguages])
 
   function update<K extends keyof CategoryInput>(key: K, value: CategoryInput[K]) {
     setForm((current) => ({ ...current, [key]: value }))

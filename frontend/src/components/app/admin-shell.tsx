@@ -23,7 +23,7 @@ import {
 } from "lucide-react"
 
 import { logout, type AdminUser } from "@/lib/api"
-import { LanguageProvider } from "@/lib/language-context"
+import { LanguageProvider, useLanguage } from "@/lib/language-context"
 import { SiteProvider, useSite } from "@/lib/site-context"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -535,6 +535,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <LanguageSwitcher />
             <SiteSwitcher onNavigate={navigate} />
             <HeaderActionsSlot className="flex items-center gap-2" />
           </div>
@@ -546,6 +547,56 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
         </main>
       </div>
     </div>
+  )
+}
+
+function LanguageSwitcher() {
+  const { languages, activeLang, setActiveLang, resetActiveLang, adminLang } = useLanguage()
+  const enabled = languages.filter((lang) => lang.is_enabled === 1)
+  if (enabled.length < 2) return null
+
+  const active = enabled.find((lang) => lang.code === activeLang) || enabled[0]
+  const adminDefault = enabled.find((lang) => lang.code === adminLang)
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="outline" size="sm" className="h-8 gap-2 px-2.5 text-xs font-normal">
+            <Languages className="h-3.5 w-3.5 text-primary" />
+            <span className="hidden max-w-[100px] truncate font-medium sm:inline">
+              {active?.name || activeLang}
+            </span>
+            <ChevronsUpDown className="h-3 w-3 opacity-50" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">后台显示语言</DropdownMenuLabel>
+          {enabled.map((lang) => (
+            <DropdownMenuItem
+              key={lang.code}
+              className="flex items-center justify-between text-xs cursor-pointer"
+              onClick={() => setActiveLang(lang.code)}
+            >
+              <span className="truncate">{lang.name}</span>
+              {lang.code === activeLang && (
+                <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4">当前</Badge>
+              )}
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+        {adminDefault && activeLang !== adminDefault.code ? (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-xs cursor-pointer" onClick={() => resetActiveLang()}>
+              跟随后台默认（{adminDefault.name}）
+            </DropdownMenuItem>
+          </>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 

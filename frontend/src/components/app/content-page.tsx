@@ -74,6 +74,12 @@ function buildInitialContentTranslations(
     }
   }
 
+  // The item may be rendered in the admin display language instead of the
+  // primary site language, so only trust the rendered fields for the primary
+  // language. Every other language comes from the translations payload.
+  const renderedInDefaultLang = !content.lang || content.lang === defaultLang
+  if (!renderedInDefaultLang) return output
+
   if (!output[defaultLang]) {
     output[defaultLang] = {
       title: content.title || "",
@@ -687,7 +693,7 @@ function ContentEditor({
     const list = languages.filter((l) => l.is_enabled === 1)
     return list.length > 0
       ? list
-      : [{ id: 1, code: defaultLang || "zh-CN", name: "默认语言", is_default: 1, is_enabled: 1, is_fallback: 0, sort_order: 0, path_prefix: "" }]
+      : [{ id: 1, code: defaultLang || "zh-CN", name: "默认语言", is_default: 1, is_enabled: 1, is_fallback: 0, is_admin_default: 1, sort_order: 0, path_prefix: "" }]
   }, [languages, defaultLang])
 
   const [activeTab, setActiveTab] = useState("base")
@@ -1581,6 +1587,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
                   <div className="flex items-center gap-1.5">
                     <span>{lang.name}</span>
                     {lang.is_default === 1 && <span className="text-[10px] text-muted-foreground">(主站)</span>}
+                    {lang.is_admin_default === 1 && <span className="text-[10px] text-muted-foreground">(后台显示)</span>}
                     {lang.is_fallback === 1 && <span className="text-[10px] text-muted-foreground">(兜底)</span>}
                   </div>
                 </SelectItem>
