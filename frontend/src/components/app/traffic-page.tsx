@@ -11,6 +11,7 @@ import {
   type AdminUser,
 } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
+import { formatVisitedAt } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -373,7 +374,7 @@ export function TrafficPage({ user }: { user: AdminUser }) {
                           <span>直接访问</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{item.last_visited_at}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{formatVisitedAt(item.last_visited_at)}</TableCell>
                     </TableRow>
                   ))
                 )}
@@ -413,7 +414,7 @@ export function TrafficPage({ user }: { user: AdminUser }) {
                 ) : (
                   items.map((item) => (
                     <TableRow key={item.id}>
-                      <TableCell className="text-xs text-muted-foreground">{item.visited_at}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{formatVisitedAt(item.visited_at)}</TableCell>
                       <TableCell><StatusBadge status={item.status} /></TableCell>
                       <TableCell className="max-w-[420px] truncate font-mono text-xs" title={`${item.path}${item.query ? `?${item.query}` : ""}`}>
                         {item.path}

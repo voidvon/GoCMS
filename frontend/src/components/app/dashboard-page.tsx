@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react"
 import {
-  Activity,
   AlertTriangle,
   Bug,
   Eye,
@@ -15,6 +14,7 @@ import {
 
 import { getStats, type AccessLogMetrics, type AdminStats } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
+import { formatVisitedAt } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import {
   Card,
@@ -145,19 +145,6 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-2xl font-semibold tracking-tight">站点概览</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {activeSite ? `${activeSite.name} 的内容与访问数据（按站点独立统计）` : "今天从这里开始处理站点内容和访问异常。"}
-          </p>
-        </div>
-        <Badge variant="outline" className="w-fit gap-1.5">
-          <Activity className="text-emerald-600" />
-          SQLite 服务正常
-        </Badge>
-      </section>
-
       {metrics ? (
         <section className="space-y-3">
           <div className="flex items-center justify-between">
@@ -169,7 +156,7 @@ export function DashboardPage() {
               </Badge>
             ) : null}
           </div>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             {trafficCards.map((card) => {
               const Icon = card.icon
               return (
@@ -179,7 +166,7 @@ export function DashboardPage() {
                     <Icon className="size-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
-                    <p className="text-2xl font-semibold tracking-tight">
+                    <p className="text-xl font-semibold tracking-tight sm:text-2xl">
                       {typeof card.value === "number" ? formatNumber(card.value) : card.value}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">{card.detail}</p>
@@ -225,7 +212,7 @@ export function DashboardPage() {
                         </TableCell>
                         <TableCell className="text-right font-medium">{formatNumber(item.hits)}</TableCell>
                         <TableCell className="text-right text-muted-foreground">{formatNumber(item.internal_hits)}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{item.last_visited_at}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{formatVisitedAt(item.last_visited_at)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -274,7 +261,7 @@ export function DashboardPage() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">站点内容</h2>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
           {contentCards.map((card) => {
             const Icon = card.icon
             return (
@@ -284,7 +271,7 @@ export function DashboardPage() {
                   <Icon className="size-4 text-muted-foreground" />
                 </CardHeader>
                 <CardContent>
-                  <p className="text-2xl font-semibold tracking-tight">
+                  <p className="text-xl font-semibold tracking-tight sm:text-2xl">
                     {typeof card.value === "number" ? formatNumber(card.value) : card.value}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">{card.detail}</p>

@@ -105,8 +105,9 @@ func (c *accessLogConfig) dayKey(t time.Time) string {
 	return t.In(c.loc()).Format("2006-01-02")
 }
 
-// formatVisited converts the stored UTC timestamp into the configured zone so
-// the dashboard shows operator-local times.
+// formatVisited returns the stored UTC timestamp as an unambiguous instant.
+// The admin frontend renders it in the browser time zone, so the value must
+// never be pre-formatted into the server zone.
 func (c *accessLogConfig) formatVisited(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -116,7 +117,7 @@ func (c *accessLogConfig) formatVisited(raw string) string {
 	if err != nil {
 		return trimmed
 	}
-	return parsed.In(c.loc()).Format("2006-01-02 15:04:05")
+	return parsed.UTC().Format(time.RFC3339)
 }
 
 // accessResponse captures the status code and content type of a public

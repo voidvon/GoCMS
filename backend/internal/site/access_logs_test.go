@@ -20,6 +20,27 @@ const (
 	accessLogCurlUA   = "curl/8.4.0"
 )
 
+// The admin frontend renders access log times in the browser zone, so the API
+// must return an unambiguous instant instead of a server-local wall clock.
+func TestFormatVisitedReturnsRFC3339UTC(t *testing.T) {
+	config := newAccessLogConfig()
+	cases := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "utc timestamp", raw: "2026-10-18 12:33:24", want: "2026-10-18T12:33:24Z"},
+		{name: "padded", raw: "  2026-01-02 03:04:05  ", want: "2026-01-02T03:04:05Z"},
+		{name: "empty", raw: "  ", want: ""},
+		{name: "unparsable stays as-is", raw: "not-a-time", want: "not-a-time"},
+	}
+	for _, testCase := range cases {
+		if got := config.formatVisited(testCase.raw); got != testCase.want {
+			t.Errorf("%s: formatVisited(%q) = %q, want %q", testCase.name, testCase.raw, got, testCase.want)
+		}
+	}
+}
+
 func TestSummarizeUserAgent(t *testing.T) {
 	cases := []struct {
 		name       string
