@@ -41,6 +41,7 @@ type Server struct {
 	updateMu         sync.Mutex
 	updateActive     bool
 	captcha          *captcha.Service
+	accessLogs       *accessLogConfig
 }
 
 func New(database *sql.DB, siteRoot string) (*Server, error) {
@@ -71,6 +72,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		if err := db.EnsureAuditLog(context.Background(), database); err != nil {
 			return nil, err
 		}
+		if err := db.EnsureAccessLog(context.Background(), database); err != nil {
+			return nil, err
+		}
 		if err := db.EnsureApiKeys(context.Background(), database); err != nil {
 			return nil, err
 		}
@@ -86,15 +90,16 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		return nil, fmt.Errorf("create captcha service: %w", err)
 	}
 	return &Server{
-		database:  database,
-		siteRoot:  siteRoot,
-		fileServe: http.FileServer(http.Dir(siteRoot)),
-		captcha:   captSvc,
+		database:   database,
+		siteRoot:   siteRoot,
+		fileServe:  http.FileServer(http.Dir(siteRoot)),
+		captcha:    captSvc,
+		accessLogs: newAccessLogConfig(),
 	}, nil
 }
 
 func (s *Server) Handler() http.Handler {
-	return http.HandlerFunc(s.serveHTTP)
+	return s.accessLogMiddleware(http.HandlerFunc(s.serveHTTP))
 }
 
 func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) {
@@ -177,6 +182,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminSession(response, request)
 	case "/api/admin/stats":
 		s.adminStats(response, request)
+	case "/api/admin/access-logs":
+		s.adminAccessLogs(response, request)
+	case "/api/admin/access-logs/errors":
+		s.adminAccessLogErrors(response, request)
 	case "/api/admin/content":
 		s.adminContent(response, request)
 	case "/api/admin/media":

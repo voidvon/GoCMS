@@ -76,6 +76,109 @@ export type AdminStats = {
   visible_contents: number
   messages: number
   pending_messages: number
+  access: AccessLogSummary
+}
+
+export type AccessLogMetrics = {
+  today_visits: number
+  today_errors: number
+  recent_visits: number
+  recent_errors: number
+  recent_users: number
+  recent_new_users: number
+  recent_pc_users: number
+  recent_mobile_users: number
+  total_errors: number
+  total_404_errors: number
+  recent_404_errors: number
+  internal_404_errors: number
+  total_pages: number
+  total_requests: number
+  retention_days: number
+  day_key: string
+}
+
+export type AccessLogPageStat = {
+  path: string
+  visits: number
+  unique_ips: number
+  last_visited_at: string
+}
+
+export type AccessLogErrorStat = {
+  path: string
+  status: number
+  hits: number
+  unique_ips: number
+  internal_hits: number
+  last_visited_at: string
+  last_referer: string
+  last_referer_kind: string
+}
+
+export type AccessLogStatusStat = { status: number; hits: number }
+
+export type AccessLogSummary = {
+  metrics: AccessLogMetrics
+  top_pages: AccessLogPageStat[]
+  top_errors: AccessLogErrorStat[]
+  status_breakdown: AccessLogStatusStat[]
+}
+
+export type AccessLogItem = {
+  id: number
+  site_id: number
+  day_key: string
+  path: string
+  query: string
+  method: string
+  status: number
+  kind: string
+  content_type: string
+  ip: string
+  referer: string
+  referer_host: string
+  referer_kind: string
+  user_agent: string
+  agent_kind: string
+  agent_label: string
+  device_kind: string
+  visited_at: string
+}
+
+export type AccessLogFilters = {
+  kind?: string
+  status?: number
+  status_mode?: string
+  agent_kind?: string
+  device_kind?: string
+  referer_kind?: string
+  window?: string
+  path?: string
+  path_prefix?: string
+  ip?: string
+  q?: string
+  limit?: number
+  page?: number
+  page_size?: number
+}
+
+export function getAccessLogs(filters: AccessLogFilters) {
+  return request<{ items: AccessLogItem[]; total: number; page: number; page_size: number; site_id: number }>(
+    `/api/admin/access-logs${query({ ...filters })}`,
+  )
+}
+
+export function getAccessLogErrors(filters: AccessLogFilters) {
+  return request<{ items: AccessLogErrorStat[]; total: number; site_id: number }>(
+    `/api/admin/access-logs/errors${query({ ...filters })}`,
+  )
+}
+
+export function clearAccessLogs(filters: AccessLogFilters) {
+  return request<{ deleted: number; site_id: number }>(`/api/admin/access-logs${query({ ...filters })}`, {
+    method: "DELETE",
+  })
 }
 
 export type ContentTranslationItem = {

@@ -61,6 +61,7 @@ import { ApiKeysPage } from "@/components/app/api-keys-page"
 import { MediaPage } from "@/components/app/media-page"
 import { UsersPage } from "@/components/app/users-page"
 import { LogsPage } from "@/components/app/logs-page"
+import { TrafficPage } from "@/components/app/traffic-page"
 import { SitesPage } from "@/components/app/sites-page"
 
 import { PublishPage } from "@/components/app/publish-page"
@@ -94,6 +95,7 @@ const mainNavItems: NavigationItem[] = [
   { id: "categories", label: "分类", icon: FolderTree },
   { id: "languages", label: "多语言", icon: Languages },
   { id: "messages", label: "信息反馈", icon: MessageSquareText },
+  { id: "traffic", label: "访问统计", icon: BarChart3 },
   { id: "members", label: "会员管理", icon: UserCheck },
   { id: "publish", label: "网站发布", icon: Globe },
   { id: "theme", label: "模板管理", icon: Palette },
@@ -350,6 +352,8 @@ function viewMeta(view: AdminView): { parent?: string; title: string; descriptio
       return { parent: "平台管理", title: "多站点管理", description: "管理各独立网站实体、域名与主题配置" }
     case "logs":
       return { parent: "平台管理", title: "操作日志", description: "查看后台操作记录" }
+    case "traffic":
+      return { title: "访问统计", description: "查看站点访问量、404 错误与访问明细" }
     case "members":
       return { title: "会员管理", description: "管理前台会员、会员组和 VIP 有效期" }
     case "users":
@@ -385,6 +389,8 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
       return <SitesPage />
     case "logs":
       return <LogsPage user={user} />
+    case "traffic":
+      return <TrafficPage user={user} />
     case "members":
       return <div className="h-full overflow-auto pb-6"><SiteUsersPage /></div>
     case "users":

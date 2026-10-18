@@ -95,6 +95,8 @@ type AdminStats struct {
 	VisibleContents int64 `json:"visible_contents"`
 	Messages        int64 `json:"messages"`
 	PendingMessages int64 `json:"pending_messages"`
+	// Access carries the per-site public traffic and error statistics.
+	Access AccessLogSummary `json:"access"`
 }
 
 type CategoryItem struct {
@@ -321,6 +323,17 @@ func (s *Server) adminStats(response http.ResponseWriter, request *http.Request)
 			return
 		}
 	}
+	summary, err := s.accessLogSummary(request.Context(), siteID)
+	if err != nil {
+		summary = AccessLogSummary{
+			TopPages:        []AccessLogPageStat{},
+			TopErrors:       []AccessLogErrorStat{},
+			StatusBreakdown: []AccessLogStatusStat{},
+		}
+	}
+	summary.Metrics.RetentionDays = s.accessLogs.retention()
+	summary.Metrics.DayKey = s.accessLogs.dayKey(time.Now())
+	stats.Access = summary
 	writeJSON(response, http.StatusOK, stats)
 }
 

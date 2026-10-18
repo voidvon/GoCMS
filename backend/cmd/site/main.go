@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -37,6 +38,8 @@ func main() {
 	frontendDev := flag.String("frontend-dev", defaults.frontendDev, "Vite dev server URL to proxy /admin/ (e.g. http://127.0.0.1:1244); empty disables dev proxy")
 	assets := flag.String("assets", defaults.assets, "public resource directory")
 	themeOverride := flag.String("theme", "", "theme resource directory override")
+	timezone := flag.String("timezone", "", "IANA time zone used for access statistics day boundaries (empty uses the system zone)")
+	accessLogDays := flag.Int("access-log-days", 3, "retention in days for the public access log")
 	flag.Parse()
 
 	if *templates == "" {
@@ -79,6 +82,15 @@ func main() {
 	}
 	server.ConfigurePublishing(themeDefinition.TemplatesRoot, *data, *frontend, *assets, themeDefinition.AssetsRoot)
 	server.ConfigureThemeCatalog(themeDir, *data, themeDefinition)
+	accessLogLocation := time.Local
+	if strings.TrimSpace(*timezone) != "" {
+		loaded, err := time.LoadLocation(strings.TrimSpace(*timezone))
+		if err != nil {
+			log.Fatalf("invalid timezone %q: %v", *timezone, err)
+		}
+		accessLogLocation = loaded
+	}
+	server.ConfigureAccessLogs(accessLogLocation, *accessLogDays)
 	if embeddedFrontend != nil {
 		server.ConfigureEmbeddedFrontend(embeddedFrontend)
 	}
@@ -94,6 +106,8 @@ func main() {
 
 	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	server.StartAccessLogMaintenance(shutdownCtx)
 
 	go func() {
 		<-shutdownCtx.Done()

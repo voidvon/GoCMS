@@ -27,6 +27,8 @@ var adminPermissions = []struct {
 	{"publish", "网站发布"}, {"languages", "语言配置"},
 	{"logs", "查看操作日志"},
 	{"login_logs", "查看登录日志"},
+	{"traffic", "访问统计"},
+	{"traffic.clear", "清空访问日志"},
 }
 
 func (u *AdminUser) hasPermission(key string) bool {
@@ -193,6 +195,14 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 			module = "messages"
 		case "site-users", "member-groups":
 			module = "members"
+		case "access-logs":
+			// Reading the traffic log needs "traffic"; clearing it needs the
+			// stronger "traffic.clear" permission.
+			if r.Method == http.MethodDelete {
+				module = "traffic.clear"
+			} else {
+				module = "traffic"
+			}
 		}
 		if hasPerm(module) {
 			return true

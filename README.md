@@ -77,6 +77,18 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 
 模板与自定义 HTML 片段属于受信任的管理员内容。普通字段会 HTML 转义，富文本正文按 HTML 输出。图片统一使用 `/images/文件名`，服务先查找 `assets/images/`，再查找当前主题的 `images/` 目录；外部数据的资源路径只在导入阶段转换。
 
+## 访问统计
+
+仪表盘按站点统计前台访问量和错误，数据来自 `gocms_access_log`。站点通过请求 Host 解析（与前台一致，独立语言域名归入所属站点），后台只显示当前所选站点的数据；不同站点之间不共享任何统计。
+
+- 记录范围：返回 HTML 的 2xx 页面访问，以及所有 4xx/5xx 响应（包括缺失的 CSS、JS、图片等资源）。成功的静态资源请求、3xx 跳转、`/api/` 和 `/admin/` 请求不记录，避免噪声。只记录 GET。
+- 每条记录保存路径、查询串（截断到 200 字符）、状态码、类型、客户端 IP、User-Agent 摘要、客户端类型（浏览器/爬虫/工具/其他）、设备类型（桌面/移动/平板/其他）、来源地址与来源分类（站内/站外/直接访问）。站内判定使用该站点的主域名、别名和独立语言域名。
+- 仪表盘展示今日访问、24 小时访问与访客、新访客、PC/移动访客、404 数量、错误总数、站内死链、累计页面、热门页面、按路径归并的错误列表和状态码分布。
+- “访问统计”页面可按时间范围、类型、状态、客户端、设备、来源、路径、IP 和关键字过滤，查看错误归并列表或逐条访问明细，并按当前筛选条件清空日志。
+- 权限：“访问统计”查看权限为 `traffic`，清空权限为 `traffic.clear`；超级管理员默认全部可用。清空操作会写入操作日志。
+- 保留策略：默认保留 3 天，服务启动时及之后每 30 分钟清理过期记录；用 `-access-log-days` 调整保留天数。自然日边界默认跟随系统时区，可用 `-timezone Asia/Shanghai` 指定 IANA 时区，时间戳仍按 UTC 存储，界面按该时区显示。
+- 接口：`GET /api/admin/access-logs`（分页明细，`page`、`page_size`，过滤参数同页面）、`GET /api/admin/access-logs/errors`（按路径与状态归并）、`DELETE /api/admin/access-logs`（按同一组过滤参数清理）；`GET /api/admin/stats` 的 `access` 字段提供仪表盘指标。
+
 ## 生产运行
 
 ```sh
@@ -87,7 +99,7 @@ cd backend
 
 Go 同时提供 `/admin/`（发布版内置前端）、`/api/` 和公开静态站点。`/images/` 依次映射到 `assets/images/` 和当前主题的 `assets/images/`，`/css/`、`/js/`、`/skin/` 映射到当前主题对应目录，网站页面读取 `web/`。发布不复制图片，也不创建符号链接。Nginx 可直接反向代理 Go；如果由 Nginx 提供静态文件，应按相同顺序配置这些资源目录，页面映射到 `web/`。外网部署由反向代理提供 HTTPS。
 
-命令行发布和 Go 服务支持 `-assets` 指定资源根目录，并支持 `-theme` 指定主题目录覆盖活动主题配置。没有覆盖参数时，程序从 `assets/theme/` 和 `data/theme.json` 解析活动主题；没有活动记录时选择已安装主题中的第一个。发布版可执行文件会把管理后台和默认 Go 模板编入自身，模板首次运行时写入外部 `templates/`；Release 单文件不包含主题目录，部署时需要在外部 `assets/theme/<id>/` 提供主题资源，修改后直接生效。备份应包括 `data/site.db`、运行时的 `assets/images/`、`assets/theme/` 和 `templates/`。
+命令行发布和 Go 服务支持 `-assets` 指定资源根目录，并支持 `-theme` 指定主题目录覆盖活动主题配置。没有覆盖参数时，程序从 `assets/theme/` 和 `data/theme.json` 解析活动主题；没有活动记录时选择已安装主题中的第一个。服务还支持 `-access-log-days`（访问日志保留天数，默认 3）和 `-timezone`（访问统计自然日边界使用的 IANA 时区，默认系统时区）。发布版可执行文件会把管理后台和默认 Go 模板编入自身，模板首次运行时写入外部 `templates/`；Release 单文件不包含主题目录，部署时需要在外部 `assets/theme/<id>/` 提供主题资源，修改后直接生效。备份应包括 `data/site.db`、运行时的 `assets/images/`、`assets/theme/` 和 `templates/`。
 
 登录仅接受 Argon2id。新导入 Access 后必须重新设置管理员密码：
 
