@@ -1360,7 +1360,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
   const [deleting, setDeleting] = useState<Content | null>(null)
   const [deleteSaving, setDeleteSaving] = useState(false)
 
-  const { activeLang, setActiveLang, languages, currentLanguage, refreshLanguages } = useLanguage()
+  const { activeLang, currentLanguage, refreshLanguages } = useLanguage()
 
   const categoryOptions = useMemo(() => flattenCategoryTree(categories).filter((c) => c.page_type !== "link"), [categories])
 
@@ -1568,33 +1568,11 @@ export function ContentPage({ user }: { user: AdminUser }) {
             ))}
           </SelectContent>
         </Select>
-        {languages.length > 1 && (
-          <Select
-            value={activeLang}
-            onValueChange={(val) => {
-              if (val) setActiveLang(val)
-            }}
-          >
-            <SelectTrigger size="sm" className="w-full sm:w-36" aria-label="选择语言">
-              <Languages className="size-3.5 mr-1 shrink-0 text-muted-foreground" />
-              <SelectValue>
-                {currentLanguage?.name || activeLang}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {languages.map((lang) => (
-                <SelectItem key={lang.code} value={lang.code}>
-                  <div className="flex items-center gap-1.5">
-                    <span>{lang.name}</span>
-                    {lang.is_default === 1 && <span className="text-[10px] text-muted-foreground">(主站)</span>}
-                    {lang.is_admin_default === 1 && <span className="text-[10px] text-muted-foreground">(后台显示)</span>}
-                    {lang.is_fallback === 1 && <span className="text-[10px] text-muted-foreground">(兜底)</span>}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
+        {/* The list language follows the backend display language; it is switched
+            on the 多语言 page so this page has no second switcher. */}
+        <p className="text-xs text-muted-foreground">
+          当前语言：{currentLanguage?.name || activeLang}（在「多语言」切换）
+        </p>
       </div>
       {notice && <p role="status" className="shrink-0 text-sm text-muted-foreground">{notice}</p>}
       {error ? <InlineAlert className="shrink-0">{error}</InlineAlert> : null}
