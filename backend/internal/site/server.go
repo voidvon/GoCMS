@@ -42,6 +42,7 @@ type Server struct {
 	updateActive     bool
 	captcha          *captcha.Service
 	accessLogs       *accessLogConfig
+	legacyPrefixes   *legacyPrefixCache
 }
 
 func New(database *sql.DB, siteRoot string) (*Server, error) {
@@ -90,11 +91,12 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		return nil, fmt.Errorf("create captcha service: %w", err)
 	}
 	return &Server{
-		database:   database,
-		siteRoot:   siteRoot,
-		fileServe:  http.FileServer(http.Dir(siteRoot)),
-		captcha:    captSvc,
-		accessLogs: newAccessLogConfig(),
+		database:       database,
+		siteRoot:       siteRoot,
+		fileServe:      http.FileServer(http.Dir(siteRoot)),
+		captcha:        captSvc,
+		accessLogs:     newAccessLogConfig(),
+		legacyPrefixes: newLegacyPrefixCache(),
 	}, nil
 }
 
@@ -452,6 +454,9 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 						http.FileServer(http.Dir(siteDir)).ServeHTTP(response, request)
 						return
 					}
+				}
+				if s.legacyLanguagePrefixRedirect(response, request, matched) {
+					return
 				}
 				if !matched.IsDefault && matched.ID > 1 {
 					// Non-default sub-sites must never fall through to default site's files in siteRoot

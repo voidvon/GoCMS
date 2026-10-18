@@ -89,6 +89,14 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 - 保留策略：默认保留 3 天，服务启动时及之后每 30 分钟清理过期记录；用 `-access-log-days` 调整保留天数。自然日边界默认跟随系统时区，可用 `-timezone Asia/Shanghai` 指定 IANA 时区，时间戳仍按 UTC 存储，界面按该时区显示。
 - 接口：`GET /api/admin/access-logs`（分页明细，`page`、`page_size`，过滤参数同页面）、`GET /api/admin/access-logs/errors`（按路径与状态归并）、`DELETE /api/admin/access-logs`（按同一组过滤参数清理）；`GET /api/admin/stats` 的 `access` 字段提供仪表盘指标。
 
+## 旧语言前缀跳转
+
+语言配置调整后（例如把某语言从子目录改为独立域名或站点根路径），搜索引擎与历史链接仍会请求旧地址，例如根路径服务的英文站点会持续收到 `/en/products/xxx/`。服务直接对这类地址做 301 跳转，不需要在 Nginx 配置 rewrite。
+
+- 判定依据是语言表：语言代码，以及独立域名语言（`site_mode=standalone`）配置的 `path_prefix`，都视为不应出现在生成 URL 中的旧前缀；子目录语言的前缀是真实路径，不参与跳转。
+- 只有在“原地址在该站点不可用、去掉前缀后的地址存在”时才跳转，并保留查询串。因此正常 URL 不受影响，真实存在的 `/en/...` 目录也不会被遮蔽。
+- 站点按请求 Host 解析，独立语言域名（如 `www.example.cn`）上的旧前缀同样会被去掉；跳转只作用于 GET/HEAD。
+
 ## 生产运行
 
 ```sh
