@@ -211,6 +211,7 @@ func (s *Server) notifyMessageCreated(messageID int64, item messageNotification)
 	settings, err := s.loadMessageWebhookSettings(ctx, item.SiteID)
 	if err != nil {
 		s.recordMessageNotification(ctx, messageID, messageNotificationFailed, "读取通知设置失败")
+		s.raiseMessageWebhookFailure(ctx, item, "读取通知设置失败")
 		return
 	}
 	if !settings.Enabled || settings.WebhookURL == "" {
@@ -224,10 +225,27 @@ func (s *Server) notifyMessageCreated(messageID int64, item messageNotification)
 	_ = s.database.QueryRowContext(ctx, `SELECT "name" FROM "`+db.SiteTable+`" WHERE "id" = ?`, item.SiteID).Scan(&siteName)
 
 	if err := s.sendFeishuText(ctx, settings.WebhookURL, buildMessageNotificationText(siteName, className, item)); err != nil {
-		s.recordMessageNotification(ctx, messageID, messageNotificationFailed, truncateMessage(err.Error(), 500))
+		reason := truncateMessage(err.Error(), 500)
+		s.recordMessageNotification(ctx, messageID, messageNotificationFailed, reason)
+		s.raiseMessageWebhookFailure(ctx, item, reason)
 		return
 	}
 	s.recordMessageNotification(ctx, messageID, messageNotificationSent, "")
+}
+
+// raiseMessageWebhookFailure files the failed push in the admin notification
+// inbox, so a broken webhook is impossible to miss instead of only showing up
+// inside the affected message. Repeated failures of the same kind collapse into
+// a single unread entry.
+func (s *Server) raiseMessageWebhookFailure(ctx context.Context, item messageNotification, reason string) {
+	s.recordAdminNotification(ctx, db.AdminNotification{
+		SiteID:   item.SiteID,
+		Kind:     "message_webhook_failed",
+		Level:    db.AdminNotificationLevelError,
+		Title:    "留言飞书通知发送失败",
+		Detail:   "留言《" + truncateMessage(item.Title, 100) + "》未能推送到飞书：" + reason,
+		LinkView: "messages",
+	})
 }
 
 func (s *Server) recordMessageNotification(ctx context.Context, messageID int64, status, errorMessage string) {

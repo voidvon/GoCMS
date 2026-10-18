@@ -768,6 +768,38 @@ export function testMessageWebhook(webhookUrl: string) {
   })
 }
 
+// Background failures (a message that could not be pushed to Feishu, for
+// example) are filed here so the admin shell can surface them on every page.
+export type AdminNotification = {
+  id: number
+  site_id: number
+  kind: string
+  level: "info" | "warning" | "error"
+  title: string
+  detail: string
+  link_view: string
+  occurrences: number
+  created_at: string
+  updated_at: string
+  read_at: string
+}
+
+export type AdminNotificationPage = {
+  items: AdminNotification[]
+  unread: number
+}
+
+export function getAdminNotifications(limit = 50) {
+  return request<AdminNotificationPage>(`/api/admin/notifications${query({ limit })}`)
+}
+
+export function markAdminNotificationsRead(payload: { ids?: number[]; all?: boolean }) {
+  return request<{ ok: boolean; unread: number }>("/api/admin/notifications", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  })
+}
+
 // Model Tables, Fields, Models
 export function getModelTables() {
   return request<ModelTable[]>("/api/admin/model-tables")

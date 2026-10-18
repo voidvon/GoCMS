@@ -66,6 +66,7 @@ import { SitesPage } from "@/components/app/sites-page"
 
 import { PublishPage } from "@/components/app/publish-page"
 import { SettingsDialog } from "@/components/app/settings-dialog"
+import { NotificationBell } from "@/components/app/notification-bell"
 import { ThemeToggle } from "@/components/app/theme-provider"
 import { HeaderActionsProvider, HeaderActionsSlot } from "@/components/app/header-actions"
 
@@ -537,6 +538,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
           <div className="flex items-center gap-2">
             <LanguageSwitcher />
             <SiteSwitcher onNavigate={navigate} />
+            <NotificationBell siteId={activeSiteId} onNavigate={navigate} />
             <HeaderActionsSlot className="flex items-center gap-2" />
           </div>
         </header>

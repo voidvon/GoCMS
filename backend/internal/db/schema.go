@@ -29,6 +29,7 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 		{name: "content", fn: EnsureContent},
 		{name: "media", fn: EnsureMedia},
 		{name: "messages", fn: EnsureMessages},
+		{name: "admin notifications", fn: EnsureAdminNotifications},
 		{name: "api keys", fn: EnsureApiKeys},
 		{name: "template assignments", fn: templateconfig.Ensure},
 		{name: "template labels", fn: templatelabel.Ensure},

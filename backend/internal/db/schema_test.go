@@ -48,6 +48,7 @@ func TestCreateSchemaContainsOnlyRuntimeTables(t *testing.T) {
 		"gocms_feedback_class":          false,
 		"gocms_feedback_field":          false,
 		"gocms_message":                 false,
+		"gocms_admin_notification":      false,
 		"gocms_api_key":                 false,
 		"gocms_api_key_event":           false,
 		"gocms_template_assignment":     false,

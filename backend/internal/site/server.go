@@ -82,6 +82,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		if err := db.EnsureApiKeys(context.Background(), database); err != nil {
 			return nil, err
 		}
+		if err := db.EnsureAdminNotifications(context.Background(), database); err != nil {
+			return nil, err
+		}
 		if err := templateconfig.Ensure(context.Background(), database); err != nil {
 			return nil, err
 		}
@@ -201,6 +204,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminMessageWebhook(response, request)
 	case "/api/admin/messages/webhook/test", "/api/admin/feedback/webhook/test":
 		s.adminMessageWebhookTest(response, request)
+	case "/api/admin/notifications":
+		s.adminNotifications(response, request)
 	case "/api/admin/feedback/batch-delete":
 		s.adminFeedbackBatchDelete(response, request)
 	case "/api/admin/feedback-classes":
