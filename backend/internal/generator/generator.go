@@ -1100,15 +1100,17 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	}
 	report.Files = totalFiles
 
+	minifyHTML := htmlMinifyEnabled(c.settings)
+
 	// Publish main site
 	targetWeb := p.TargetWeb()
-	if err = publishPagesToDirectory(ctx, targetWeb, mainPages); err != nil {
+	if err = publishPagesToDirectory(ctx, targetWeb, mainPages, minifyHTML); err != nil {
 		return report, err
 	}
 
 	// Publish standalone language sites to independent directories
 	for _, b := range standaloneList {
-		if err = publishPagesToDirectory(ctx, b.targetWeb, b.pages); err != nil {
+		if err = publishPagesToDirectory(ctx, b.targetWeb, b.pages, minifyHTML); err != nil {
 			return report, err
 		}
 	}
@@ -1116,7 +1118,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	return report, nil
 }
 
-func publishPagesToDirectory(ctx context.Context, targetWeb string, pages map[string][]byte) error {
+func publishPagesToDirectory(ctx context.Context, targetWeb string, pages map[string][]byte, minifyHTML bool) error {
 	web, err := filepath.Abs(targetWeb)
 	if err != nil {
 		return err
@@ -1136,6 +1138,11 @@ func publishPagesToDirectory(ctx context.Context, targetWeb string, pages map[st
 	for relative, data := range pages {
 		if err = ctx.Err(); err != nil {
 			return err
+		}
+		if minifyHTML && isHTMLPage(relative) {
+			if data, err = minifyHTMLDocument(data); err != nil {
+				return fmt.Errorf("压缩 %s: %w", relative, err)
+			}
 		}
 		path := filepath.Join(stage, filepath.FromSlash(relative))
 		if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
