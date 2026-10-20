@@ -273,10 +273,10 @@ func importCategories(ctx context.Context, transaction *sql.Tx, source categoryS
 			INSERT INTO "gocms_category"
 			("name", "parent_id", "order_id", "list_page_size", "page_type", "route_id",
 			 "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path",
-			 "detail_file_pattern", "detail_template", "keywords", "description", "cover_content", "model_id")
-			VALUES (?, 0, ?, ?, 'list', ?, ?, '{id}.html', 'category_list.html', '', ?, '{id}.html', ?, ?, ?, '', ?)`,
+			 "detail_file_pattern", "detail_template", "description", "cover_content", "model_id")
+			VALUES (?, 0, ?, ?, 'list', ?, ?, '{id}.html', 'category_list.html', '', ?, '{id}.html', ?, ?, '', ?)`,
 			row.text("CatName", "coname"), row.number("Orderid", "ORderID", "orderid"), pageSize, oldID,
-			listPath, detailPath, detailTemplate, row.text("key"), normalizeImageText(row.text("desc"), publicHost), modelID)
+			listPath, detailPath, detailTemplate, normalizeImageText(row.text("desc"), publicHost), modelID)
 		if err != nil {
 			return nil, fmt.Errorf("import %s category %d: %w", source, oldID, err)
 		}
@@ -379,7 +379,6 @@ func importProductContent(ctx context.Context, transaction *sql.Tx, rows []sourc
 			Summary:    summary,
 			Body:       normalizeImageText(row.text("itemize"), publicHost),
 			Image:      normalizeImageText(image, publicHost),
-			Keywords:   row.text("key"),
 			OrderID:    row.number("orderid"),
 			Featured:   flagValue(row.number("tjhome")),
 			Visible:    flagValue(row.number("show")),
@@ -405,7 +404,6 @@ func importArticleContent(ctx context.Context, transaction *sql.Tx, rows []sourc
 			Image:       normalizeImageText(row.text("Picture"), publicHost),
 			Published:   row.text("Dateandtime"),
 			Source:      row.text("Nfrom"),
-			Keywords:    row.text("key"),
 			Description: normalizeImageText(row.text("desc"), publicHost),
 			OrderID:     row.number("newsid"),
 			Featured:    flagValue(row.number("tjhome")),
@@ -463,7 +461,6 @@ type contentInput struct {
 	Image       string
 	Published   string
 	Source      string
-	Keywords    string
 	Description string
 	OrderID     int64
 	Featured    int64
@@ -483,10 +480,10 @@ func insertContent(ctx context.Context, transaction *sql.Tx, item contentInput) 
 	}
 	result, err := transaction.ExecContext(ctx, `
 		INSERT INTO "gocms_content"
-		("category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "keywords", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		("category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.CategoryID, item.RouteKey, item.Title, item.Code, item.Summary, item.Body, item.Image, item.Published,
-		item.Source, item.Keywords, item.Description, item.OrderID, item.Featured, item.Visible, modelID, extraData)
+		item.Source, item.Description, item.OrderID, item.Featured, item.Visible, modelID, extraData)
 	if err != nil {
 		return 0, err
 	}

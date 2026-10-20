@@ -25,7 +25,7 @@ type Content struct {
 	CoverImage    string                            `json:"cover_image"`
 	PublishedAt   string                            `json:"published_at"`
 	Source        string                            `json:"source"`
-	Keywords      string                            `json:"keywords"`
+	SEOTitle      string                            `json:"seo_title"`
 	Description   string                            `json:"description"`
 	OrderID       int64                             `json:"order_id"`
 	Featured      int64                             `json:"featured"`
@@ -60,7 +60,7 @@ type contentPayload struct {
 	CoverImage    string                            `json:"cover_image"`
 	PublishedAt   string                            `json:"published_at"`
 	Source        string                            `json:"source"`
-	Keywords      string                            `json:"keywords"`
+	SEOTitle      string                            `json:"seo_title"`
 	Description   string                            `json:"description"`
 	OrderID       int64                             `json:"order_id"`
 	Featured      int64                             `json:"featured"`
@@ -92,13 +92,16 @@ func (s *Server) adminContent(response http.ResponseWriter, request *http.Reques
 
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	categoryID := parseIntOrZero(request.URL.Query().Get("category_id"))
+	// 后台内容列表选择父级栏目时通过 include_children=1 一并筛选其下级栏目；
+	// 层级关系取自 "parent_id"，与栏目名称和路径无关。
+	includeChildren := boolQuery(request.URL.Query().Get("include_children"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
 	page := positiveInt(request.URL.Query().Get("page"), 1)
 	pageSize := positiveInt(request.URL.Query().Get("page_size"), 20)
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	result, err := s.queryContent(request.Context(), siteID, query, categoryID, lang, page, pageSize, false)
+	result, err := s.queryContent(request.Context(), siteID, query, categoryID, includeChildren, lang, page, pageSize, false)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -207,7 +210,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			payload.Title = strings.TrimSpace(def.Title)
 			payload.Summary = def.Summary
 			payload.Content = def.Content
-			payload.Keywords = def.Keywords
+			payload.SEOTitle = def.SEOTitle
 			payload.Description = def.Description
 		}
 	}
@@ -338,10 +341,10 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		defer transaction.Rollback()
 		result, err := transaction.ExecContext(request.Context(), `
 			INSERT INTO "gocms_content"
-			("site_id", "category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "keywords", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
+			("site_id", "category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "seo_title", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
 			VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			targetSiteID, payload.Category, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
-			payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
+			payload.PublishedAt, payload.Source, payload.SEOTitle, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
 			modelID, extraDataStr)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
@@ -375,7 +378,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 					Title:         payload.Title,
 					Summary:       payload.Summary,
 					Content:       payload.Content,
-					Keywords:      payload.Keywords,
+					SEOTitle:      payload.SEOTitle,
 					Description:   payload.Description,
 					ExtraData:     transExtra,
 					PublishStatus: payload.PublishStatus,
@@ -404,7 +407,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 				payload.Title = def.Title
 				payload.Summary = def.Summary
 				payload.Content = def.Content
-				payload.Keywords = def.Keywords
+				payload.SEOTitle = def.SEOTitle
 				payload.Description = def.Description
 			}
 		} else {
@@ -420,7 +423,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 					Title:         payload.Title,
 					Summary:       payload.Summary,
 					Content:       payload.Content,
-					Keywords:      payload.Keywords,
+					SEOTitle:      payload.SEOTitle,
 					Description:   payload.Description,
 					ExtraData:     transExtra,
 					PublishStatus: payload.PublishStatus,
@@ -434,10 +437,10 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 				UPDATE "gocms_content" SET "site_id" = ?, "category_id" = ?,
 				"route_key" = CASE WHEN ? != '' THEN ? ELSE "route_key" END,
 				"title" = ?, "code" = ?, "summary" = ?, "body" = ?,
-				"cover_image" = ?, "published_at" = ?, "source" = ?, "keywords" = ?, "description" = ?,
+				"cover_image" = ?, "published_at" = ?, "source" = ?, "seo_title" = ?, "description" = ?,
 				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
 				targetSiteID, payload.Category, routeKey, routeKey, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
-				payload.PublishedAt, payload.Source, payload.Keywords, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
+				payload.PublishedAt, payload.Source, payload.SEOTitle, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
 				modelID, extraDataStr, id)
 			if err != nil {
 				http.Error(response, "database error", http.StatusInternalServerError)
@@ -496,7 +499,7 @@ func normalizeContentDate(value string) string {
 	return value
 }
 
-func (s *Server) queryContent(ctx context.Context, siteID int64, query string, categoryID int64, lang string, page, pageSize int, visibleOnly bool) (ContentPage, error) {
+func (s *Server) queryContent(ctx context.Context, siteID int64, query string, categoryID int64, includeChildren bool, lang string, page, pageSize int, visibleOnly bool) (ContentPage, error) {
 	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx)
 	if lang == "" {
 		lang = defaultLang
@@ -512,8 +515,21 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 		where += ` AND "visible" = 1`
 	}
 	if categoryID > 0 {
-		where += ` AND "category_id" = ?`
-		args = append(args, categoryID)
+		if includeChildren {
+			// 递归展开所选栏目及其全部下级栏目，父级筛选因此覆盖子栏目内容。
+			// 层级关系取自 "parent_id"，不依赖栏目名称或路径。
+			where += ` AND "category_id" IN (
+				WITH RECURSIVE "subtree"("id") AS (
+					SELECT "id" FROM "gocms_category" WHERE "id" = ?
+					UNION
+					SELECT c."id" FROM "gocms_category" c JOIN "subtree" s ON c."parent_id" = s."id"
+				)
+				SELECT "id" FROM "subtree")`
+			args = append(args, categoryID)
+		} else {
+			where += ` AND "category_id" = ?`
+			args = append(args, categoryID)
+		}
 	}
 	if query != "" {
 		// Match the base language plus the translations of the requested language
@@ -565,7 +581,7 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 	statement := `
 		SELECT "id", COALESCE("route_key", ''), COALESCE("category_id", 0), COALESCE("title", ''),
 		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
-		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("keywords", ''), COALESCE("description", ''),
+		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("seo_title", ''), COALESCE("description", ''),
 		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0),
 		       COALESCE("model_id", 1), COALESCE("extra_data", '{}')
 		FROM ` + from + ` WHERE ` + where + ` ORDER BY ` + orderBy + ` LIMIT ? OFFSET ?`
@@ -605,7 +621,7 @@ func (s *Server) applyContentTranslation(ctx context.Context, item *Content, tra
 			Title:         item.Title,
 			Summary:       item.Summary,
 			Content:       item.Content,
-			Keywords:      item.Keywords,
+			SEOTitle:      item.SEOTitle,
 			Description:   item.Description,
 			ExtraData:     make(map[string]any),
 			PublishStatus: "published",
@@ -638,10 +654,10 @@ func (s *Server) applyContentTranslation(ctx context.Context, item *Content, tra
 		item.Content = fallbackTrans.Content
 	}
 
-	if strings.TrimSpace(trans.Keywords) != "" {
-		item.Keywords = trans.Keywords
-	} else if strings.TrimSpace(fallbackTrans.Keywords) != "" {
-		item.Keywords = fallbackTrans.Keywords
+	if strings.TrimSpace(trans.SEOTitle) != "" {
+		item.SEOTitle = trans.SEOTitle
+	} else if strings.TrimSpace(fallbackTrans.SEOTitle) != "" {
+		item.SEOTitle = fallbackTrans.SEOTitle
 	}
 
 	if strings.TrimSpace(trans.Description) != "" {
@@ -679,7 +695,7 @@ func scanContent(scanner contentScanner) (Content, error) {
 	var extraJSON string
 	err := scanner.Scan(
 		&item.ID, &item.RouteKey, &item.Category, &item.Title, &item.Code, &item.Summary,
-		&item.Content, &item.CoverImage, &item.PublishedAt, &item.Source, &item.Keywords,
+		&item.Content, &item.CoverImage, &item.PublishedAt, &item.Source, &item.SEOTitle,
 		&item.Description, &item.OrderID, &item.Featured, &item.Visible,
 		&item.ModelID, &extraJSON,
 	)
@@ -704,7 +720,7 @@ func (s *Server) readContent(ctx context.Context, id int64, lang string, visible
 	row := s.database.QueryRowContext(ctx, `
 		SELECT "id", COALESCE("route_key", ''), COALESCE("category_id", 0), COALESCE("title", ''),
 		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
-		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("keywords", ''), COALESCE("description", ''),
+		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("seo_title", ''), COALESCE("description", ''),
 		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0),
 		       COALESCE("model_id", 1), COALESCE("extra_data", '{}')
 		FROM "gocms_content" WHERE `+where, id)
@@ -729,7 +745,7 @@ func (s *Server) contentJSON(response http.ResponseWriter, request *http.Request
 	}
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
-	result, err := s.queryContent(request.Context(), siteID, query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
+	result, err := s.queryContent(request.Context(), siteID, query, 0, false, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return

@@ -91,13 +91,77 @@ func seedDefaultModels(ctx context.Context, database *sql.DB) error {
 	_, _ = database.ExecContext(ctx, `
 		UPDATE "`+ModelFieldTable+`"
 		SET "is_translatable" = 1
-		WHERE "field_name" IN ('title', 'summary', 'body', 'keywords', 'description')
+		WHERE "field_name" IN ('title', 'summary', 'body', 'seo_title', 'description')
 	`)
+
+	if err := migrateKeywordsFieldToSEOTitle(ctx, database); err != nil {
+		return fmt.Errorf("rename keywords field: %w", err)
+	}
 
 	if err := MigrateCategoryAndContentModels(ctx, database); err != nil {
 		return fmt.Errorf("migrate category and content models: %w", err)
 	}
 
+	return nil
+}
+
+// migrateKeywordsFieldToSEOTitle retires the obsolete keywords field. The
+// system row is dropped (root-relative seed inserts the seo_title field) and
+// every model entry field list is rewritten so the editor keeps its layout.
+func migrateKeywordsFieldToSEOTitle(ctx context.Context, database *sql.DB) error {
+	if _, err := database.ExecContext(ctx, `
+		DELETE FROM "`+ModelFieldTable+`"
+		WHERE "field_name" = 'keywords' AND "is_system" = 1`); err != nil {
+		return fmt.Errorf("remove keywords field: %w", err)
+	}
+
+	rows, err := database.QueryContext(ctx, `SELECT "id", "entry_fields" FROM "`+ModelTable+`"`)
+	if err != nil {
+		return err
+	}
+	type modelEntry struct {
+		id     int64
+		fields string
+	}
+	var models []modelEntry
+	for rows.Next() {
+		var entry modelEntry
+		if err := rows.Scan(&entry.id, &entry.fields); err != nil {
+			rows.Close()
+			return err
+		}
+		models = append(models, entry)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, model := range models {
+		var entries []map[string]string
+		if err := json.Unmarshal([]byte(model.fields), &entries); err != nil {
+			continue
+		}
+		changed := false
+		for i := range entries {
+			if strings.EqualFold(strings.TrimSpace(entries[i]["field"]), "keywords") {
+				entries[i]["field"] = "seo_title"
+				entries[i]["label"] = "SEO 标题"
+				changed = true
+			}
+		}
+		if !changed {
+			continue
+		}
+		encoded, err := json.Marshal(entries)
+		if err != nil {
+			continue
+		}
+		if _, err := database.ExecContext(ctx, `
+			UPDATE "`+ModelTable+`" SET "entry_fields" = ? WHERE "id" = ?`, string(encoded), model.id); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -170,7 +234,7 @@ func ensureArticleModel(ctx context.Context, database *sql.DB, now string) (int6
 		{"cover_image", "缩略图", "image", "", "列表或详情展示图", 40, 1},
 		{"published_at", "发布时间", "date", "", "发布或更新时间", 50, 1},
 		{"source", "信息来源", "text", "", "如转载网站或作者单位", 60, 1},
-		{"keywords", "关键词", "text", "", "页面SEO关键词", 70, 1},
+		{"seo_title", "SEO 标题", "text", "", "页面 SEO 标题，留空时回退为内容标题", 70, 1},
 		{"description", "描述", "textarea", "", "页面SEO描述", 80, 1},
 	}
 
@@ -193,7 +257,7 @@ func ensureArticleModel(ctx context.Context, database *sql.DB, now string) (int6
 			{"field": "cover_image", "label": "缩略图"},
 			{"field": "published_at", "label": "发布时间"},
 			{"field": "source", "label": "信息来源"},
-			{"field": "keywords", "label": "关键词"},
+			{"field": "seo_title", "label": "SEO 标题"},
 			{"field": "description", "label": "描述"},
 		})
 		mustFieldsJSON, _ := json.Marshal([]string{"title"})
@@ -272,7 +336,7 @@ func ensureProductModel(ctx context.Context, database *sql.DB, now string) (int6
 		{"cover_image", "产品图片", "image", "", "产品主图或外观展示图", 50, 1},
 		{"photo_list", "产品图集", "morepic", "", "产品多角度细节实拍与图集展示", 60, 0},
 		{"published_at", "发布时间", "date", "", "发布或更新时间", 70, 1},
-		{"keywords", "关键词", "text", "", "页面SEO关键词", 80, 1},
+		{"seo_title", "SEO 标题", "text", "", "页面 SEO 标题，留空时回退为内容标题", 80, 1},
 		{"description", "描述", "textarea", "", "页面SEO描述", 90, 1},
 	}
 
@@ -297,7 +361,7 @@ func ensureProductModel(ctx context.Context, database *sql.DB, now string) (int6
 			{"field": "photo_list", "label": "产品图集"},
 			{"field": "body", "label": "详细说明"},
 			{"field": "published_at", "label": "发布时间"},
-			{"field": "keywords", "label": "关键词"},
+			{"field": "seo_title", "label": "SEO 标题"},
 			{"field": "description", "label": "描述"},
 		})
 		mustFieldsJSON, _ := json.Marshal([]string{"title"})

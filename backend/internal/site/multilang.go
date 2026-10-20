@@ -13,7 +13,7 @@ type ContentTranslationItem struct {
 	Title         string         `json:"title"`
 	Summary       string         `json:"summary"`
 	Content       string         `json:"content"`
-	Keywords      string         `json:"keywords"`
+	SEOTitle      string         `json:"seo_title"`
 	Description   string         `json:"description"`
 	ExtraData     map[string]any `json:"extra_data,omitempty"`
 	PublishStatus string         `json:"publish_status,omitempty"`
@@ -21,7 +21,7 @@ type ContentTranslationItem struct {
 
 type CategoryTranslationItem struct {
 	Name         string `json:"name"`
-	Keywords     string `json:"keywords"`
+	SEOTitle     string `json:"seo_title"`
 	Description  string `json:"description"`
 	CoverContent string `json:"cover_content"`
 	LinkURL      string `json:"link_url,omitempty"`
@@ -40,7 +40,7 @@ func (s *Server) getTranslatableFieldNames(ctx context.Context, queryer dbQuerye
 		"title":       true,
 		"summary":     true,
 		"body":        true,
-		"keywords":    true,
+		"seo_title":    true,
 		"description": true,
 	}
 
@@ -71,7 +71,7 @@ func (s *Server) getTranslatableFieldNames(ctx context.Context, queryer dbQuerye
 
 func (s *Server) loadCategoryTranslations(ctx context.Context, categoryID int64) (map[string]CategoryTranslationItem, error) {
 	rows, err := s.database.QueryContext(ctx, `
-		SELECT "lang", "name", "keywords", "description", "cover_content", COALESCE("link_url", '')
+		SELECT "lang", "name", "seo_title", "description", "cover_content", COALESCE("link_url", '')
 		FROM "`+db.CategoryTranslationTable+`"
 		WHERE "category_id" = ?`, categoryID)
 	if err != nil {
@@ -81,11 +81,11 @@ func (s *Server) loadCategoryTranslations(ctx context.Context, categoryID int64)
 
 	translations := make(map[string]CategoryTranslationItem)
 	for rows.Next() {
-		var lang, name, keywords, desc, cover, linkURL string
-		if err := rows.Scan(&lang, &name, &keywords, &desc, &cover, &linkURL); err == nil {
+		var lang, name, seoTitle, desc, cover, linkURL string
+		if err := rows.Scan(&lang, &name, &seoTitle, &desc, &cover, &linkURL); err == nil {
 			translations[lang] = CategoryTranslationItem{
 				Name:         name,
-				Keywords:     keywords,
+				SEOTitle:     seoTitle,
 				Description:  desc,
 				CoverContent: cover,
 				LinkURL:      linkURL,
@@ -97,7 +97,7 @@ func (s *Server) loadCategoryTranslations(ctx context.Context, categoryID int64)
 
 func (s *Server) loadAllCategoryTranslations(ctx context.Context) (map[int64]map[string]CategoryTranslationItem, error) {
 	rows, err := s.database.QueryContext(ctx, `
-		SELECT "category_id", "lang", "name", "keywords", "description", "cover_content", COALESCE("link_url", '')
+		SELECT "category_id", "lang", "name", "seo_title", "description", "cover_content", COALESCE("link_url", '')
 		FROM "`+db.CategoryTranslationTable+`"`)
 	if err != nil {
 		return nil, err
@@ -107,14 +107,14 @@ func (s *Server) loadAllCategoryTranslations(ctx context.Context) (map[int64]map
 	result := make(map[int64]map[string]CategoryTranslationItem)
 	for rows.Next() {
 		var catID int64
-		var lang, name, keywords, desc, cover, linkURL string
-		if err := rows.Scan(&catID, &lang, &name, &keywords, &desc, &cover, &linkURL); err == nil {
+		var lang, name, seoTitle, desc, cover, linkURL string
+		if err := rows.Scan(&catID, &lang, &name, &seoTitle, &desc, &cover, &linkURL); err == nil {
 			if result[catID] == nil {
 				result[catID] = make(map[string]CategoryTranslationItem)
 			}
 			result[catID][lang] = CategoryTranslationItem{
 				Name:         name,
-				Keywords:     keywords,
+				SEOTitle:     seoTitle,
 				Description:  desc,
 				CoverContent: cover,
 				LinkURL:      linkURL,
@@ -138,7 +138,7 @@ func (s *Server) loadContentTranslationsForIDs(ctx context.Context, contentIDs [
 	}
 
 	rows, err := s.database.QueryContext(ctx, `
-		SELECT "content_id", "lang", "title", "summary", "body", "keywords", "description", "extra_data", "publish_status"
+		SELECT "content_id", "lang", "title", "summary", "body", "seo_title", "description", "extra_data", "publish_status"
 		FROM "`+db.ContentTranslationTable+`"
 		WHERE "content_id" IN (`+strings.Join(placeholders, ",")+`)`, args...)
 	if err != nil {
@@ -148,8 +148,8 @@ func (s *Server) loadContentTranslationsForIDs(ctx context.Context, contentIDs [
 
 	for rows.Next() {
 		var contentID int64
-		var lang, title, summary, body, keywords, desc, extraStr, status string
-		if err := rows.Scan(&contentID, &lang, &title, &summary, &body, &keywords, &desc, &extraStr, &status); err == nil {
+		var lang, title, summary, body, seoTitle, desc, extraStr, status string
+		if err := rows.Scan(&contentID, &lang, &title, &summary, &body, &seoTitle, &desc, &extraStr, &status); err == nil {
 			extra := make(map[string]any)
 			if strings.TrimSpace(extraStr) != "" {
 				_ = json.Unmarshal([]byte(extraStr), &extra)
@@ -164,7 +164,7 @@ func (s *Server) loadContentTranslationsForIDs(ctx context.Context, contentIDs [
 				Title:         title,
 				Summary:       summary,
 				Content:       body,
-				Keywords:      keywords,
+				SEOTitle:      seoTitle,
 				Description:   desc,
 				ExtraData:     extra,
 				PublishStatus: status,
@@ -176,7 +176,7 @@ func (s *Server) loadContentTranslationsForIDs(ctx context.Context, contentIDs [
 
 func (s *Server) loadContentTranslations(ctx context.Context, contentID int64) (map[string]ContentTranslationItem, error) {
 	rows, err := s.database.QueryContext(ctx, `
-		SELECT "lang", "title", "summary", "body", "keywords", "description", "extra_data", "publish_status"
+		SELECT "lang", "title", "summary", "body", "seo_title", "description", "extra_data", "publish_status"
 		FROM "`+db.ContentTranslationTable+`"
 		WHERE "content_id" = ?`, contentID)
 	if err != nil {
@@ -186,8 +186,8 @@ func (s *Server) loadContentTranslations(ctx context.Context, contentID int64) (
 
 	translations := make(map[string]ContentTranslationItem)
 	for rows.Next() {
-		var lang, title, summary, body, keywords, desc, extraStr, status string
-		if err := rows.Scan(&lang, &title, &summary, &body, &keywords, &desc, &extraStr, &status); err == nil {
+		var lang, title, summary, body, seoTitle, desc, extraStr, status string
+		if err := rows.Scan(&lang, &title, &summary, &body, &seoTitle, &desc, &extraStr, &status); err == nil {
 			extra := make(map[string]any)
 			if strings.TrimSpace(extraStr) != "" {
 				_ = json.Unmarshal([]byte(extraStr), &extra)
@@ -199,7 +199,7 @@ func (s *Server) loadContentTranslations(ctx context.Context, contentID int64) (
 				Title:         title,
 				Summary:       summary,
 				Content:       body,
-				Keywords:      keywords,
+				SEOTitle:      seoTitle,
 				Description:   desc,
 				ExtraData:     extra,
 				PublishStatus: status,
@@ -217,15 +217,15 @@ func (s *Server) saveCategoryTranslations(ctx context.Context, execer dbExecer, 
 		}
 		_, err := execer.ExecContext(ctx, `
 			INSERT INTO "`+db.CategoryTranslationTable+`"
-			("category_id", "lang", "name", "keywords", "description", "cover_content", "link_url")
+			("category_id", "lang", "name", "seo_title", "description", "cover_content", "link_url")
 			VALUES (?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT("category_id", "lang") DO UPDATE SET
 			"name" = excluded."name",
-			"keywords" = excluded."keywords",
+			"seo_title" = excluded."seo_title",
 			"description" = excluded."description",
 			"cover_content" = excluded."cover_content",
 			"link_url" = excluded."link_url"`,
-			categoryID, lang, trans.Name, trans.Keywords, trans.Description, trans.CoverContent, trans.LinkURL)
+			categoryID, lang, trans.Name, trans.SEOTitle, trans.Description, trans.CoverContent, trans.LinkURL)
 		if err != nil {
 			return err
 		}
@@ -249,17 +249,17 @@ func (s *Server) saveContentTranslations(ctx context.Context, execer dbExecer, c
 		}
 		_, err = execer.ExecContext(ctx, `
 			INSERT INTO "`+db.ContentTranslationTable+`"
-			("content_id", "lang", "title", "summary", "body", "keywords", "description", "extra_data", "publish_status")
+			("content_id", "lang", "title", "summary", "body", "seo_title", "description", "extra_data", "publish_status")
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT("content_id", "lang") DO UPDATE SET
 			"title" = excluded."title",
 			"summary" = excluded."summary",
 			"body" = excluded."body",
-			"keywords" = excluded."keywords",
+			"seo_title" = excluded."seo_title",
 			"description" = excluded."description",
 			"extra_data" = excluded."extra_data",
 			"publish_status" = excluded."publish_status"`,
-			contentID, lang, trans.Title, trans.Summary, trans.Content, trans.Keywords, trans.Description, string(extraJSON), status)
+			contentID, lang, trans.Title, trans.Summary, trans.Content, trans.SEOTitle, trans.Description, string(extraJSON), status)
 		if err != nil {
 			return err
 		}

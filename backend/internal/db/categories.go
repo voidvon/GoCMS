@@ -33,7 +33,7 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 			"detail_path" TEXT NOT NULL DEFAULT 'content',
 			"detail_file_pattern" TEXT NOT NULL DEFAULT '{id}.html',
 			"detail_template" TEXT NOT NULL DEFAULT 'content_detail.html',
-			"keywords" TEXT NOT NULL DEFAULT '',
+			"seo_title" TEXT NOT NULL DEFAULT '',
 			"description" TEXT NOT NULL DEFAULT '',
 			"cover_content" TEXT NOT NULL DEFAULT '',
 			"model_id" INTEGER NOT NULL DEFAULT 1,
@@ -41,6 +41,9 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 			"nav_position" TEXT NOT NULL DEFAULT 'main'
 		)`); err != nil {
 		return fmt.Errorf("create category table: %w", err)
+	}
+	if err := renameKeywordsToSEOTitle(ctx, database, unifiedCategoryTable); err != nil {
+		return err
 	}
 	for _, statement := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_gocms_category_site ON "gocms_category" ("site_id", "parent_id", "order_id", "id")`,
@@ -56,7 +59,7 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		"list_page_size": "INTEGER NOT NULL DEFAULT 14",
 		"page_type":      "TEXT NOT NULL DEFAULT 'list'",
 		"cover_template": "TEXT NOT NULL DEFAULT ''",
-		"keywords":       "TEXT NOT NULL DEFAULT ''",
+		"seo_title":      "TEXT NOT NULL DEFAULT ''",
 		"description":    "TEXT NOT NULL DEFAULT ''",
 		"cover_content":  "TEXT NOT NULL DEFAULT ''",
 		"model_id":       "INTEGER NOT NULL DEFAULT 1",
@@ -90,7 +93,7 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 			"category_id" INTEGER NOT NULL,
 			"lang" TEXT NOT NULL,
 			"name" TEXT NOT NULL DEFAULT '',
-			"keywords" TEXT NOT NULL DEFAULT '',
+			"seo_title" TEXT NOT NULL DEFAULT '',
 			"description" TEXT NOT NULL DEFAULT '',
 			"cover_content" TEXT NOT NULL DEFAULT '',
 			"link_url" TEXT NOT NULL DEFAULT '',
@@ -110,9 +113,16 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		}
 	}
 
+	if err := renameKeywordsToSEOTitle(ctx, database, CategoryTranslationTable); err != nil {
+		return err
+	}
+	if err := ensureTableColumn(ctx, database, CategoryTranslationTable, "seo_title", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+
 	_, _ = database.ExecContext(ctx, `
-		INSERT OR IGNORE INTO "`+CategoryTranslationTable+`" ("category_id", "lang", "name", "keywords", "description", "cover_content", "link_url")
-		SELECT "id", 'zh-CN', "name", "keywords", "description", "cover_content", "link_url"
+		INSERT OR IGNORE INTO "`+CategoryTranslationTable+`" ("category_id", "lang", "name", "seo_title", "description", "cover_content", "link_url")
+		SELECT "id", 'zh-CN', "name", "seo_title", "description", "cover_content", "link_url"
 		FROM "`+unifiedCategoryTable+`"
 	`)
 

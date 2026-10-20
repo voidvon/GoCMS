@@ -188,7 +188,7 @@ export type ContentTranslationItem = {
   title?: string
   summary?: string
   content?: string
-  keywords?: string
+  seo_title?: string
   description?: string
   extra_data?: Record<string, any>
   publish_status?: string
@@ -205,7 +205,7 @@ export type Content = {
   cover_image: string
   published_at: string
   source: string
-  keywords: string
+  seo_title: string
   description: string
   order_id: number
   featured: number
@@ -370,7 +370,7 @@ export type FeedbackField = {
 
 export type CategoryTranslationItem = {
   name?: string
-  keywords?: string
+  seo_title?: string
   description?: string
   cover_content?: string
   link_url?: string
@@ -392,7 +392,7 @@ export type CategoryItem = {
   detail_path: string
   detail_file_pattern: string
   detail_template: string
-  keywords?: string
+  seo_title?: string
   description?: string
   cover_content?: string
   model_id?: number
@@ -638,9 +638,9 @@ export function getStats() {
   return request<AdminStats>("/api/admin/stats")
 }
 
-export function getContent(page: number, pageSize: number, search: string, categoryID = 0, lang?: string) {
+export function getContent(page: number, pageSize: number, search: string, categoryID = 0, lang?: string, includeChildren = false) {
   return request<ContentPage>(
-    `/api/admin/content${query({ page, page_size: pageSize, q: search, category_id: categoryID || undefined, lang: lang || undefined })}`,
+    `/api/admin/content${query({ page, page_size: pageSize, q: search, category_id: categoryID || undefined, include_children: includeChildren ? 1 : undefined, lang: lang || undefined })}`,
   )
 }
 

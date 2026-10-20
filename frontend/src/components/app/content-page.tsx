@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react"
-import { ArrowDown, ArrowUp, FileText, ImagePlus, Languages, Library, LoaderCircle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react"
+import { ArrowDown, ArrowUp, FileText, ImagePlus, Library, LoaderCircle, Plus, Search, Trash2, Upload, X } from "lucide-react"
 
 import {
   createContent,
@@ -25,7 +25,7 @@ import {
 import { useLanguage } from "@/lib/language-context"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -39,7 +39,6 @@ import { PaginatedTable } from "@/components/app/paginated-table"
 import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
 import { RichTextEditor } from "@/components/app/rich-text-editor"
 import { flattenCategoryTree } from "@/lib/category-tree"
-import { cn } from "@/lib/utils"
 import { formatWallDate } from "@/lib/time"
 
 function buildInitialContentTranslations(
@@ -56,7 +55,7 @@ function buildInitialContentTranslations(
         title: source[lang.code].title || "",
         summary: source[lang.code].summary || "",
         content: source[lang.code].content || "",
-        keywords: source[lang.code].keywords || "",
+        seo_title: source[lang.code].seo_title || "",
         description: source[lang.code].description || "",
         extra_data: source[lang.code].extra_data || {},
         publish_status: source[lang.code].publish_status || "published",
@@ -66,7 +65,7 @@ function buildInitialContentTranslations(
         title: "",
         summary: "",
         content: "",
-        keywords: "",
+        seo_title: "",
         description: "",
         extra_data: {},
         publish_status: "published",
@@ -85,7 +84,7 @@ function buildInitialContentTranslations(
       title: content.title || "",
       summary: content.summary || "",
       content: content.content || "",
-      keywords: content.keywords || "",
+      seo_title: content.seo_title || "",
       description: content.description || "",
       extra_data: content.extra_data || {},
       publish_status: "published",
@@ -94,7 +93,7 @@ function buildInitialContentTranslations(
     output[defaultLang].title = content.title
     output[defaultLang].summary = content.summary || output[defaultLang].summary
     output[defaultLang].content = content.content || output[defaultLang].content
-    output[defaultLang].keywords = content.keywords || output[defaultLang].keywords
+    output[defaultLang].seo_title = content.seo_title || output[defaultLang].seo_title
     output[defaultLang].description = content.description || output[defaultLang].description
     output[defaultLang].extra_data = { ...(content.extra_data || {}), ...(output[defaultLang].extra_data || {}) }
   }
@@ -147,7 +146,7 @@ const emptyContent: ContentInput = {
   cover_image: "",
   published_at: "",
   source: "",
-  keywords: "",
+  seo_title: "",
   description: "",
   order_id: 0,
   featured: 0,
@@ -547,7 +546,7 @@ function isSystemField(name: string): boolean {
     "cover_image",
     "published_at",
     "source",
-    "keywords",
+    "seo_title",
     "description",
   ].includes(name)
 }
@@ -562,7 +561,7 @@ function defaultFieldLabel(name: string): string {
     cover_image: "缩略图",
     published_at: "发布时间",
     source: "信息来源",
-    keywords: "关键词",
+    seo_title: "SEO 标题",
     description: "描述",
   }
   return map[name] || name
@@ -684,7 +683,7 @@ function ContentEditor({
   categories: CategoryItem[]
   models: SystemModel[]
   modelFields: ModelField[]
-  onSave: (content: ContentInput, publish?: boolean) => void
+  onSave: (content: ContentInput, publish?: boolean) => void | Promise<void>
   onCancel: () => void
   saving: boolean
 }) {
@@ -704,6 +703,7 @@ function ContentEditor({
   const [customError, setCustomError] = useState("")
   const categoryOptions = useMemo(() => flattenCategoryTree(categories).filter((c) => c.page_type !== "link"), [categories])
   const [bodyUploading, setBodyUploading] = useState(false)
+  const [pendingAction, setPendingAction] = useState<"save" | "publish" | null>(null)
 
   useEffect(() => {
     setForm({ ...content, visible: canReview ? content.visible : 0 })
@@ -720,7 +720,7 @@ function ContentEditor({
             title: "",
             summary: "",
             content: "",
-            keywords: "",
+            seo_title: "",
             description: "",
             extra_data: {},
             publish_status: "published",
@@ -763,7 +763,7 @@ function ContentEditor({
       if (fieldDef?.is_translatable !== undefined) {
         return fieldDef.is_translatable === 1
       }
-      return ["title", "summary", "body", "content", "keywords", "description"].includes(fieldName)
+      return ["title", "summary", "body", "content", "seo_title", "description"].includes(fieldName)
     }
 
     if (currentModel.entry_fields && currentModel.entry_fields.length > 0) {
@@ -825,7 +825,7 @@ function ContentEditor({
         title: "",
         summary: "",
         content: "",
-        keywords: "",
+        seo_title: "",
         description: "",
         extra_data: {},
         publish_status: "published",
@@ -841,7 +841,7 @@ function ContentEditor({
     if (fieldName === "title") return t.title || ""
     if (fieldName === "summary") return t.summary || ""
     if (fieldName === "body" || fieldName === "content") return t.content || ""
-    if (fieldName === "keywords") return t.keywords || ""
+    if (fieldName === "seo_title") return t.seo_title || ""
     if (fieldName === "description") return t.description || ""
     return t.extra_data?.[fieldName] ?? ""
   }
@@ -853,8 +853,8 @@ function ContentEditor({
       updateTranslation(langCode, { summary: value })
     } else if (fieldName === "body" || fieldName === "content") {
       updateTranslation(langCode, { content: value })
-    } else if (fieldName === "keywords") {
-      updateTranslation(langCode, { keywords: value })
+    } else if (fieldName === "seo_title") {
+      updateTranslation(langCode, { seo_title: value })
     } else if (fieldName === "description") {
       updateTranslation(langCode, { description: value })
     } else {
@@ -863,7 +863,7 @@ function ContentEditor({
           title: "",
           summary: "",
           content: "",
-          keywords: "",
+          seo_title: "",
           description: "",
           extra_data: {},
           publish_status: "published",
@@ -1045,7 +1045,7 @@ function ContentEditor({
       )
     }
 
-    const isFullWidth = field.field_name === "title" || field.field_name === "keywords"
+    const isFullWidth = field.field_name === "title" || field.field_name === "seo_title"
     return (
       <div key={field.field_name} className={`space-y-2 ${isFullWidth ? "sm:col-span-2" : ""}`}>
         <FieldLabel
@@ -1059,20 +1059,20 @@ function ContentEditor({
           value={val || ""}
           onChange={(e) => onChange(e.target.value)}
           placeholder={
-            field.field_name === "keywords"
+            field.field_name === "seo_title"
               ? "用 | 分隔关键词"
               : placeholderNote || field.description || `请输入${field.field_label}`
           }
           required={isRequired}
         />
-        {field.description && field.field_name !== "keywords" ? (
+        {field.description && field.field_name !== "seo_title" ? (
           <p className="text-xs text-muted-foreground">{field.description}</p>
         ) : null}
       </div>
     )
   }
 
-  function handleSave(publish = false) {
+  async function handleSave(publish = false) {
     for (const f of baseFields) {
       if (mustFieldSet.has(f.field_name)) {
         const val = getBaseFieldValue(f.field_name)
@@ -1117,7 +1117,7 @@ function ContentEditor({
       title: defaultTitle,
       summary: defaultTrans?.summary ?? form.summary,
       content: defaultTrans?.content ?? form.content,
-      keywords: defaultTrans?.keywords ?? form.keywords,
+      seo_title: defaultTrans?.seo_title ?? form.seo_title,
       description: defaultTrans?.description ?? form.description,
       model_id: currentModelId,
       extra_data: {
@@ -1126,220 +1126,210 @@ function ContentEditor({
       },
       translations,
     }
-    onSave(payload, publish)
+    setPendingAction(publish ? "publish" : "save")
+    try {
+      await onSave(payload, publish)
+    } finally {
+      setPendingAction(null)
+    }
   }
 
   const defaultTitle = translations[defaultLang]?.title?.trim() || form.title?.trim() || ""
   const isSaveDisabled = saving || bodyUploading || !defaultTitle
 
   return (
-    <>
-      <DialogHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <DialogTitle>{content.title ? "编辑内容" : "新增内容"}</DialogTitle>
-          </div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <DialogHeader className="flex-row flex-wrap items-center justify-between gap-2 border-b px-4 py-3 pr-12">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <DialogTitle>{content.title ? "编辑内容" : "新增内容"}</DialogTitle>
           <Badge variant="outline" className="text-xs font-normal">
             模型：{currentModel?.name || "通用模型"}
           </Badge>
         </div>
-        <DialogDescription>
-          默认显示非翻译的基础信息，切换到对应语言标签页可编辑多语言翻译字段。
-        </DialogDescription>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onCancel} disabled={saving || bodyUploading}>
+            取消
+          </Button>
+          <Button size="sm" onClick={() => handleSave(false)} disabled={isSaveDisabled}>
+            {pendingAction === "save" ? <LoaderCircle className="animate-spin" /> : null}
+            仅保存
+          </Button>
+          <Button size="sm" onClick={() => handleSave(true)} disabled={isSaveDisabled}>
+            {pendingAction === "publish" ? <LoaderCircle className="animate-spin" /> : null}
+            保存并发布
+          </Button>
+        </div>
       </DialogHeader>
 
-      <div className="space-y-4 py-2">
-        {customError ? <InlineAlert>{customError}</InlineAlert> : null}
+      <ScrollArea className="min-h-0 flex-1" contentClassName="p-4">
+        <div className="space-y-4">
+          {customError ? <InlineAlert>{customError}</InlineAlert> : null}
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="w-full max-w-full overflow-x-auto overscroll-x-contain pb-1">
-            <TabsList className="w-max min-w-full justify-start h-9 p-1 bg-muted/60">
-              <TabsTrigger value="base" className="flex-none">基础信息</TabsTrigger>
-              {enabledLanguages.map((lang) => (
-                <TabsTrigger key={lang.id} value={lang.code} className="flex-none">
-                  {lang.name}
-                  {lang.code === defaultLang ? " *" : ""}
-                  {lang.code === fallbackLang && lang.code !== defaultLang ? " (兜底)" : ""}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
-
-          <TabsContent value="base" className="space-y-4 pt-2">
-            {/* 顶部栏目与模型联动控制 */}
-            <div className="rounded-lg border bg-muted/40 p-3.5 space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <Label className="font-semibold text-sm">所属栏目分类</Label>
-                <span className="text-xs text-muted-foreground">
-                  关联模型：<strong className="text-foreground">{currentModel?.name || "默认模型"}</strong> ({activeFields.length} 个字段)
-                </span>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5 sm:col-span-2">
-                  <Select
-                    value={String(form.category_id)}
-                    onValueChange={(value) => {
-                      const catId = Number(value ?? 0)
-                      const cat = categoryOptions.find((c) => c.id === catId)
-                      setForm((curr) => ({
-                        ...curr,
-                        category_id: catId,
-                        model_id: cat?.model_id || curr.model_id || 1,
-                      }))
-                    }}
-                  >
-                    <SelectTrigger className="w-full bg-background">
-                      <SelectValue>
-                        {(value) => {
-                          const selectedID = Number(value ?? 0)
-                          return selectedID > 0
-                            ? categoryOptions.find((category) => category.id === selectedID)?.name ?? "选择分类"
-                            : "未分类"
-                        }}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">未分类</SelectItem>
-                      {categoryOptions.map((category) => (
-                        <SelectItem key={category.id} value={String(category.id)}>
-                          <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <div className="w-full max-w-full overflow-x-auto overscroll-x-contain pb-1">
+              <TabsList className="w-max min-w-full justify-start h-9 p-1 bg-muted/60">
+                <TabsTrigger value="base" className="flex-none">基础信息</TabsTrigger>
+                {enabledLanguages.map((lang) => (
+                  <TabsTrigger key={lang.id} value={lang.code} className="flex-none">
+                    {lang.name}
+                    {lang.code === defaultLang ? " *" : ""}
+                    {lang.code === fallbackLang && lang.code !== defaultLang ? " (兜底)" : ""}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
             </div>
 
-            {/* 基础通用字段（非多语言字段） */}
-            {baseFields.length > 0 && (
-              <div className="grid gap-5 sm:grid-cols-2">
-                {baseFields.map((field) => {
-                  const isRequired = mustFieldSet.has(field.field_name)
-                  const val = getBaseFieldValue(field.field_name)
-                  return renderFieldControl(
-                    field,
-                    val,
-                    (nextVal) => setBaseFieldValue(field.field_name, nextVal),
-                    isRequired,
-                    "base",
-                  )
-                })}
-              </div>
-            )}
-
-            {/* 发布与展示属性 */}
-            <div className="space-y-3 rounded-lg border p-3.5 bg-card">
-              <p className="text-sm font-semibold text-muted-foreground border-b pb-1.5">发布与展示属性</p>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 items-center">
-                <div className="space-y-1">
-                  <Label htmlFor="content-order">显示排序权重</Label>
-                  <Input
-                    id="content-order"
-                    type="number"
-                    min="0"
-                    value={form.order_id}
-                    onChange={(e) => update("order_id", Number(e.target.value))}
-                    placeholder="数字越大越靠前"
-                  />
+            <TabsContent value="base" className="space-y-4 pt-2">
+              {/* 顶部栏目与模型联动控制 */}
+              <div className="rounded-lg border bg-muted/40 p-3.5 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label className="font-semibold text-sm">所属栏目分类</Label>
+                  <span className="text-xs text-muted-foreground">
+                    关联模型：<strong className="text-foreground">{currentModel?.name || "默认模型"}</strong> ({activeFields.length} 个字段)
+                  </span>
                 </div>
-                <div className="space-y-1">
-                  <Label htmlFor="content-route-key">自定义文件名 (Route Key)</Label>
-                  <Input
-                    id="content-route-key"
-                    value={form.route_key || ""}
-                    onChange={(e) => update("route_key", e.target.value.trim())}
-                    placeholder="留空为系统ID (如 412)"
-                  />
-                </div>
-                <div className="flex items-center justify-between rounded-md border p-2.5">
-                  <div>
-                    <p className="text-sm font-medium">公开展示</p>
-                    <p className="text-xs text-muted-foreground">{canReview ? "审核确认后公开，生成页面及链接" : "保存为隐藏内容，由审核人员确认后公开"}</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Select
+                      value={String(form.category_id)}
+                      onValueChange={(value) => {
+                        const catId = Number(value ?? 0)
+                        const cat = categoryOptions.find((c) => c.id === catId)
+                        setForm((curr) => ({
+                          ...curr,
+                          category_id: catId,
+                          model_id: cat?.model_id || curr.model_id || 1,
+                        }))
+                      }}
+                    >
+                      <SelectTrigger className="w-full bg-background">
+                        <SelectValue>
+                          {(value) => {
+                            const selectedID = Number(value ?? 0)
+                            return selectedID > 0
+                              ? categoryOptions.find((category) => category.id === selectedID)?.name ?? "选择分类"
+                              : "未分类"
+                          }}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">未分类</SelectItem>
+                        {categoryOptions.map((category) => (
+                          <SelectItem key={category.id} value={String(category.id)}>
+                            <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <Switch
-                    checked={form.visible === 1}
-                    disabled={!canReview}
-                    onCheckedChange={(checked) => update("visible", checked ? 1 : 0)}
-                    aria-label="公开展示"
-                  />
-                </div>
-                <div className="flex items-center justify-between rounded-md border p-2.5">
-                  <div>
-                    <p className="text-sm font-medium">首页推荐</p>
-                    <p className="text-xs text-muted-foreground">主题首页推荐标</p>
-                  </div>
-                  <Switch
-                    checked={form.featured === 1}
-                    onCheckedChange={(checked) => update("featured", checked ? 1 : 0)}
-                    aria-label="首页推荐"
-                  />
                 </div>
               </div>
-            </div>
-          </TabsContent>
 
-          {enabledLanguages.map((lang) => {
-            const isDefault = lang.code === defaultLang
-            const fallbackLangName = enabledLanguages.find((l) => l.code === fallbackLang)?.name || fallbackLang
-            return (
-              <TabsContent key={lang.id} value={lang.code} className="space-y-4 pt-2">
-                <div className={cn(
-                  "rounded-md px-4 py-2.5 text-xs flex items-center gap-2 border",
-                  isDefault
-                    ? "bg-blue-500/10 text-blue-900 dark:text-blue-200 border-blue-500/20"
-                    : "bg-amber-500/10 text-amber-900 dark:text-amber-200 border-amber-500/20"
-                )}>
-                  <Languages className={cn("size-4 shrink-0", isDefault ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400")} />
-                  {isDefault ? (
-                    <span>这是默认主站语言（<strong>{lang.name}</strong>），标题为必填项。其他语言对应字段留空时，系统将使用兜底语言进行回退展示。</span>
-                  ) : (
-                    <span>当前正在编辑 <strong>{lang.name}</strong> 语言的翻译内容。如果标题、摘要或正文等留空，系统将自动使用兜底语言（<strong>{fallbackLangName}</strong>）的内容。</span>
-                  )}
-                </div>
-
+              {/* 基础通用字段（非多语言字段） */}
+              {baseFields.length > 0 && (
                 <div className="grid gap-5 sm:grid-cols-2">
-                  {translatableFields.map((field) => {
-                    const isRequired = isDefault && (field.field_name === "title" || mustFieldSet.has(field.field_name))
-                    const val = getTranslationFieldValue(lang.code, field.field_name)
-                    const placeholderNote = !isDefault
-                      ? `留空将使用兜底语言（${fallbackLangName}）的内容`
-                      : undefined
+                  {baseFields.map((field) => {
+                    const isRequired = mustFieldSet.has(field.field_name)
+                    const val = getBaseFieldValue(field.field_name)
                     return renderFieldControl(
                       field,
                       val,
-                      (nextVal) => setTranslationFieldValue(lang.code, field.field_name, nextVal),
+                      (nextVal) => setBaseFieldValue(field.field_name, nextVal),
                       isRequired,
-                      `lang-${lang.code}`,
-                      placeholderNote,
+                      "base",
                     )
                   })}
                 </div>
-              </TabsContent>
-            )
-          })}
-        </Tabs>
-      </div>
+              )}
 
-      <DialogFooter>
-        <Button variant="outline" onClick={onCancel} disabled={saving || bodyUploading}>
-          取消
-        </Button>
-        <Button onClick={() => handleSave(false)} disabled={isSaveDisabled}>
-          {saving ? <LoaderCircle className="animate-spin" /> : null}
-          仅保存
-        </Button>
-        <Button onClick={() => handleSave(true)} disabled={isSaveDisabled}>
-          保存并发布
-        </Button>
-      </DialogFooter>
-    </>
+              {/* 发布与展示属性 */}
+              <div className="space-y-3 rounded-lg border p-3.5 bg-card">
+                <p className="text-sm font-semibold text-muted-foreground border-b pb-1.5">发布与展示属性</p>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 items-center">
+                  <div className="space-y-1">
+                    <Label htmlFor="content-order">显示排序权重</Label>
+                    <Input
+                      id="content-order"
+                      type="number"
+                      min="0"
+                      value={form.order_id}
+                      onChange={(e) => update("order_id", Number(e.target.value))}
+                      placeholder="数字越大越靠前"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="content-route-key">自定义文件名 (Route Key)</Label>
+                    <Input
+                      id="content-route-key"
+                      value={form.route_key || ""}
+                      onChange={(e) => update("route_key", e.target.value.trim())}
+                      placeholder="留空为系统ID (如 412)"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border p-2.5">
+                    <div>
+                      <p className="text-sm font-medium">公开展示</p>
+                      <p className="text-xs text-muted-foreground">{canReview ? "审核确认后公开，生成页面及链接" : "保存为隐藏内容，由审核人员确认后公开"}</p>
+                    </div>
+                    <Switch
+                      checked={form.visible === 1}
+                      disabled={!canReview}
+                      onCheckedChange={(checked) => update("visible", checked ? 1 : 0)}
+                      aria-label="公开展示"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between rounded-md border p-2.5">
+                    <div>
+                      <p className="text-sm font-medium">首页推荐</p>
+                      <p className="text-xs text-muted-foreground">主题首页推荐标</p>
+                    </div>
+                    <Switch
+                      checked={form.featured === 1}
+                      onCheckedChange={(checked) => update("featured", checked ? 1 : 0)}
+                      aria-label="首页推荐"
+                    />
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            {enabledLanguages.map((lang) => {
+              const isDefault = lang.code === defaultLang
+              const fallbackLangName = enabledLanguages.find((l) => l.code === fallbackLang)?.name || fallbackLang
+              return (
+                <TabsContent key={lang.id} value={lang.code} className="space-y-4 pt-2">
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    {translatableFields.map((field) => {
+                      const isRequired = isDefault && (field.field_name === "title" || mustFieldSet.has(field.field_name))
+                      const val = getTranslationFieldValue(lang.code, field.field_name)
+                      const placeholderNote = !isDefault
+                        ? `留空将使用兜底语言（${fallbackLangName}）的内容`
+                        : undefined
+                      return renderFieldControl(
+                        field,
+                        val,
+                        (nextVal) => setTranslationFieldValue(lang.code, field.field_name, nextVal),
+                        isRequired,
+                        `lang-${lang.code}`,
+                        placeholderNote,
+                      )
+                    })}
+                  </div>
+                </TabsContent>
+              )
+            })}
+          </Tabs>
+        </div>
+      </ScrollArea>
+    </div>
   )
 }
 
 export function ContentPage({ user }: { user: AdminUser }) {
   const allowed = (permission: string) => user.is_super || user.permissions.includes(permission)
   const canReview = allowed("content.review")
+  // 标题与缩略图是列表的主要编辑入口，权限判断与操作列保持一致。
+  const canEditItem = (item: Content) => allowed("content.edit") && (!item.visible || canReview)
   const [items, setItems] = useState<Content[]>([])
   const [categories, setCategories] = useState<CategoryItem[]>([])
   const [models, setModels] = useState<SystemModel[]>([])
@@ -1360,7 +1350,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
   const [deleting, setDeleting] = useState<Content | null>(null)
   const [deleteSaving, setDeleteSaving] = useState(false)
 
-  const { activeLang, currentLanguage, refreshLanguages } = useLanguage()
+  const { activeLang, refreshLanguages } = useLanguage()
 
   const categoryOptions = useMemo(() => flattenCategoryTree(categories).filter((c) => c.page_type !== "link"), [categories])
 
@@ -1372,7 +1362,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
 
   useEffect(() => {
     let active = true
-    getContent(page, pageSize, appliedQuery, categoryID, activeLang)
+    getContent(page, pageSize, appliedQuery, categoryID, activeLang, true)
       .then((response) => {
         if (!active) return
         setItems(response.items)
@@ -1441,7 +1431,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
       cover_image: editingDetail.cover_image,
       published_at: editingDetail.published_at,
       source: editingDetail.source,
-      keywords: editingDetail.keywords,
+      seo_title: editingDetail.seo_title,
       description: editingDetail.description,
       order_id: editingDetail.order_id,
       featured: editingDetail.featured,
@@ -1503,7 +1493,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
       setLoading(true)
       const targetPage = editing ? page : 1
       if (!editing) setPage(1)
-      const response = await getContent(targetPage, pageSize, appliedQuery, categoryID, activeLang)
+      const response = await getContent(targetPage, pageSize, appliedQuery, categoryID, activeLang, true)
       setItems(response.items)
       setTotal(response.total)
     } catch (saveError) {
@@ -1570,9 +1560,6 @@ export function ContentPage({ user }: { user: AdminUser }) {
         </Select>
         {/* The list language follows the backend display language; it is switched
             on the 多语言 page so this page has no second switcher. */}
-        <p className="text-xs text-muted-foreground">
-          当前语言：{currentLanguage?.name || activeLang}（在「多语言」切换）
-        </p>
       </div>
       {notice && <p role="status" className="shrink-0 text-sm text-muted-foreground">{notice}</p>}
       {error ? <InlineAlert className="shrink-0">{error}</InlineAlert> : null}
@@ -1604,11 +1591,24 @@ export function ContentPage({ user }: { user: AdminUser }) {
                 <TableRow key={item.id}>
                   <TableCell className="max-w-[520px] pl-4">
                     <div className="flex min-w-0 items-center gap-3">
-                      <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted text-muted-foreground">
+                      <button
+                        type="button"
+                        className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted text-muted-foreground transition enabled:cursor-pointer enabled:hover:ring-2 enabled:hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-default"
+                        onClick={() => openEdit(item)}
+                        disabled={!canEditItem(item)}
+                        aria-label={`编辑${item.title}`}
+                      >
                         {item.cover_image ? <img src={item.cover_image} alt="" className="size-full object-contain" /> : <FileText className="size-4" />}
-                      </div>
+                      </button>
                       <div className="min-w-0">
-                        <p className="truncate font-medium">{item.title}</p>
+                        <button
+                          type="button"
+                          className="block max-w-full truncate text-left font-medium enabled:cursor-pointer enabled:hover:text-primary enabled:hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-default"
+                          onClick={() => openEdit(item)}
+                          disabled={!canEditItem(item)}
+                        >
+                          {item.title}
+                        </button>
                         <p className="truncate text-xs text-muted-foreground">{item.code || "无编号"} · #{item.id}</p>
                       </div>
                     </div>
@@ -1623,7 +1623,6 @@ export function ContentPage({ user }: { user: AdminUser }) {
                   </TableCell>
                   <TableCell className="pr-4 text-right">
                     <div className="flex justify-end gap-1">
-                      <IconButton disabled={!allowed("content.edit") || (!!item.visible && !canReview)} variant="ghost" size="icon-sm" onClick={() => openEdit(item)} label={`编辑${item.title}`}><Pencil /></IconButton>
                       <IconButton disabled={!allowed("content.delete")} variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(item)} label={`删除${item.title}`}><Trash2 /></IconButton>
                     </div>
                   </TableCell>
@@ -1634,12 +1633,18 @@ export function ContentPage({ user }: { user: AdminUser }) {
       </PaginatedTable>
 
       <Dialog open={editorOpen} onOpenChange={closeEditor}>
-        <DialogContent className="flex flex-col overflow-hidden sm:max-w-5xl">
-          <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-4 pr-2">
-            {editorLoading ? (
-              <><DialogHeader><DialogTitle>编辑内容</DialogTitle><DialogDescription>正在加载内容。</DialogDescription></DialogHeader><div className="flex h-32 items-center justify-center text-muted-foreground"><LoaderCircle className="size-5 animate-spin" /></div></>
-            ) : <ContentEditor canReview={canReview} key={`${editing?.id ?? "new"}-${activeLang}`} content={formContent} categories={categories} models={models} modelFields={modelFields} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
-          </ScrollArea>
+        <DialogContent className="flex h-[calc(100dvh-3rem)] max-h-[calc(100dvh-3rem)] w-full flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[min(96rem,calc(100vw-2rem))] max-sm:inset-0 max-sm:h-dvh max-sm:max-h-none max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-none">
+          {editorLoading ? (
+            <>
+              <DialogHeader className="border-b px-4 py-3 pr-12">
+                <DialogTitle>编辑内容</DialogTitle>
+                <DialogDescription>正在加载内容。</DialogDescription>
+              </DialogHeader>
+              <div className="flex flex-1 items-center justify-center text-muted-foreground">
+                <LoaderCircle className="size-5 animate-spin" />
+              </div>
+            </>
+          ) : <ContentEditor canReview={canReview} key={`${editing?.id ?? "new"}-${activeLang}`} content={formContent} categories={categories} models={models} modelFields={modelFields} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
         </DialogContent>
       </Dialog>
       <ConfirmDialog

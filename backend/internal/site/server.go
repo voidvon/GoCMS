@@ -393,7 +393,7 @@ func (s *Server) searchJSON(response http.ResponseWriter, request *http.Request)
 
 	query := strings.TrimSpace(request.URL.Query().Get("q"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
-	result, err := s.queryContent(request.Context(), siteID, query, 0, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
+	result, err := s.queryContent(request.Context(), siteID, query, 0, false, lang, positiveInt(request.URL.Query().Get("page"), 1), positiveInt(request.URL.Query().Get("page_size"), 20), true)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -537,6 +537,14 @@ func parseIntOrZero(value string) int64 {
 		return 0
 	}
 	return parsed
+}
+
+func boolQuery(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true":
+		return true
+	}
+	return false
 }
 
 func methodNotAllowed(response http.ResponseWriter) {

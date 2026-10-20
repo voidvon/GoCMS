@@ -26,7 +26,7 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 			"cover_image" TEXT NOT NULL DEFAULT '',
 			"published_at" TEXT NOT NULL DEFAULT '',
 			"source" TEXT NOT NULL DEFAULT '',
-			"keywords" TEXT NOT NULL DEFAULT '',
+			"seo_title" TEXT NOT NULL DEFAULT '',
 			"description" TEXT NOT NULL DEFAULT '',
 			"sort_order" INTEGER NOT NULL DEFAULT 0,
 			"featured" INTEGER NOT NULL DEFAULT 0,
@@ -35,6 +35,14 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 			"extra_data" TEXT NOT NULL DEFAULT '{}'
 		)`); err != nil {
 		return fmt.Errorf("create content table: %w", err)
+	}
+	// The retired keywords column held the SEO title after the previous CMS
+	// import, so existing databases keep their values under the new name.
+	if err := renameKeywordsToSEOTitle(ctx, database, unifiedContentTable); err != nil {
+		return err
+	}
+	if err := ensureContentColumn(ctx, database, "seo_title", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
 	}
 	for name, definition := range map[string]string{
 		"site_id":    "INTEGER NOT NULL DEFAULT 1",
@@ -51,7 +59,7 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_gocms_content_category ON "gocms_content" ("category_id", "sort_order", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_content_model ON "gocms_content" ("model_id", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_content_visible ON "gocms_content" ("visible", "id")`,
-		`CREATE INDEX IF NOT EXISTS idx_gocms_content_search ON "gocms_content" ("title", "code", "keywords")`,
+		`CREATE INDEX IF NOT EXISTS idx_gocms_content_search ON "gocms_content" ("title", "code", "seo_title")`,
 	} {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create content index: %w", err)
@@ -70,7 +78,7 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 			"title" TEXT NOT NULL DEFAULT '',
 			"summary" TEXT NOT NULL DEFAULT '',
 			"body" TEXT NOT NULL DEFAULT '',
-			"keywords" TEXT NOT NULL DEFAULT '',
+			"seo_title" TEXT NOT NULL DEFAULT '',
 			"description" TEXT NOT NULL DEFAULT '',
 			"extra_data" TEXT NOT NULL DEFAULT '{}',
 			"publish_status" TEXT NOT NULL DEFAULT 'published',
@@ -81,10 +89,16 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 	if _, err := database.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_gocms_content_trans ON "`+ContentTranslationTable+`" ("content_id", "lang")`); err != nil {
 		return fmt.Errorf("create content translation index: %w", err)
 	}
+	if err := renameKeywordsToSEOTitle(ctx, database, ContentTranslationTable); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, database, ContentTranslationTable, "seo_title", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 
 	_, _ = database.ExecContext(ctx, `
-		INSERT OR IGNORE INTO "`+ContentTranslationTable+`" ("content_id", "lang", "title", "summary", "body", "keywords", "description", "extra_data", "publish_status")
-		SELECT "id", 'zh-CN', "title", "summary", "body", "keywords", "description", '{}', 'published'
+		INSERT OR IGNORE INTO "`+ContentTranslationTable+`" ("content_id", "lang", "title", "summary", "body", "seo_title", "description", "extra_data", "publish_status")
+		SELECT "id", 'zh-CN', "title", "summary", "body", "seo_title", "description", '{}', 'published'
 		FROM "`+unifiedContentTable+`"
 	`)
 

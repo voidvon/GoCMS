@@ -324,7 +324,7 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 	}
 	// Add category translation for en
 	if _, err := database.Exec(`
-		INSERT INTO "gocms_category_translation" ("category_id", "lang", "name", "keywords")
+		INSERT INTO "gocms_category_translation" ("category_id", "lang", "name", "seo_title")
 		VALUES (1, 'en', 'English News', 'news, english')`); err != nil {
 		t.Fatal(err)
 	}
@@ -464,7 +464,7 @@ func TestLinkCategoryGeneration(t *testing.T) {
 	// Multi-language translations for categories
 	if _, err := database.Exec(`
 		INSERT INTO "gocms_category_translation"
-			("category_id", "lang", "name", "keywords", "description", "cover_content", "link_url")
+			("category_id", "lang", "name", "seo_title", "description", "cover_content", "link_url")
 		VALUES
 			(1, 'en', 'Home', '', '', '', '/en/'),
 			(2, 'en', 'About Us', '', '', '', ''),
@@ -816,18 +816,18 @@ func TestRelatedItemsFallbackAndKeywordMatching(t *testing.T) {
 			},
 			"gocms_content": {
 				// 疏水阀栏目 (101)
-				{"id": "1", "category_id": "101", "title": "斯派莎克BTM7疏水阀", "keywords": "斯派莎克 疏水阀", "route_key": "1", "visible": "1", "sort_order": "1"},
-				{"id": "2", "category_id": "101", "title": "斯派莎克BT6疏水阀", "keywords": "斯派莎克 疏水阀", "route_key": "2", "visible": "1", "sort_order": "2"},
+				{"id": "1", "category_id": "101", "title": "斯派莎克BTM7疏水阀", "seo_title": "斯派莎克 疏水阀", "route_key": "1", "visible": "1", "sort_order": "1"},
+				{"id": "2", "category_id": "101", "title": "斯派莎克BT6疏水阀", "seo_title": "斯派莎克 疏水阀", "route_key": "2", "visible": "1", "sort_order": "2"},
 				// 闸阀栏目 (102)
-				{"id": "3", "category_id": "102", "title": "铸铁闸阀Z41T", "keywords": "铸铁 闸阀 斯派莎克", "route_key": "3", "visible": "1", "sort_order": "1"},
-				{"id": "4", "category_id": "102", "title": "锻钢闸阀Z41Y", "keywords": "锻钢 闸阀", "route_key": "4", "visible": "1", "sort_order": "2"},
+				{"id": "3", "category_id": "102", "title": "铸铁闸阀Z41T", "seo_title": "铸铁 闸阀 斯派莎克", "route_key": "3", "visible": "1", "sort_order": "1"},
+				{"id": "4", "category_id": "102", "title": "锻钢闸阀Z41Y", "seo_title": "锻钢 闸阀", "route_key": "4", "visible": "1", "sort_order": "2"},
 			},
 		},
 	}
 
 	// 测试用例 1: 闸阀 ID=3 栏目内只有 1 个其他产品 (ID=4)，但需要 3 个相关产品
 	// 期望：同栏目的 ID=4 必定优先选中；另外 1 个通过关键词“斯派莎克”或根分类兜底补充疏水阀的内容，最终返回 3 条。
-	view := c.tables["gocms_content"][2] // ID=3 (铸铁闸阀Z41T, keywords: 铸铁 闸阀 斯派莎克)
+	view := c.tables["gocms_content"][2] // ID=3 (铸铁闸阀Z41T, SEO 标题: 铸铁 闸阀 斯派莎克)
 	related := c.relatedItems(view, 3)
 	if len(related) != 3 {
 		t.Fatalf("expected 3 related items, got %d", len(related))
@@ -1118,8 +1118,6 @@ func TestStandaloneLanguageSiteGeneration(t *testing.T) {
 		t.Fatalf("unexpected ru robots: %s", ruRobots)
 	}
 }
-
-
 
 func TestListIndexFilePatternPagination(t *testing.T) {
 	database, err := db.Open(":memory:")

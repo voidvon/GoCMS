@@ -50,7 +50,7 @@ function buildInitialCategoryTranslations(
     if (source[lang.code]) {
       output[lang.code] = {
         name: source[lang.code].name || "",
-        keywords: source[lang.code].keywords || "",
+        seo_title: source[lang.code].seo_title || "",
         description: source[lang.code].description || "",
         cover_content: source[lang.code].cover_content || "",
         link_url: source[lang.code].link_url || "",
@@ -58,7 +58,7 @@ function buildInitialCategoryTranslations(
     } else {
       output[lang.code] = {
         name: "",
-        keywords: "",
+        seo_title: "",
         description: "",
         cover_content: "",
         link_url: "",
@@ -75,14 +75,14 @@ function buildInitialCategoryTranslations(
   if (!output[defaultLang]) {
     output[defaultLang] = {
       name: category.name || "",
-      keywords: category.keywords || "",
+      seo_title: category.seo_title || "",
       description: category.description || "",
       cover_content: category.cover_content || "",
       link_url: category.link_url || "",
     }
   } else if (!output[defaultLang].name && category.name) {
     output[defaultLang].name = category.name
-    output[defaultLang].keywords = category.keywords || output[defaultLang].keywords
+    output[defaultLang].seo_title = category.seo_title || output[defaultLang].seo_title
     output[defaultLang].description = category.description || output[defaultLang].description
     output[defaultLang].cover_content = category.cover_content || output[defaultLang].cover_content
     output[defaultLang].link_url = category.link_url || output[defaultLang].link_url
@@ -200,7 +200,7 @@ function categoryInput(category: CategoryItem, templateGroups: ThemeTemplateGrou
     model_id: category.model_id || 1,
     link_url: category.link_url || "",
     nav_position: category.nav_position || "main",
-    keywords: category.keywords || "",
+    seo_title: category.seo_title || "",
     description: category.description || "",
     cover_content: category.cover_content || "",
     translations: category.translations || {},
@@ -330,7 +330,7 @@ export function CategoriesPage() {
       ...prev,
       [langCode]: {
         name: "",
-        keywords: "",
+        seo_title: "",
         description: "",
         cover_content: "",
         link_url: "",
@@ -348,7 +348,7 @@ export function CategoriesPage() {
         if (!next[lang.code]) {
           next[lang.code] = {
             name: "",
-            keywords: "",
+            seo_title: "",
             description: "",
             cover_content: "",
             link_url: "",
@@ -507,7 +507,7 @@ export function CategoriesPage() {
       const payload: CategoryInput = {
         ...form,
         name: defaultName,
-        keywords: translations[defaultLang]?.keywords ?? form.keywords,
+        seo_title: translations[defaultLang]?.seo_title ?? form.seo_title,
         description: translations[defaultLang]?.description ?? form.description,
         cover_content: translations[defaultLang]?.cover_content ?? form.cover_content,
         link_url: defaultLink,
@@ -866,7 +866,7 @@ export function CategoriesPage() {
                 {enabledLanguages.map((lang) => {
                   const isDefault = lang.code === defaultLang
                   const fallbackLangName = enabledLanguages.find((l) => l.code === fallbackLang)?.name || fallbackLang
-                  const trans = translations[lang.code] || { name: "", keywords: "", description: "", cover_content: "" }
+                  const trans = translations[lang.code] || { name: "", seo_title: "", description: "", cover_content: "" }
                   return (
                     <TabsContent key={lang.id} value={lang.code} className="flex min-h-0 flex-1 flex-col mt-0">
                       <ScrollArea className="h-0 min-h-0 flex-1 w-full" orientation="vertical">
@@ -926,11 +926,11 @@ export function CategoriesPage() {
                           ) : (
                             <>
                               <div className="space-y-2">
-                                <Label htmlFor={`category-keywords-${lang.code}`}>SEO 关键词</Label>
+                                <Label htmlFor={`category-seo-title-${lang.code}`}>SEO 标题</Label>
                                 <Input
-                                  id={`category-keywords-${lang.code}`}
-                                  value={trans.keywords || ""}
-                                  onChange={(event) => updateTranslation(lang.code, { keywords: event.target.value })}
+                                  id={`category-seo-title-${lang.code}`}
+                                  value={trans.seo_title || ""}
+                                  onChange={(event) => updateTranslation(lang.code, { seo_title: event.target.value })}
                                   placeholder={isDefault ? "用 | 或逗号分隔关键词" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
                                 />
                               </div>

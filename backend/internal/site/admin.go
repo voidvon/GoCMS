@@ -115,7 +115,7 @@ type CategoryItem struct {
 	DetailPath        string                             `json:"detail_path"`
 	DetailFilePattern string                             `json:"detail_file_pattern"`
 	DetailTemplate    string                             `json:"detail_template"`
-	Keywords          string                             `json:"keywords,omitempty"`
+	SEOTitle          string                             `json:"seo_title,omitempty"`
 	Description       string                             `json:"description,omitempty"`
 	CoverContent      string                             `json:"cover_content,omitempty"`
 	ModelID           int64                              `json:"model_id"`
@@ -143,7 +143,7 @@ type categoryPayload struct {
 	DetailPath        string                             `json:"detail_path"`
 	DetailFilePattern string                             `json:"detail_file_pattern"`
 	DetailTemplate    string                             `json:"detail_template"`
-	Keywords          string                             `json:"keywords"`
+	SEOTitle          string                             `json:"seo_title"`
 	Description       string                             `json:"description"`
 	CoverContent      string                             `json:"cover_content"`
 	ModelID           int64                              `json:"model_id"`
@@ -366,7 +366,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		SELECT c."id", c."name", c."parent_id", c."order_id", c."list_page_size", c."page_type", c."route_id",
 		       (SELECT COUNT(*) FROM "gocms_content" content WHERE content."category_id" = c."id"),
 		       c."list_path", c."list_file_pattern", c."list_template", c."cover_template", c."detail_path",
-		       c."detail_file_pattern", c."detail_template", COALESCE(c."keywords", ''), COALESCE(c."description", ''),
+		       c."detail_file_pattern", c."detail_template", COALESCE(c."seo_title", ''), COALESCE(c."description", ''),
 		       COALESCE(c."cover_content", ''), COALESCE(c."model_id", 1), COALESCE(c."link_url", ''),
 		       COALESCE(c."nav_position", 'main')
 		FROM "gocms_category" c
@@ -383,7 +383,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		if err := rows.Scan(&item.ID, &item.Name, &item.ParentID, &item.OrderID, &item.ListPageSize, &item.PageType, &item.RouteID,
 			&item.ContentCount, &item.ListPath, &item.ListFilePattern, &item.ListTemplate,
 			&item.CoverTemplate, &item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate,
-			&item.Keywords, &item.Description, &item.CoverContent, &item.ModelID, &item.LinkURL, &item.NavPosition); err != nil {
+			&item.SEOTitle, &item.Description, &item.CoverContent, &item.ModelID, &item.LinkURL, &item.NavPosition); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -400,7 +400,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		if _, ok := translations[defaultLang]; !ok {
 			translations[defaultLang] = CategoryTranslationItem{
 				Name:         items[i].Name,
-				Keywords:     items[i].Keywords,
+				SEOTitle:     items[i].SEOTitle,
 				Description:  items[i].Description,
 				CoverContent: items[i].CoverContent,
 				LinkURL:      items[i].LinkURL,
@@ -409,7 +409,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 
 		if trans, ok := translations[requestedLang]; ok && strings.TrimSpace(trans.Name) != "" {
 			items[i].Name = trans.Name
-			items[i].Keywords = trans.Keywords
+			items[i].SEOTitle = trans.SEOTitle
 			items[i].Description = trans.Description
 			items[i].CoverContent = trans.CoverContent
 			if trans.LinkURL != "" {
@@ -420,7 +420,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 			fallbackTrans := translations[fallbackLang]
 			if strings.TrimSpace(fallbackTrans.Name) != "" {
 				items[i].Name = fallbackTrans.Name
-				items[i].Keywords = fallbackTrans.Keywords
+				items[i].SEOTitle = fallbackTrans.SEOTitle
 				items[i].Description = fallbackTrans.Description
 				items[i].CoverContent = fallbackTrans.CoverContent
 				if fallbackTrans.LinkURL != "" {
@@ -474,7 +474,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		defaultLang, _ := s.getDefaultAndFallbackLang(request.Context())
 		if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Name) != "" {
 			payload.Name = strings.TrimSpace(def.Name)
-			payload.Keywords = def.Keywords
+			payload.SEOTitle = def.SEOTitle
 			payload.Description = def.Description
 			payload.CoverContent = def.CoverContent
 			if def.LinkURL != "" {
@@ -546,9 +546,9 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		}
 		result, err := s.database.ExecContext(request.Context(), `
 			INSERT INTO "gocms_category"
-			("site_id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", "keywords", "description", "cover_content", "model_id", "link_url", "nav_position")
+			("site_id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", "seo_title", "description", "cover_content", "model_id", "link_url", "nav_position")
 			VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			siteID, payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL, payload.NavPosition)
+			siteID, payload.Name, payload.ParentID, payload.OrderID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.SEOTitle, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL, payload.NavPosition)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -570,7 +570,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			_ = s.saveCategoryTranslations(request.Context(), s.database, newID, payload.Translations)
 		} else {
 			_ = s.saveCategoryTranslations(request.Context(), s.database, newID, map[string]CategoryTranslationItem{
-				requestedLang: {Name: payload.Name, Keywords: payload.Keywords, Description: payload.Description, CoverContent: payload.CoverContent, LinkURL: payload.LinkURL},
+				requestedLang: {Name: payload.Name, SEOTitle: payload.SEOTitle, Description: payload.Description, CoverContent: payload.CoverContent, LinkURL: payload.LinkURL},
 			})
 		}
 	} else {
@@ -578,7 +578,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			_ = s.saveCategoryTranslations(request.Context(), s.database, id, payload.Translations)
 			if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Name) != "" {
 				payload.Name = def.Name
-				payload.Keywords = def.Keywords
+				payload.SEOTitle = def.SEOTitle
 				payload.Description = def.Description
 				payload.CoverContent = def.CoverContent
 				if def.LinkURL != "" {
@@ -587,7 +587,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			}
 		} else {
 			_ = s.saveCategoryTranslations(request.Context(), s.database, id, map[string]CategoryTranslationItem{
-				requestedLang: {Name: payload.Name, Keywords: payload.Keywords, Description: payload.Description, CoverContent: payload.CoverContent, LinkURL: payload.LinkURL},
+				requestedLang: {Name: payload.Name, SEOTitle: payload.SEOTitle, Description: payload.Description, CoverContent: payload.CoverContent, LinkURL: payload.LinkURL},
 			})
 		}
 
@@ -599,8 +599,8 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		if requestedLang == defaultLang || payload.Translations != nil {
 			result, err := s.database.ExecContext(request.Context(), `
 				UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "route_id" = ?, "list_page_size" = ?, "page_type" = ?,
-				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "keywords" = ?, "description" = ?, "cover_content" = ?, "model_id" = ?, "link_url" = ?, "nav_position" = ? WHERE "id" = ?`,
-				payload.Name, payload.ParentID, payload.OrderID, routeID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.Keywords, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL, payload.NavPosition, id)
+				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "seo_title" = ?, "description" = ?, "cover_content" = ?, "model_id" = ?, "link_url" = ?, "nav_position" = ? WHERE "id" = ?`,
+				payload.Name, payload.ParentID, payload.OrderID, routeID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.SEOTitle, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL, payload.NavPosition, id)
 			if err != nil {
 				http.Error(response, "database error", http.StatusInternalServerError)
 				return

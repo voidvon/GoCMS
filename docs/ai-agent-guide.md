@@ -73,6 +73,7 @@
   - `page_size`: 每页条数（默认 20，最大 100）
   - `q`: 搜索关键词（可选）
   - `category_id`: 按栏目筛选（可选，传 0 查询全部）
+  - `include_children`: 传 `1`/`true` 时连同 `category_id` 的全部下级栏目一起筛选（可选，默认仅本级）。后台内容列表的栏目筛选始终开启该行为。
 - **响应示例**：
   ```json
   {
@@ -107,7 +108,7 @@
   | `content` | string | 否 | 正文富文本（HTML 格式） |
   | `summary` | string | 否 | 摘要（若为空，前台主题通常会截取正文） |
   | `cover_image` | string | 否 | 封面图相对路径，如 `/images/demo.jpg` |
-  | `keywords` | string | 否 | SEO 关键词，以逗号分隔 |
+  | `seo_title` | string | 否 | SEO 标题，留空时前台回退为内容标题 |
   | `description` | string | 否 | SEO 页面描述 |
   | `visible` | integer | 否 | `1` 为公开展示，`0` 为隐藏草稿（默认 `1`） |
   | `order_id` | integer | 否 | 排序权重（数值越大越靠前，默认 `0`） |
@@ -119,7 +120,7 @@
     "category_id": 2,
     "summary": "本次发布涵盖三款全新智能设备...",
     "content": "<p>今天我们非常荣幸地宣布推出全新一代智能设备...</p>",
-    "keywords": "新产品,智能设备,发布会",
+    "seo_title": "新产品发布与智能设备方案 | 示例站点",
     "description": "2026 年秋季新产品发布详情与参数说明。",
     "visible": 1
   }

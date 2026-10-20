@@ -167,7 +167,7 @@ type ListCategory struct {
 	RowStart     bool
 	RowEnd       bool
 	Description  string
-	Keywords     string
+	SEOTitle     string
 	CoverContent string
 }
 
@@ -180,7 +180,7 @@ type NavigationItem struct {
 	Current      bool
 	Active       bool
 	Description  string
-	Keywords     string
+	SEOTitle     string
 	CoverContent string
 	Children     []NavigationItem
 }
@@ -630,10 +630,10 @@ func prepareTranslatedCategories(baseRows, transRows []Row, targetLang, fallback
 			row["seo_title"] = v
 		}
 
-		if v := strings.TrimSpace(targetTrans["keywords"]); v != "" {
-			row["keywords"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["keywords"]); v != "" {
-			row["keywords"] = v
+		if v := strings.TrimSpace(targetTrans["seo_title"]); v != "" {
+			row["seo_title"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["seo_title"]); v != "" {
+			row["seo_title"] = v
 		}
 
 		if v := strings.TrimSpace(targetTrans["description"]); v != "" {
@@ -705,10 +705,10 @@ func prepareTranslatedContent(baseRows, transRows []Row, targetLang, fallbackLan
 			}
 		}
 
-		if v := strings.TrimSpace(targetTrans["keywords"]); v != "" {
-			row["keywords"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["keywords"]); v != "" {
-			row["keywords"] = v
+		if v := strings.TrimSpace(targetTrans["seo_title"]); v != "" {
+			row["seo_title"] = v
+		} else if v := strings.TrimSpace(fallbackTrans["seo_title"]); v != "" {
+			row["seo_title"] = v
 		}
 
 		if v := strings.TrimSpace(targetTrans["description"]); v != "" {
@@ -929,7 +929,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		"summary":     true,
 		"body":        true,
 		"content":     true,
-		"keywords":    true,
+		"seo_title":   true,
 		"description": true,
 	}
 	for _, f := range c.tables["gocms_model_field"] {
@@ -1666,7 +1666,7 @@ func (c *content) listCategories(view Row) []ListCategory {
 			Current:      child.n("id") == category.n("id"),
 			Last:         index+1 == len(children),
 			Description:  esc(child["description"]),
-			Keywords:     esc(child["keywords"]),
+			SEOTitle:     esc(child["seo_title"]),
 			CoverContent: esc(child["cover_content"]),
 		})
 	}
@@ -1701,7 +1701,7 @@ func (c *content) listChildren(arg any) []ListCategory {
 			RowStart:     index%5 == 0,
 			RowEnd:       index%5 == 4 || index+1 == len(children),
 			Description:  esc(child["description"]),
-			Keywords:     esc(child["keywords"]),
+			SEOTitle:     esc(child["seo_title"]),
 			CoverContent: esc(child["cover_content"]),
 		})
 	}
@@ -1905,7 +1905,7 @@ func (c *content) navigationItem(category Row, position string, depth int, curre
 		Current:      isCurrent,
 		Active:       isActive,
 		Description:  esc(category["description"]),
-		Keywords:     esc(category["keywords"]),
+		SEOTitle:     esc(category["seo_title"]),
 		CoverContent: esc(category["cover_content"]),
 		Children:     items,
 	}
@@ -1979,17 +1979,17 @@ func (c *content) relatedItems(view Row, limit int) []ListItem {
 		selectedIDs[item.n("id")] = true
 	}
 
-	// 2. 关键词匹配（参考帝国 CMS 算法：按逗号/空格分词，在所属大类/根栏目下匹配标题或关键词）
-	keywordsStr := strings.TrimSpace(view["keywords"])
-	var keywords []string
-	if keywordsStr != "" {
-		rawTokens := strings.FieldsFunc(keywordsStr, func(r rune) bool {
+	// 2. SEO 标题匹配（按逗号/空格分词，在所属大类/根栏目下匹配标题或 SEO 标题）
+	seoTitleStr := strings.TrimSpace(view["seo_title"])
+	var seoTitle []string
+	if seoTitleStr != "" {
+		rawTokens := strings.FieldsFunc(seoTitleStr, func(r rune) bool {
 			return r == ',' || r == '，' || r == ' ' || r == ';' || r == '；'
 		})
 		for _, tok := range rawTokens {
 			tok = strings.TrimSpace(tok)
 			if len([]rune(tok)) >= 2 {
-				keywords = append(keywords, strings.ToLower(tok))
+				seoTitle = append(seoTitle, strings.ToLower(tok))
 			}
 		}
 	}
@@ -1997,7 +1997,7 @@ func (c *content) relatedItems(view Row, limit int) []ListItem {
 	root := c.listRoot(category)
 	rootID := root.n("id")
 
-	if len(keywords) > 0 && len(selected) < limit {
+	if len(seoTitle) > 0 && len(selected) < limit {
 		type kwCandidate struct {
 			row   Row
 			score int
@@ -2013,9 +2013,9 @@ func (c *content) relatedItems(view Row, limit int) []ListItem {
 				continue
 			}
 			titleLower := strings.ToLower(item["title"])
-			kwLower := strings.ToLower(item["keywords"])
+			kwLower := strings.ToLower(item["seo_title"])
 			score := 0
-			for _, kw := range keywords {
+			for _, kw := range seoTitle {
 				if strings.Contains(titleLower, kw) {
 					score += 2
 				}
@@ -2193,7 +2193,7 @@ func (c *content) contentView(row Row) Row {
 		"published_at":       esc(row["published_at"]),
 		"date":               esc(row["published_at"]),
 		"source":             esc(row["source"]),
-		"keywords":           esc(row["keywords"]),
+		"seo_title":          esc(row["seo_title"]),
 		"description":        esc(row["description"]),
 		"category_id":        esc(category["id"]),
 		"category_name":      esc(category["name"]),
@@ -2252,7 +2252,7 @@ func (c *content) categoryView(category Row, items []Row, page, pageSize int) Ro
 		"root_category_url": c.rootCategoryURL(),
 		"home_url":          c.homeURL(),
 		"lang":              c.lang,
-		"keywords":          esc(category["keywords"]),
+		"seo_title":         esc(category["seo_title"]),
 		"description":       esc(category["description"]),
 		"body":              category["cover_content"],
 		"content":           category["cover_content"],
@@ -2318,7 +2318,7 @@ func (c *content) buildForLang() error {
 		"title":         esc(siteTitle),
 		"site_name":     esc(siteName),
 		"site_url":      esc(c.settings["site_url"]),
-		"keywords":      esc(siteKeywords),
+		"seo_title":     esc(siteKeywords),
 		"description":   esc(siteDescription),
 		"root_category": "",
 		"home_url":      c.homeURL(),
