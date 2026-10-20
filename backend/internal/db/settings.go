@@ -130,3 +130,16 @@ func SaveSiteSettingsForSite(ctx context.Context, database *sql.DB, siteID int64
 
 	return tx.Commit()
 }
+
+// LoadSiteSetting returns a single site setting. It returns sql.ErrNoRows when
+// the key is not configured for the site.
+func LoadSiteSetting(ctx context.Context, database *sql.DB, siteID int64, key string) (string, error) {
+	if siteID <= 0 {
+		siteID = 1
+	}
+	var value string
+	err := database.QueryRowContext(ctx, `
+		SELECT "value" FROM "`+siteSettingsTable+`"
+		WHERE "site_id" = ? AND "key" = ? LIMIT 1`, siteID, key).Scan(&value)
+	return value, err
+}

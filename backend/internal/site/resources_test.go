@@ -1,10 +1,14 @@
 package site
 
 import (
+	"context"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"gocms/internal/db"
 )
 
 func TestSeparateResources(t *testing.T) {
@@ -71,5 +75,84 @@ func TestSeparateResources(t *testing.T) {
 				t.Fatalf("got %d %q", response.Code, response.Body.String())
 			}
 		})
+	}
+}
+
+func TestMinifiesThemeCSSAndJS(t *testing.T) {
+	dir := t.TempDir()
+	assets := filepath.Join(dir, "assets")
+	theme := filepath.Join(assets, "theme", "blue", "assets")
+	for _, path := range []string{filepath.Join(theme, "css"), filepath.Join(theme, "js")} {
+		if err := os.MkdirAll(path, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	css := "body {\n  color: red;\n}\n"
+	js := "function add (a, b) {\n  return a + b;\n}\n"
+	if err := os.WriteFile(filepath.Join(theme, "css/site.css"), []byte(css), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(theme, "js/site.js"), []byte(js), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	server, err := New(nil, filepath.Join(dir, "web"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.assetsRoot = assets
+	server.themeRoot = theme
+
+	for _, test := range []struct {
+		path  string
+		want  string
+		input int
+	}{
+		{path: "/css/site.css", want: "body{color:red}", input: len(css)},
+		{path: "/js/site.js", want: "function add(", input: len(js)},
+	} {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest("GET", test.path, nil))
+		body := response.Body.String()
+		if response.Code != 200 || !strings.HasPrefix(body, test.want) || len(body) >= test.input {
+			t.Fatalf("%s: got %d %q", test.path, response.Code, body)
+		}
+	}
+}
+
+func TestAssetMinifyCanBeDisabled(t *testing.T) {
+	database, err := db.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if err := db.CreateSchema(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveSiteSettingsForSite(context.Background(), database, 1, map[string]string{"asset_minify": "0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	assets := filepath.Join(dir, "assets")
+	theme := filepath.Join(assets, "theme", "blue", "assets")
+	if err := os.MkdirAll(filepath.Join(theme, "css"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	css := "body {\n  color: red;\n}\n"
+	if err := os.WriteFile(filepath.Join(theme, "css/site.css"), []byte(css), 0644); err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(database, filepath.Join(dir, "web"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.assetsRoot = assets
+	server.themeRoot = theme
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest("GET", "/css/site.css", nil))
+	if response.Code != 200 || response.Body.String() != css {
+		t.Fatalf("got %d %q", response.Code, response.Body.String())
 	}
 }
