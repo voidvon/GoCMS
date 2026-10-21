@@ -113,7 +113,7 @@ export function DashboardPage() {
         {
           label: "404 错误",
           value: metrics.total_404_errors,
-          detail: `24 小时内 ${formatNumber(metrics.recent_404_errors)} 次 · 站内死链 ${formatNumber(metrics.internal_404_errors)} 次`,
+          detail: `24 小时内 ${formatNumber(metrics.recent_404_errors)} 次 · 站内死链地址 ${formatNumber(metrics.internal_404_paths)} 个`,
           icon: Bug,
         },
         {
@@ -124,8 +124,8 @@ export function DashboardPage() {
         },
         {
           label: "站内死链",
-          value: metrics.internal_404_errors,
-          detail: "由站内页面跳转触发的 404，优先修复",
+          value: metrics.internal_404_paths,
+          detail: `由有效站内页面触发的 404（累计 ${formatNumber(metrics.internal_404_errors)} 次命中），优先修复`,
           icon: Link2Off,
         },
         {
@@ -149,10 +149,10 @@ export function DashboardPage() {
         <section className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-muted-foreground">访问与错误</h2>
-            {metrics.internal_404_errors > 0 ? (
+            {metrics.internal_404_paths > 0 ? (
               <Badge variant="outline" className="gap-1.5 border-amber-300 text-amber-700 dark:text-amber-300">
                 <AlertTriangle className="size-3.5" />
-                {formatNumber(metrics.internal_404_errors)} 个站内死链待处理
+                {formatNumber(metrics.internal_404_paths)} 个站内死链地址待处理
               </Badge>
             ) : null}
           </div>
@@ -296,7 +296,7 @@ export function DashboardPage() {
               {metrics ? (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">站内死链</span>
-                  <span className="font-medium">{formatNumber(metrics.internal_404_errors)}</span>
+                  <span className="font-medium">{formatNumber(metrics.internal_404_paths)}</span>
                 </div>
               ) : null}
             </CardContent>

@@ -28,6 +28,8 @@ func TestGenerateSitemapFromPublishedPages(t *testing.T) {
 	for name, body := range map[string]string{
 		"index.html":        "home",
 		"catalog/item.htm":  "catalog",
+		"404.html":          "not found",
+		"es/404.html":       "not found",
 		"sitemap.html":      "old html map",
 		"Sitemap.xml":       "old xml map",
 		"assets/ignored.js": "asset",
@@ -52,6 +54,9 @@ func TestGenerateSitemapFromPublishedPages(t *testing.T) {
 	if !strings.Contains(string(html), `href="/"`) || !strings.Contains(string(html), `href="/catalog/item.htm"`) || strings.Contains(string(html), "old html map") || strings.Contains(string(html), "Sitemap.xml") {
 		t.Fatalf("unexpected html sitemap: %s", html)
 	}
+	if strings.Contains(string(html), "404.html") {
+		t.Fatalf("html sitemap advertised 404 pages: %s", html)
+	}
 
 	if filename, err := publisher.GenerateSitemap(context.Background(), SitemapXML); err != nil || filename != "Sitemap.xml" {
 		t.Fatalf("generate xml sitemap = %q, %v", filename, err)
@@ -62,6 +67,9 @@ func TestGenerateSitemapFromPublishedPages(t *testing.T) {
 	}
 	if !strings.Contains(string(xml), "https://example.com/catalog/item.htm") || strings.Contains(string(xml), "ignored.js") || strings.Contains(string(xml), "Sitemap.xml") {
 		t.Fatalf("unexpected xml sitemap: %s", xml)
+	}
+	if strings.Contains(string(xml), "404.html") {
+		t.Fatalf("xml sitemap advertised 404 pages: %s", xml)
 	}
 }
 

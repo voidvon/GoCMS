@@ -1033,11 +1033,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 			}
 			langSiteURL = strings.TrimRight(langSiteURL, "/")
 
-			langUrls := make([]string, 0, len(c.pages))
-			for pagePath := range c.pages {
-				langUrls = append(langUrls, pagePath)
-			}
-			sort.Strings(langUrls)
+			langUrls := sitemapURLs(c.pages)
 
 			c.pages["llms.txt"], err = renderLLMS(ctx, langSiteURL, langUrls, func(path string) (io.ReadCloser, error) {
 				return io.NopCloser(bytes.NewReader(c.pages[path])), nil
@@ -1070,11 +1066,7 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	}
 
 	c.pages = mainPages
-	urls := make([]string, 0, len(c.pages))
-	for pagePath := range c.pages {
-		urls = append(urls, pagePath)
-	}
-	sort.Strings(urls)
+	urls := sitemapURLs(c.pages)
 	c.pages["llms.txt"], err = renderLLMS(ctx, c.settings["site_url"], urls, func(path string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(c.pages[path])), nil })
 	if err != nil {
 		return report, err
@@ -2407,11 +2399,11 @@ func (c *content) buildForLang() error {
 
 	msgPath := "msg.html"
 	searchPath := "search.html"
-	notFoundPath := "404.html"
+	notFoundPath := routing.NotFoundFileName
 	if c.langPrefix != "" {
 		msgPath = c.langPrefix + "/msg.html"
 		searchPath = c.langPrefix + "/search.html"
-		notFoundPath = c.langPrefix + "/404.html"
+		notFoundPath = c.langPrefix + "/" + routing.NotFoundFileName
 	}
 	if err := c.page(msgPath, templateconfig.RoleMessage, Row{"home_url": c.homeURL(), "lang": c.lang}); err != nil {
 		return err
@@ -2439,7 +2431,33 @@ func (c *content) notFoundPage(pagePath string, row Row) error {
 	if _, ok := c.templates[normalized]; !ok {
 		return nil
 	}
+	// 404 is a terminal error page, not a content page. Give themes an explicit
+	// contract instead of relying on their generic header fallbacks, which would
+	// otherwise inherit the home page title, canonical and indexable robots.
+	row["is_404"] = "true"
+	row["page_type"] = "404"
+	row["seo_title"] = "404"
+	row["seo_robots"] = "noindex, follow"
+	row["seo_canonical"] = ""
 	return c.pageTemplate(pagePath, normalized, row)
+}
+
+// sitemapURLs returns the generated pages that may be advertised as public
+// content. 404 documents and the sitemap files themselves are structural, not
+// content, and must stay out of sitemap.xml/sitemap.html/llms.txt.
+func sitemapURLs(pages map[string][]byte) []string {
+	urls := make([]string, 0, len(pages))
+	for pagePath := range pages {
+		if routing.IsNotFoundPage(pagePath) {
+			continue
+		}
+		if strings.EqualFold(pagePath, "sitemap.html") || strings.EqualFold(pagePath, "sitemap.xml") {
+			continue
+		}
+		urls = append(urls, pagePath)
+	}
+	sort.Strings(urls)
+	return urls
 }
 
 func min(left, right int) int {

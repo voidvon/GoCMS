@@ -92,6 +92,7 @@ export type AccessLogMetrics = {
   total_404_errors: number
   recent_404_errors: number
   internal_404_errors: number
+  internal_404_paths: number
   total_pages: number
   total_requests: number
   retention_days: number

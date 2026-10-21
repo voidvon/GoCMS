@@ -84,7 +84,22 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 
 `notfound` 绑定是可选的：主题提供 404 模板时按语言生成 `404.html`，未命中的路径由服务端返回该页面（同一语言目录优先，例如 `/es/...` 使用 `es/404.html`），API 路径仍返回纯文本；主题没有 404 模板时保持原有的纯文本响应，主题校验与发布都不会失败。
 
+404 模板会收到 `is_404=true`、`page_type=404`、`seo_title=404`、`seo_robots=noindex, follow`、`seo_canonical=""`。主题应优先使用这些字段，而不是让通用 head 回退到首页 title/canonical：
+
+```go
+{{if .is_404}}
+  <title>{{.seo_title}} | {{setting "site_name"}}</title>
+  <meta name="robots" content="{{.seo_robots}}">
+{{else}}
+  <!-- 正常页面的 title / canonical / robots -->
+{{end}}
+```
+
+服务端还会对所有 4xx/5xx 响应设置 `Cache-Control: no-store`，对 HTML 错误设置 `X-Robots-Tag: noindex, follow`；直接访问 `/404.html` 也带同样的响应头。`404.html` 与各语言 404 页面不会进入 `sitemap.xml`、`sitemap.html` 或 `llms.txt`。
+
 所有内容统一使用 `gocms_content`，所有栏目统一使用 `gocms_category`，留言统一使用 `gocms_message`。每个分类保存自己的栏目类型、列表/封面模板、详情模板、静态目录和文件名规则；内容只保存所属分类 ID，发布器按分类解析路径。新建分类使用通用默认配置，导入器负责把外部系统的数据转换为这些统一字段。运行时只读取 `gocms_*` 表，不读取外部系统的表结构。
+
+错误响应（4xx/5xx）始终使用 `Cache-Control: no-store`，避免文件补传或页面修复后仍被浏览器/反向代理缓存。反向代理配置只应对成功响应设置长缓存，不要对 `uploads`、`images`、`css`、`js` 等 location 使用 `add_header ... always`。
 
 发布写入前默认对 `.html` 页面做 HTML 压缩（去除注释、折叠标签间空白，`<pre>`、`<textarea>` 及内联 `script`/`style` 内容保持原样）；站点设置 `html_minify=0` 可关闭。`sitemap.xml`、`llms.txt` 等非 HTML 文件不处理。
 
@@ -101,8 +116,8 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 仪表盘按站点统计前台访问量和错误，数据来自 `gocms_access_log`。站点通过请求 Host 解析（与前台一致，独立语言域名归入所属站点），后台只显示当前所选站点的数据；不同站点之间不共享任何统计。
 
 - 记录范围：返回 HTML 的 2xx 页面访问，以及所有 4xx/5xx 响应（包括缺失的 CSS、JS、图片等资源）。成功的静态资源请求、3xx 跳转、`/api/` 和 `/admin/` 请求不记录，避免噪声。只记录 GET。
-- 每条记录保存路径、查询串（截断到 200 字符）、状态码、类型、客户端 IP、User-Agent 摘要、客户端类型（浏览器/爬虫/工具/其他）、设备类型（桌面/移动/平板/其他）、来源地址与来源分类（站内/站外/直接访问）。站内判定使用该站点的主域名、别名和独立语言域名。
-- 仪表盘展示今日访问、24 小时访问与访客、新访客、PC/移动访客、404 数量、错误总数、站内死链、累计页面、热门页面、按路径归并的错误列表和状态码分布。
+- 每条记录保存路径、查询串（截断到 200 字符）、状态码、类型、客户端 IP、User-Agent 摘要、客户端类型（浏览器/爬虫/工具/其他）、设备类型（桌面/移动/平板/其他）、来源地址与来源分类（站内/站外/直接访问/无效 Referer）。站内判定不只检查域名：错误请求还要求 Referer 指向该站点真实存在的 HTML 页面（目录 URL 需有 `index.html`），否则记为 `invalid`，不计入“站内死链”。现代浏览器提供的 `Sec-Fetch-Site` 也会参与判定。
+- 仪表盘展示今日访问、24 小时访问与访客、新访客、PC/移动访客、404 数量、错误总数、站内死链地址数/命中数、累计页面、热门页面、按路径归并的错误列表和状态码分布。`internal_404_paths` 是按 URL 去重后的站内死链数，`internal_404_errors` 是命中次数，二者不要混用。
 - “访问统计”页面可按时间范围、类型、状态、客户端、设备、来源、路径、IP 和关键字过滤，查看错误归并列表或逐条访问明细，并按当前筛选条件清空日志。
 - 权限：“访问统计”查看权限为 `traffic`，清空权限为 `traffic.clear`；超级管理员默认全部可用。清空操作会写入操作日志。
 - 保留策略：默认保留 3 天，服务启动时及之后每 30 分钟清理过期记录；用 `-access-log-days` 调整保留天数。自然日边界默认跟随系统时区，可用 `-timezone Asia/Shanghai` 指定 IANA 时区；时间戳按 UTC 存储与传输，界面统一按浏览器所在时区显示。

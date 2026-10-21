@@ -79,6 +79,7 @@ const refererOptions = [
   { value: "internal", label: "站内跳转" },
   { value: "external", label: "站外来源" },
   { value: "none", label: "直接访问" },
+  { value: "invalid", label: "无效 Referer" },
 ]
 
 function hasPermission(user: AdminUser, key: string, activeSiteId?: number) {
@@ -104,6 +105,7 @@ function StatusBadge({ status }: { status: number }) {
 function refererLabel(kind: string) {
   if (kind === "internal") return "站内"
   if (kind === "external") return "站外"
+  if (kind === "invalid") return "无效"
   return "直接"
 }
 
@@ -453,7 +455,7 @@ export function TrafficPage({ user }: { user: AdminUser }) {
       {tab === "errors" && errors.length > 0 ? (
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <AlertTriangle className="size-3.5" />
-          按“站内来源”排序可以优先修复站内链接指向的死链。
+          站内来源只统计来源页真实存在（HTML 页面）的请求；无效 Referer 不会计入站内死链。
         </p>
       ) : null}
     </div>

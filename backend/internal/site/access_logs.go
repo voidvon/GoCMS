@@ -7,6 +7,9 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +41,7 @@ const (
 type accessLogCacheEntry struct {
 	siteID  int64
 	domains map[string]bool
+	site    *db.Site
 }
 
 type accessLogConfig struct {
@@ -121,8 +125,9 @@ func (c *accessLogConfig) formatVisited(raw string) string {
 }
 
 // accessResponse captures the status code and content type of a public
-// response. It is a pure pass-through wrapper: it never mutates headers so
-// http.ServeContent / http.FileServer keep working unchanged.
+// response and applies the CMS-wide error policy: errors are never cacheable
+// and HTML errors are not indexable. Successful responses pass through
+// unchanged so http.ServeContent / http.FileServer keep their semantics.
 type accessResponse struct {
 	http.ResponseWriter
 	status      int
@@ -134,6 +139,17 @@ func (w *accessResponse) Unwrap() http.ResponseWriter { return w.ResponseWriter 
 func (w *accessResponse) WriteHeader(status int) {
 	if w.status != 0 {
 		return
+	}
+	// Errors must never inherit the long-lived cache policy of successful
+	// static assets. Otherwise a file that is uploaded after a 404 was cached
+	// can keep returning the stale 404 for hours (or days, depending on the
+	// reverse proxy). 404 HTML is also explicitly non-indexable, independent
+	// of whether the active theme remembered to emit the right meta tags.
+	if status >= http.StatusBadRequest {
+		w.Header().Set("Cache-Control", "no-store")
+		if strings.HasPrefix(strings.ToLower(w.Header().Get("Content-Type")), "text/html") {
+			w.Header().Set("X-Robots-Tag", "noindex, follow")
+		}
 	}
 	w.status = status
 	w.contentType = w.Header().Get("Content-Type")
@@ -195,25 +211,11 @@ func (s *Server) recordAccessLog(request *http.Request, result *accessResponse) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	siteID, domains := s.accessLogSite(ctx, request)
+	siteID, domains, site := s.accessLogSite(ctx, request)
 	if siteID <= 0 {
 		return
 	}
-	refererKind := "none"
-	if refererHost != "" {
-		// A referer from the very host being served is always internal, even
-		// when that host is not (yet) recorded as a domain of the site.
-		switch {
-		case refererHost == normalizeAccessLogHost(requestHost(request)), domains[refererHost]:
-			refererKind = "internal"
-		case s.accessLogRefererSiteID(ctx, refererHost) == siteID:
-			// Standalone language domains and wildcard aliases resolve to the
-			// same site and are therefore internal referers too.
-			refererKind = "internal"
-		default:
-			refererKind = "external"
-		}
-	}
+	refererKind := s.classifyAccessLogReferer(ctx, request, site, siteID, domains, refererHost, referer, status)
 	query := request.URL.RawQuery
 	if len(query) > accessLogQueryLimit {
 		query = query[:accessLogQueryLimit]
@@ -233,11 +235,11 @@ func (s *Server) recordAccessLog(request *http.Request, result *accessResponse) 
 // accessLogSite resolves the public site for a request and returns the set of
 // hosts that belong to it. Results are cached briefly so that logging costs at
 // most one lookup per host per cache window.
-func (s *Server) accessLogSite(ctx context.Context, request *http.Request) (int64, map[string]bool) {
+func (s *Server) accessLogSite(ctx context.Context, request *http.Request) (int64, map[string]bool, *db.Site) {
 	host := normalizeAccessLogHost(requestHost(request))
 	cache := s.accessLogs
 	if cache == nil {
-		return 0, nil
+		return 0, nil, nil
 	}
 	if host != "" {
 		cache.mu.RLock()
@@ -245,7 +247,7 @@ func (s *Server) accessLogSite(ctx context.Context, request *http.Request) (int6
 		fresh := time.Since(cache.refreshedAt) < accessLogSiteCacheTTL
 		cache.mu.RUnlock()
 		if ok && fresh {
-			return entry.siteID, entry.domains
+			return entry.siteID, entry.domains, entry.site
 		}
 	}
 
@@ -254,7 +256,7 @@ func (s *Server) accessLogSite(ctx context.Context, request *http.Request) (int6
 		site, err = db.GetDefaultSite(ctx, s.database)
 	}
 	if err != nil || site == nil {
-		return 0, nil
+		return 0, nil, nil
 	}
 	domains := map[string]bool{}
 	if normalized := normalizeAccessLogHost(site.Domain); normalized != "" {
@@ -274,10 +276,10 @@ func (s *Server) accessLogSite(ctx context.Context, request *http.Request) (int6
 			cache.hosts = map[string]accessLogCacheEntry{}
 			cache.refreshedAt = time.Now()
 		}
-		cache.hosts[host] = accessLogCacheEntry{siteID: site.ID, domains: domains}
+		cache.hosts[host] = accessLogCacheEntry{siteID: site.ID, domains: domains, site: site}
 		cache.mu.Unlock()
 	}
-	return site.ID, domains
+	return site.ID, domains, site
 }
 
 // accessLogRefererSiteID resolves the site owning a referer host. Unlike the
@@ -361,6 +363,82 @@ func refererHostName(referer string) string {
 		return ""
 	}
 	return normalizeAccessLogHost(parsed.Host)
+}
+
+// classifyAccessLogReferer separates a real navigation from a spoofed or
+// synthetic Referer header. The old implementation trusted any host that
+// belonged to the site, so scanners could label "/.aws/credentials" as an
+// internal link by pointing Referer at the same path. We now require both a
+// same-site host and, for error responses, an actual HTML page on disk. When a
+// browser supplies Sec-Fetch-Site, cross-site/none are honoured as well.
+//
+// Successful page views skip the filesystem check: they are not part of the
+// broken-link dashboard and the extra stat on every request would be wasteful.
+func (s *Server) classifyAccessLogReferer(ctx context.Context, request *http.Request, site *db.Site, siteID int64, domains map[string]bool, refererHost, referer string, status int) string {
+	if refererHost == "" {
+		return "none"
+	}
+	fetchSite := strings.ToLower(strings.TrimSpace(request.Header.Get("Sec-Fetch-Site")))
+	if fetchSite == "cross-site" {
+		return "external"
+	}
+	internalHost := refererHost == normalizeAccessLogHost(requestHost(request)) || domains[refererHost]
+	if !internalHost && s.accessLogRefererSiteID(ctx, refererHost) != siteID {
+		return "external"
+	}
+	if fetchSite == "none" {
+		return "none"
+	}
+	if status >= http.StatusBadRequest && !s.refererPageServed(site, referer) {
+		// Keep the row for diagnostics, but do not let it inflate the
+		// "internal dead links" KPI. It will be shown as an invalid referer.
+		return "invalid"
+	}
+	return "internal"
+}
+
+func (s *Server) refererPageServed(site *db.Site, referer string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(referer))
+	if err != nil {
+		return false
+	}
+	if parsed.Path == "" {
+		parsed.Path = "/"
+	}
+	dirs := s.siteServingDirs(site)
+	if len(dirs) == 0 {
+		return false
+	}
+	return s.pageServed(dirs, parsed.Path)
+}
+
+// pageServed is pathServed with a page-only contract: assets, XML, JSON and
+// other non-HTML files are valid files but are not pages a visitor can navigate
+// from. Directory URLs are accepted when they contain index.html.
+func (s *Server) pageServed(dirs []string, urlPath string) bool {
+	relative := strings.Trim(path.Clean("/"+strings.ReplaceAll(urlPath, `\`, "/")), "/")
+	if relative == "" || relative == "." {
+		relative = "index.html"
+	}
+	extension := strings.ToLower(path.Ext(relative))
+	for _, dir := range dirs {
+		target := filepath.Join(dir, filepath.FromSlash(relative))
+		if stat, err := os.Stat(target); err == nil {
+			if stat.IsDir() {
+				if fileExistsInDir(target, "index.html") {
+					return true
+				}
+				continue
+			}
+			// Only HTML files are navigation pages. Check the extension after
+			// the stat so a directory such as /release-1.2/ still works.
+			return extension == "" || extension == ".html" || extension == ".htm"
+		}
+		if fileExistsInDir(target, "index.html") {
+			return true
+		}
+	}
+	return false
 }
 
 // userAgentInfo is a coarse, provider-independent classification used for
@@ -545,22 +623,23 @@ type AccessLogItem struct {
 
 // AccessLogMetrics is the dashboard headline block for one site.
 type AccessLogMetrics struct {
-	TodayVisits       int64  `json:"today_visits"`
-	TodayErrors       int64  `json:"today_errors"`
-	RecentVisits      int64  `json:"recent_visits"`
-	RecentErrors      int64  `json:"recent_errors"`
-	RecentUsers       int64  `json:"recent_users"`
-	RecentNewUsers    int64  `json:"recent_new_users"`
-	RecentPCUsers     int64  `json:"recent_pc_users"`
-	RecentMobileUsers int64  `json:"recent_mobile_users"`
-	TotalErrors       int64  `json:"total_errors"`
-	TotalNotFound     int64  `json:"total_404_errors"`
-	RecentNotFound    int64  `json:"recent_404_errors"`
-	InternalNotFound  int64  `json:"internal_404_errors"`
-	TotalPages        int64  `json:"total_pages"`
-	TotalRequests     int64  `json:"total_requests"`
-	RetentionDays     int    `json:"retention_days"`
-	DayKey            string `json:"day_key"`
+	TodayVisits           int64  `json:"today_visits"`
+	TodayErrors           int64  `json:"today_errors"`
+	RecentVisits          int64  `json:"recent_visits"`
+	RecentErrors          int64  `json:"recent_errors"`
+	RecentUsers           int64  `json:"recent_users"`
+	RecentNewUsers        int64  `json:"recent_new_users"`
+	RecentPCUsers         int64  `json:"recent_pc_users"`
+	RecentMobileUsers     int64  `json:"recent_mobile_users"`
+	TotalErrors           int64  `json:"total_errors"`
+	TotalNotFound         int64  `json:"total_404_errors"`
+	RecentNotFound        int64  `json:"recent_404_errors"`
+	InternalNotFound      int64  `json:"internal_404_errors"`
+	InternalNotFoundPaths int64  `json:"internal_404_paths"`
+	TotalPages            int64  `json:"total_pages"`
+	TotalRequests         int64  `json:"total_requests"`
+	RetentionDays         int    `json:"retention_days"`
+	DayKey                string `json:"day_key"`
 }
 
 // AccessLogPageStat is one row of the popular page ranking.
@@ -632,7 +711,7 @@ func parseAccessLogFilter(values url.Values) AccessLogFilter {
 var accessLogKinds = map[string]bool{"": true, "all": true, "page": true, "error": true}
 var accessLogAgentKinds = map[string]bool{"": true, "all": true, "browser": true, "bot": true, "tool": true, "other": true}
 var accessLogDeviceKinds = map[string]bool{"": true, "all": true, "desktop": true, "mobile": true, "tablet": true, "other": true}
-var accessLogRefererKinds = map[string]bool{"": true, "all": true, "internal": true, "external": true, "none": true}
+var accessLogRefererKinds = map[string]bool{"": true, "all": true, "internal": true, "external": true, "none": true, "invalid": true}
 var accessLogStatusModes = map[string]bool{"": true, "all": true, "errors": true, "404": true, "4xx": true, "5xx": true, "200": true, "3xx": true}
 var accessLogWindows = map[string]bool{"": true, "all": true, "today": true, "1h": true, "24h": true, "3d": true}
 
@@ -754,19 +833,20 @@ func (s *Server) accessLogSummary(ctx context.Context, siteID int64) (AccessLogS
 	summary.Metrics.RetentionDays = s.accessLogs.retention()
 
 	var row struct {
-		totalRows      sql.NullInt64
-		todayVisits    sql.NullInt64
-		todayErrors    sql.NullInt64
-		recentVisits   sql.NullInt64
-		recentErrors   sql.NullInt64
-		totalErrors    sql.NullInt64
-		totalNotFound  sql.NullInt64
-		recentNotFound sql.NullInt64
-		internalNotF   sql.NullInt64
-		totalPages     sql.NullInt64
-		recentUsers    sql.NullInt64
-		recentPC       sql.NullInt64
-		recentMobile   sql.NullInt64
+		totalRows         sql.NullInt64
+		todayVisits       sql.NullInt64
+		todayErrors       sql.NullInt64
+		recentVisits      sql.NullInt64
+		recentErrors      sql.NullInt64
+		totalErrors       sql.NullInt64
+		totalNotFound     sql.NullInt64
+		recentNotFound    sql.NullInt64
+		internalNotF      sql.NullInt64
+		internalNotFPaths sql.NullInt64
+		totalPages        sql.NullInt64
+		recentUsers       sql.NullInt64
+		recentPC          sql.NullInt64
+		recentMobile      sql.NullInt64
 	}
 	err := s.database.QueryRowContext(ctx, `SELECT
 			COUNT(*),
@@ -778,13 +858,14 @@ func (s *Server) accessLogSummary(ctx context.Context, siteID int64) (AccessLogS
 			COALESCE(SUM(CASE WHEN "status" = 404 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN "status" = 404 AND "visited_at" >= datetime('now', '-24 hours') THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN "status" = 404 AND "referer_kind" = 'internal' THEN 1 ELSE 0 END), 0),
+			COUNT(DISTINCT CASE WHEN "status" = 404 AND "referer_kind" = 'internal' THEN "path" END),
 			COUNT(DISTINCT CASE WHEN "kind" = 'page' AND "status" = 200 THEN "path" END),
 			COUNT(DISTINCT CASE WHEN "kind" = 'page' AND "agent_kind" <> 'bot' AND "ip" <> '' AND "visited_at" >= datetime('now', '-24 hours') THEN "ip" END),
 			COUNT(DISTINCT CASE WHEN "kind" = 'page' AND "agent_kind" <> 'bot' AND "ip" <> '' AND "device_kind" = 'desktop' AND "visited_at" >= datetime('now', '-24 hours') THEN "ip" END),
 			COUNT(DISTINCT CASE WHEN "kind" = 'page' AND "agent_kind" <> 'bot' AND "ip" <> '' AND "device_kind" = 'mobile' AND "visited_at" >= datetime('now', '-24 hours') THEN "ip" END)
 		FROM "`+db.AccessLogTable+`" WHERE "site_id" = ?`, dayKey, dayKey, siteID).
 		Scan(&row.totalRows, &row.todayVisits, &row.todayErrors, &row.recentVisits, &row.recentErrors,
-			&row.totalErrors, &row.totalNotFound, &row.recentNotFound, &row.internalNotF, &row.totalPages,
+			&row.totalErrors, &row.totalNotFound, &row.recentNotFound, &row.internalNotF, &row.internalNotFPaths, &row.totalPages,
 			&row.recentUsers, &row.recentPC, &row.recentMobile)
 	if err != nil {
 		return summary, err
@@ -798,6 +879,7 @@ func (s *Server) accessLogSummary(ctx context.Context, siteID int64) (AccessLogS
 	summary.Metrics.TotalNotFound = row.totalNotFound.Int64
 	summary.Metrics.RecentNotFound = row.recentNotFound.Int64
 	summary.Metrics.InternalNotFound = row.internalNotF.Int64
+	summary.Metrics.InternalNotFoundPaths = row.internalNotFPaths.Int64
 	summary.Metrics.TotalPages = row.totalPages.Int64
 	summary.Metrics.RecentUsers = row.recentUsers.Int64
 	summary.Metrics.RecentPCUsers = row.recentPC.Int64

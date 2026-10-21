@@ -106,3 +106,24 @@ func TestRouteValidation(t *testing.T) {
 		t.Fatalf("cover id filename = %q, err=%v", got, err)
 	}
 }
+
+func TestIsNotFoundPage(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want bool
+	}{
+		{"404.html", true},
+		{"es/404.html", true},
+		{"es\\404.html", true},
+		{"404.htm", true},
+		{"products/404.html", true},
+		{"404.html.bak", false},
+		{"1404.html", false},
+		{"404/", false},
+		{"", false},
+	} {
+		if got := IsNotFoundPage(tc.in); got != tc.want {
+			t.Errorf("IsNotFoundPage(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}

@@ -16,6 +16,7 @@ import (
 
 	"gocms/internal/captcha"
 	"gocms/internal/db"
+	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
 	"gocms/internal/templatelabel"
 	"gocms/internal/theme"
@@ -121,6 +122,13 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 	cleanPath := request.URL.Path
 	if cleanPath != "/" {
 		cleanPath = strings.TrimSuffix(cleanPath, "/")
+	}
+	// /404.html is a real file and therefore normally answers 200 when opened
+	// directly. It is still an error document: keep it out of search indexes and
+	// out of every cache, even when a browser requests it without an error path.
+	if routing.IsNotFoundPage(cleanPath) {
+		response.Header().Set("X-Robots-Tag", "noindex, follow")
+		response.Header().Set("Cache-Control", "no-store")
 	}
 	if !strings.HasPrefix(strings.ToLower(cleanPath), "/api/") {
 		if s.checkAliasRedirect(response, request) {
@@ -441,25 +449,15 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 				http.Error(response, "站点已停用", http.StatusForbidden)
 				return
 			}
-			siteDir := matched.OutputDir
-			if siteDir == "" && matched.ID > 0 {
-				siteDir = fmt.Sprintf("%d", matched.ID)
+			relPath := strings.TrimPrefix(clean, "/")
+			if relPath == "" {
+				relPath = "index.html"
 			}
-			if siteDir != "" {
-				if !filepath.IsAbs(siteDir) {
-					primaryDir := filepath.Join(s.siteRoot, siteDir)
-					if _, err := os.Stat(primaryDir); os.IsNotExist(err) && matched.OutputDir == "" {
-						legacySitesDir := filepath.Join(s.siteRoot, "sites", siteDir)
-						if stat, err := os.Stat(legacySitesDir); err == nil && stat.IsDir() {
-							primaryDir = legacySitesDir
-						}
-					}
-					siteDir = primaryDir
-				}
-				relPath := strings.TrimPrefix(clean, "/")
-				if relPath == "" {
-					relPath = "index.html"
-				}
+			// Resolve through the same ordered directory list used by the 404
+			// handler. The default site may fall back to siteRoot, and a missing
+			// per-site output directory must not turn an existing siteRoot file
+			// (including /404.html itself) into a 404 response.
+			for _, siteDir := range s.siteServingDirs(matched) {
 				targetFile := filepath.Join(siteDir, filepath.FromSlash(relPath))
 				if stat, err := os.Stat(targetFile); err == nil {
 					if !stat.IsDir() || fileExistsInDir(targetFile, "index.html") {
@@ -467,17 +465,17 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 						return
 					}
 				}
-				if s.legacyLanguagePrefixRedirect(response, request, matched) {
-					return
-				}
-				if s.serveSiteNotFound(response, request, matched, relPath) {
-					return
-				}
-				if !matched.IsDefault && matched.ID > 1 {
-					// Non-default sub-sites must never fall through to default site's files in siteRoot
-					http.NotFound(response, request)
-					return
-				}
+			}
+			if s.legacyLanguagePrefixRedirect(response, request, matched) {
+				return
+			}
+			if s.serveSiteNotFound(response, request, matched, relPath) {
+				return
+			}
+			if !matched.IsDefault && matched.ID > 1 {
+				// Non-default sub-sites must never fall through to default site's files in siteRoot
+				http.NotFound(response, request)
+				return
 			}
 		}
 	}

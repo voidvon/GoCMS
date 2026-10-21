@@ -15,6 +15,8 @@ func TestLLMSPublishedPages(t *testing.T) {
 	writeTemplate(t, web, "index.html", `<html><head><title>Example &amp; Company</title><meta content="Public &quot;guide&quot;" name="description"></head><body>private body</body></html>`)
 	writeTemplate(t, web, "en/arbitrary/a (1).html", `<head><title>English [title]</title><meta NAME="DESCRIPTION" content="Line&#10;two"></head>`)
 	writeTemplate(t, web, "sitemap.html", "ignored")
+	writeTemplate(t, web, "404.html", "ignored")
+	writeTemplate(t, web, "es/404.html", "ignored")
 	writeTemplate(t, web, "secret.txt", "ignored")
 	p := Publisher{Web: web, Data: data}
 	name, err := p.GenerateLLMS(context.Background())
@@ -27,7 +29,7 @@ func TestLLMSPublishedPages(t *testing.T) {
 			t.Fatalf("missing %q: %s", want, got)
 		}
 	}
-	for _, forbidden := range []string{"private body", "sitemap.html", "secret.txt"} {
+	for _, forbidden := range []string{"private body", "sitemap.html", "404.html", "secret.txt"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("unexpected %q", forbidden)
 		}

@@ -35,6 +35,25 @@ func TestServeSiteNotFoundPage(t *testing.T) {
 	if contentType := response.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
 		t.Fatalf("missing path content type = %q", contentType)
 	}
+	if cacheControl := response.Header().Get("Cache-Control"); !strings.Contains(cacheControl, "no-store") {
+		t.Fatalf("404 cache-control = %q, want no-store", cacheControl)
+	}
+	if robots := response.Header().Get("X-Robots-Tag"); !strings.Contains(robots, "noindex") {
+		t.Fatalf("404 x-robots-tag = %q, want noindex", robots)
+	}
+
+	// Opening the generated file directly is a 200, but it is still an error
+	// document and must not be indexed or cached.
+	direct := legacyRedirectRequest(t, server, http.MethodGet, "example.test", "/404.html")
+	if direct.Code != http.StatusOK {
+		t.Fatalf("direct 404.html status = %d, want 200", direct.Code)
+	}
+	if robots := direct.Header().Get("X-Robots-Tag"); !strings.Contains(robots, "noindex") {
+		t.Fatalf("direct 404.html x-robots-tag = %q, want noindex", robots)
+	}
+	if cacheControl := direct.Header().Get("Cache-Control"); !strings.Contains(cacheControl, "no-store") {
+		t.Fatalf("direct 404.html cache-control = %q, want no-store", cacheControl)
+	}
 
 	// 语言目录下的未命中路径优先使用该语言的 404 页面。
 	response = legacyRedirectRequest(t, server, http.MethodGet, "example.test", "/es/missing")

@@ -60,7 +60,7 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 	writeTemplate(t, templates, "index.html", `home={{setting "site_name"}} {{label "HOME-BANNER" .}} nav={{range navigation .}}{{.Name}}={{.URL}};{{end}}`)
 	writeTemplate(t, templates, "msg.html", `message`)
 	writeTemplate(t, templates, "search.html", `search`)
-	writeTemplate(t, templates, "404.html", `not-found lang={{.lang}} home={{.home_url}}`)
+	writeTemplate(t, templates, "404.html", `not-found lang={{.lang}} home={{.home_url}} is404={{.is_404}} robots={{.seo_robots}} title={{.seo_title}}`)
 	writeTemplate(t, templates, "lists/section.html", `list={{.category_name}} page={{.list_page}}/{{.content_count}} items={{range listItems .}}{{label "item-card" .}}{{.Title}}={{.URL}};{{end}}{{with listPagination .}}pages={{.Pages}} current={{.Page}}{{end}}`)
 	writeTemplate(t, templates, "details/item.html", `detail={{.title}} category={{.category_name}} root={{.category_root_name}} body={{.body}} previous={{.previous_url}} next={{.next_url}} related={{range relatedItems . 2}}{{.Title}}={{.URL}};{{end}}`)
 	writeTemplate(t, templates, "covers/landing.html", `cover={{.category_name}} children={{range listChildren .}}{{.Name}}={{.URL}};{{end}}`)
@@ -84,8 +84,11 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 			t.Fatalf("missing generated page %s: %v", relative, err)
 		}
 	}
-	if body := readGenerated(t, web, "404.html"); !strings.Contains(body, "not-found") {
+	if body := readGenerated(t, web, "404.html"); !strings.Contains(body, "not-found") || !strings.Contains(body, "is404=true") || !strings.Contains(body, "robots=noindex, follow") || !strings.Contains(body, "title=404") {
 		t.Fatalf("404 page body = %q", body)
+	}
+	if sitemap := readGenerated(t, web, "Sitemap.xml"); strings.Contains(sitemap, "404.html") {
+		t.Fatalf("sitemap must not advertise the 404 page: %s", sitemap)
 	}
 	// 主题没有 404 模板时仍可发布，只是不生成 404 页面。
 	if err := os.Remove(filepath.Join(templates, "404.html")); err != nil {

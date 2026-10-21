@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"gocms/internal/db"
+	"gocms/internal/routing"
 )
 
 const (
@@ -60,7 +61,6 @@ func (p Publisher) generateIndex(ctx context.Context, format string) (string, er
 		targetWeb = p.Web
 	}
 	web, err := filepath.Abs(targetWeb)
-
 
 	if err != nil {
 		return "", err
@@ -137,6 +137,12 @@ func publishedURLs(ctx context.Context, web string) ([]string, error) {
 		}
 		relative = filepath.ToSlash(relative)
 		if strings.EqualFold(relative, "sitemap.html") || strings.EqualFold(relative, "sitemap.xml") {
+			return nil
+		}
+		// 404 pages are generated for every language but are terminal error
+		// documents, never public content. Keep them out of sitemap.xml,
+		// sitemap.html and llms.txt even when a theme publishes them as files.
+		if routing.IsNotFoundPage(relative) {
 			return nil
 		}
 		extension := strings.ToLower(filepath.Ext(relative))

@@ -23,6 +23,20 @@ const (
 	PageTypeLink  = "link"
 )
 
+// NotFoundFileName is the conventional generated error document. Themes that
+// provide a 404 template publish this file at the site root and under each
+// language directory. Sitemap generation and static serving share this
+// definition so an error page can never be advertised as content.
+const NotFoundFileName = "404.html"
+
+// IsNotFoundPage reports whether a generated file or URL path is a 404
+// document. Only the basename is considered, so /404.html, /es/404.html and
+// Windows-style separators are all recognised without knowing site languages.
+func IsNotFoundPage(relative string) bool {
+	base := strings.ToLower(path.Base(strings.ReplaceAll(strings.TrimSpace(relative), `\`, "/")))
+	return base == "404.html" || base == "404.htm"
+}
+
 func NormalizePageType(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {

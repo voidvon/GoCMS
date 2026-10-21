@@ -109,8 +109,13 @@ func TestAccessLogRecordsPublicTraffic(t *testing.T) {
 	if status := publicRequest("example.test", "/logo.png", "", accessLogChromeUA).Code; status != http.StatusOK {
 		t.Fatalf("asset status = %d, want 200", status)
 	}
-	if status := publicRequest("example.test", "/missing-page", "https://example.test/other", accessLogChromeUA).Code; status != http.StatusNotFound {
+	if status := publicRequest("example.test", "/missing-page", "https://example.test/", accessLogChromeUA).Code; status != http.StatusNotFound {
 		t.Fatalf("missing page status = %d, want 404", status)
+	}
+	// A same-host Referer that points at a non-existent path is a spoofed
+	// scanner header, not an internal navigation.
+	if status := publicRequest("example.test", "/missing-invalid", "https://example.test/.aws/credentials", accessLogChromeUA).Code; status != http.StatusNotFound {
+		t.Fatalf("invalid referer status = %d, want 404", status)
 	}
 	if status := publicRequest("example.test", "/css/missing.css", "https://external.test/page", accessLogChromeUA).Code; status != http.StatusNotFound {
 		t.Fatalf("missing asset status = %d, want 404", status)
@@ -137,23 +142,24 @@ func TestAccessLogRecordsPublicTraffic(t *testing.T) {
 		args  []any
 		want  int64
 	}{
-		{"all rows", `SELECT COUNT(*) FROM ` + table, nil, 8},
-		{"single site", `SELECT COUNT(*) FROM ` + table + ` WHERE "site_id" = 1`, nil, 8},
+		{"all rows", `SELECT COUNT(*) FROM ` + table, nil, 9},
+		{"single site", `SELECT COUNT(*) FROM ` + table + ` WHERE "site_id" = 1`, nil, 9},
 		{"page views", `SELECT COUNT(*) FROM ` + table + ` WHERE "kind" = 'page'`, nil, 6},
-		{"errors", `SELECT COUNT(*) FROM ` + table + ` WHERE "kind" = 'error' AND "status" = 404`, nil, 2},
+		{"errors", `SELECT COUNT(*) FROM ` + table + ` WHERE "kind" = 'error' AND "status" = 404`, nil, 3},
 		{"successful asset skipped", `SELECT COUNT(*) FROM ` + table + ` WHERE "path" = '/logo.png'`, nil, 0},
 		{"api skipped", `SELECT COUNT(*) FROM ` + table + ` WHERE "path" LIKE '/api/%'`, nil, 0},
 		{"admin skipped", `SELECT COUNT(*) FROM ` + table + ` WHERE "path" LIKE '/admin%'`, nil, 0},
 		{"redirects skipped", `SELECT COUNT(*) FROM ` + table + ` WHERE "status" >= 300 AND "status" < 400`, nil, 0},
-		{"browser rows", `SELECT COUNT(*) FROM ` + table + ` WHERE "agent_kind" = 'browser'`, nil, 6},
+		{"browser rows", `SELECT COUNT(*) FROM ` + table + ` WHERE "agent_kind" = 'browser'`, nil, 7},
 		{"bot rows", `SELECT COUNT(*) FROM ` + table + ` WHERE "agent_kind" = 'bot'`, nil, 1},
 		{"tool rows", `SELECT COUNT(*) FROM ` + table + ` WHERE "agent_kind" = 'tool'`, nil, 1},
 		{"mobile rows", `SELECT COUNT(*) FROM ` + table + ` WHERE "device_kind" = 'mobile'`, nil, 1},
-		{"desktop rows", `SELECT COUNT(*) FROM ` + table + ` WHERE "device_kind" = 'desktop'`, nil, 5},
+		{"desktop rows", `SELECT COUNT(*) FROM ` + table + ` WHERE "device_kind" = 'desktop'`, nil, 6},
 		{"internal referer", `SELECT COUNT(*) FROM ` + table + ` WHERE "referer_kind" = 'internal'`, nil, 3},
 		{"external referer", `SELECT COUNT(*) FROM ` + table + ` WHERE "referer_kind" = 'external'`, nil, 1},
-		{"recorded ip", `SELECT COUNT(*) FROM ` + table + ` WHERE "ip" = '192.0.2.1'`, nil, 8},
-		{"recorded content type", `SELECT COUNT(*) FROM ` + table + ` WHERE "status" = 404 AND "content_type" <> ''`, nil, 2},
+		{"invalid referer", `SELECT COUNT(*) FROM ` + table + ` WHERE "referer_kind" = 'invalid'`, nil, 1},
+		{"recorded ip", `SELECT COUNT(*) FROM ` + table + ` WHERE "ip" = '192.0.2.1'`, nil, 9},
+		{"recorded content type", `SELECT COUNT(*) FROM ` + table + ` WHERE "status" = 404 AND "content_type" <> ''`, nil, 3},
 	}
 	for _, check := range checks {
 		if got := count(check.query, check.args...); got != check.want {
@@ -344,6 +350,9 @@ func TestAccessLogAdminEndpoints(t *testing.T) {
 	}
 	if stats.Access.Metrics.InternalNotFound != 2 {
 		t.Errorf("stats access internal_404_errors = %d, want 2", stats.Access.Metrics.InternalNotFound)
+	}
+	if stats.Access.Metrics.InternalNotFoundPaths != 1 {
+		t.Errorf("stats access internal_404_paths = %d, want 1", stats.Access.Metrics.InternalNotFoundPaths)
 	}
 	if stats.Access.Metrics.TotalPages != 2 {
 		t.Errorf("stats access total_pages = %d, want 2", stats.Access.Metrics.TotalPages)
@@ -546,5 +555,58 @@ func TestAccessLogRefererSiteResolution(t *testing.T) {
 	}
 	if kind := kindFor("spiraxsteam.com"); kind != "external" {
 		t.Errorf("外部域名 referer = %q, want external", kind)
+	}
+}
+
+func TestAccessLogFilterAcceptsInvalidReferer(t *testing.T) {
+	filter := normalizeAccessLogFilter(AccessLogFilter{RefererKind: "invalid"})
+	if filter.RefererKind != "invalid" {
+		t.Fatalf("referer kind = %q, want invalid", filter.RefererKind)
+	}
+}
+
+func TestAccessLogRefererFetchMetadata(t *testing.T) {
+	server, database, _, siteDir := newSiteAdminTestServer(t)
+	if err := os.WriteFile(filepath.Join(siteDir, "index.html"), []byte("<html>home</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE "gocms_site" SET "domain" = 'example.test' WHERE "is_default" = 1`); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name      string
+		path      string
+		referer   string
+		fetchSite string
+		want      string
+	}{
+		{"cross-site wins", "/missing-cross", "https://example.test/", "cross-site", "external"},
+		{"same-origin valid page", "/missing-valid", "https://example.test/", "same-origin", "internal"},
+		{"same-origin missing page", "/missing-fake", "https://example.test/nope", "same-origin", "invalid"},
+		{"explicit none", "/missing-none", "https://example.test/", "none", "none"},
+		{"no header falls back to filesystem", "/missing-fallback", "https://example.test/", "", "internal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			request.Host = "example.test"
+			request.Header.Set("User-Agent", accessLogChromeUA)
+			request.Header.Set("Referer", tc.referer)
+			if tc.fetchSite != "" {
+				request.Header.Set("Sec-Fetch-Site", tc.fetchSite)
+			}
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404", response.Code)
+			}
+			var got string
+			if err := database.QueryRow(`SELECT "referer_kind" FROM "`+db.AccessLogTable+`" WHERE "path" = ? ORDER BY "id" DESC LIMIT 1`, tc.path).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("referer_kind = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
