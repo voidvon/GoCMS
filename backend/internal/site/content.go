@@ -101,13 +101,9 @@ func (s *Server) adminContent(response http.ResponseWriter, request *http.Reques
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	result, err := s.queryContent(request.Context(), siteID, query, categoryID, includeChildren, lang, page, pageSize, false)
+	result, err := s.queryAdminContent(request.Context(), siteID, query, categoryID, includeChildren, lang, page, pageSize)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
-		return
-	}
-	if err := s.populateContentURLs(request.Context(), &result); err != nil {
-		http.Error(response, "content route error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(response, http.StatusOK, result)
@@ -195,7 +191,6 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 	}
 	s.saveContent(response, request, id)
 }
-
 
 func (s *Server) saveContent(response http.ResponseWriter, request *http.Request, id int64) {
 	var payload contentPayload
@@ -505,6 +500,48 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 		lang = defaultLang
 	}
 
+	rows, total, err := s.queryContentRows(ctx, siteID, query, categoryID, includeChildren, lang, page, pageSize, visibleOnly, `
+		"id", COALESCE("route_key", ''), COALESCE("category_id", 0), COALESCE("title", ''),
+		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
+		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("seo_title", ''), COALESCE("description", ''),
+		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0),
+		       COALESCE("model_id", 1), COALESCE("extra_data", '{}')`)
+	if err != nil {
+		return ContentPage{}, err
+	}
+	defer rows.Close()
+	items := make([]Content, 0, pageSize)
+	for rows.Next() {
+		item, err := scanContent(rows)
+		if err != nil {
+			return ContentPage{}, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return ContentPage{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return ContentPage{}, err
+	}
+
+	if len(items) > 0 {
+		ids := make([]int64, len(items))
+		for i := range items {
+			ids[i] = items[i].ID
+		}
+		allTrans, _ := s.loadContentTranslationsForIDs(ctx, ids)
+		for i := range items {
+			s.applyContentTranslation(ctx, &items[i], allTrans[items[i].ID], lang, defaultLang, fallbackLang)
+		}
+	}
+	return ContentPage{Query: query, Page: page, PageSize: pageSize, Total: total, Items: items}, nil
+}
+
+// queryContentRows shares filtering, permissions, search ranking and pagination
+// between the compact admin list and full public content queries. Columns are
+// supplied only by these internal callers, never by request parameters.
+func (s *Server) queryContentRows(ctx context.Context, siteID int64, query string, categoryID int64, includeChildren bool, lang string, page, pageSize int, visibleOnly bool, columns string) (*sql.Rows, int64, error) {
 	where := "1=1" + contentScopeSQL(ctx)
 	var args []any
 	if siteID > 0 {
@@ -544,7 +581,7 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 	}
 	var total int64
 	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "gocms_content" WHERE `+where, args...).Scan(&total); err != nil {
-		return ContentPage{}, err
+		return nil, 0, err
 	}
 
 	// 搜索时按相关性排序，译文（当前语言）与基准字段同等参与，因为页面展示的就是译文。
@@ -578,38 +615,10 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 	selectArgs = append(selectArgs, args...)
 	selectArgs = append(selectArgs, orderArgs...)
 	selectArgs = append(selectArgs, pageSize, (page-1)*pageSize)
-	statement := `
-		SELECT "id", COALESCE("route_key", ''), COALESCE("category_id", 0), COALESCE("title", ''),
-		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
-		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("seo_title", ''), COALESCE("description", ''),
-		       COALESCE("sort_order", 0), COALESCE("featured", 0), COALESCE("visible", 0),
-		       COALESCE("model_id", 1), COALESCE("extra_data", '{}')
+	statement := `SELECT ` + columns + `
 		FROM ` + from + ` WHERE ` + where + ` ORDER BY ` + orderBy + ` LIMIT ? OFFSET ?`
 	rows, err := s.database.QueryContext(ctx, statement, selectArgs...)
-	if err != nil {
-		return ContentPage{}, err
-	}
-	items := make([]Content, 0, pageSize)
-	for rows.Next() {
-		item, err := scanContent(rows)
-		if err != nil {
-			return ContentPage{}, err
-		}
-		items = append(items, item)
-	}
-	_ = rows.Close()
-
-	if len(items) > 0 {
-		ids := make([]int64, len(items))
-		for i := range items {
-			ids[i] = items[i].ID
-		}
-		allTrans, _ := s.loadContentTranslationsForIDs(ctx, ids)
-		for i := range items {
-			s.applyContentTranslation(ctx, &items[i], allTrans[items[i].ID], lang, defaultLang, fallbackLang)
-		}
-	}
-	return ContentPage{Query: query, Page: page, PageSize: pageSize, Total: total, Items: items}, nil
+	return rows, total, err
 }
 
 func (s *Server) applyContentTranslation(ctx context.Context, item *Content, translations map[string]ContentTranslationItem, lang, defaultLang, fallbackLang string) {
@@ -793,7 +802,6 @@ func (s *Server) contentJSONItem(response http.ResponseWriter, request *http.Req
 	}
 	writeJSON(response, http.StatusOK, item)
 }
-
 
 func (s *Server) contentDetailURL(ctx context.Context, categoryID int64, routeKey string) (string, error) {
 	directory := routing.DefaultDetailPath

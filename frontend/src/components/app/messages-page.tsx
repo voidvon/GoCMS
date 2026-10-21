@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useCallback, useEffect, useState } from "react"
 import {
   Check,
@@ -75,9 +76,9 @@ export function MessagesPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
 
   // Feedback Item Dialogs
-  const [viewingItem, setViewingItem] = useState<FeedbackItem | null>(null)
+  const [viewingItem, setViewingItem, viewingItemDialog] = useDialogState<FeedbackItem>()
   const [updatingState, setUpdatingState] = useState(false)
-  const [deletingItem, setDeletingItem] = useState<FeedbackItem | null>(null)
+  const [deletingItem, setDeletingItem, deletingItemDialog] = useDialogState<FeedbackItem>()
   const [batchDeleting, setBatchDeleting] = useState(false)
 
   // Classes State
@@ -85,8 +86,8 @@ export function MessagesPage() {
   const [editingClass, setEditingClass] = useState<Partial<FeedbackClass> | null>(null)
   const [classDialogOpen, setClassDialogOpen] = useState(false)
   const [classSaving, setClassSaving] = useState(false)
-  const [classDeleting, setClassDeleting] = useState<FeedbackClass | null>(null)
-  const [codeModalClass, setCodeModalClass] = useState<FeedbackClass | null>(null)
+  const [classDeleting, setClassDeleting, classDeletingDialog] = useDialogState<FeedbackClass>()
+  const [codeModalClass, setCodeModalClass, codeModalClassDialog] = useDialogState<FeedbackClass>()
   const [copiedCode, setCopiedCode] = useState(false)
 
   // Fields State
@@ -94,7 +95,7 @@ export function MessagesPage() {
   const [editingField, setEditingField] = useState<Partial<FeedbackField> | null>(null)
   const [fieldDialogOpen, setFieldDialogOpen] = useState(false)
   const [fieldSaving, setFieldSaving] = useState(false)
-  const [fieldDeleting, setFieldDeleting] = useState<FeedbackField | null>(null)
+  const [fieldDeleting, setFieldDeleting, fieldDeletingDialog] = useDialogState<FeedbackField>()
 
   // Load Feedbacks
   const loadFeedbacks = useCallback(() => {
@@ -634,7 +635,7 @@ export function MessagesPage() {
       </Tabs>
 
       {/* Dialog: View Feedback Item Detail */}
-      <Dialog open={Boolean(viewingItem)} onOpenChange={(open) => { if (!open) setViewingItem(null) }}>
+      <Dialog {...viewingItemDialog} onOpenChange={(open) => { if (!open) setViewingItem(null) }}>
         {viewingItem ? (
           <DialogContent className="max-w-3xl">
             <DialogHeader>
@@ -873,7 +874,7 @@ export function MessagesPage() {
       </Dialog>
 
       {/* Dialog: View Form Code */}
-      <Dialog open={Boolean(codeModalClass)} onOpenChange={(open) => { if (!open) setCodeModalClass(null) }}>
+      <Dialog {...codeModalClassDialog} onOpenChange={(open) => { if (!open) setCodeModalClass(null) }}>
         {codeModalClass ? (
           <DialogContent className="max-w-xl">
             <DialogHeader>
@@ -1019,7 +1020,7 @@ export function MessagesPage() {
 
       {/* Confirm Dialogs */}
       <ConfirmDialog
-        open={Boolean(deletingItem)}
+        {...deletingItemDialog}
         onOpenChange={(open) => {
           if (!open) setDeletingItem(null)
         }}
@@ -1037,7 +1038,7 @@ export function MessagesPage() {
         onConfirm={confirmBatchDelete}
       />
       <ConfirmDialog
-        open={Boolean(classDeleting)}
+        {...classDeletingDialog}
         onOpenChange={(open) => {
           if (!open) setClassDeleting(null)
         }}
@@ -1047,7 +1048,7 @@ export function MessagesPage() {
         onConfirm={confirmDeleteClass}
       />
       <ConfirmDialog
-        open={Boolean(fieldDeleting)}
+        {...fieldDeletingDialog}
         onOpenChange={(open) => {
           if (!open) setFieldDeleting(null)
         }}

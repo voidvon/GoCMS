@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useState } from "react"
 import {
   LoaderCircle,
@@ -81,7 +82,7 @@ export function LanguagesPage() {
   const [submitting, setSubmitting] = useState(false)
 
   // Delete dialog state
-  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [deletingId, setDeletingId, deletingIdDialog] = useDialogState<number>()
 
   function openCreate() {
     setEditingLang(null)
@@ -612,7 +613,7 @@ export function LanguagesPage() {
 
       {/* Delete Confirmation */}
       <ConfirmDialog
-        open={deletingId !== null}
+        {...deletingIdDialog}
         onOpenChange={(open) => {
           if (!open) setDeletingId(null)
         }}

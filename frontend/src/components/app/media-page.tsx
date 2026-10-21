@@ -8,6 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ConfirmDialog, InlineAlert, SearchField } from "@/components/app/app-ui"
 import { PaginatedTable } from "@/components/app/paginated-table"
 import { TimeText } from "@/components/app/time-text"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { useDialogState } from "@/lib/use-dialog-state"
 
 const pageSize = 20
 
@@ -15,8 +17,10 @@ function fileSize(bytes: number) {
   return bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-function MediaDetails({ asset, onClose, onDeleted }: {
+function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }: {
   asset: MediaAsset
+  open: boolean
+  onOpenChangeComplete: (open: boolean) => void
   onClose: () => void
   onDeleted: () => void
 }) {
@@ -51,6 +55,7 @@ function MediaDetails({ asset, onClose, onDeleted }: {
     setError("")
     try {
       await deleteMedia(asset.id)
+      setConfirmOpen(false)
       onDeleted()
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除附件失败")
@@ -63,55 +68,59 @@ function MediaDetails({ asset, onClose, onDeleted }: {
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open && !deleting) onClose() }}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="break-all pr-6">{asset.original_name || "未命名图片"}</DialogTitle>
-          <DialogDescription>附件详情与内容引用</DialogDescription>
-        </DialogHeader>
-        <div className="flex min-h-40 items-center justify-center rounded-lg border bg-muted/40 p-3">
-          <img src={asset.url} alt={asset.original_name} className="max-h-72 max-w-full object-contain" />
-        </div>
-        {error ? <InlineAlert>{error}</InlineAlert> : null}
-        {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
-        <dl className="grid grid-cols-2 gap-3 text-sm">
-          <div><dt className="text-muted-foreground">格式 / 大小</dt><dd>{asset.mime_type} · {fileSize(asset.size_bytes)}</dd></div>
-          <div><dt className="text-muted-foreground">尺寸</dt><dd>{asset.width} × {asset.height}</dd></div>
-          <div><dt className="text-muted-foreground">上传人</dt><dd className="break-all">{asset.uploaded_by || "未知"}</dd></div>
-          <div><dt className="text-muted-foreground">上传时间</dt><dd><TimeText value={asset.created_at} /></dd></div>
-        </dl>
-        <div className="space-y-2">
-          <p className="text-sm font-medium">访问地址</p>
-          <p className="select-all break-all rounded-md bg-muted p-2 text-xs">{new URL(asset.url, window.location.origin).href}</p>
-          <Button variant="outline" size="sm" onClick={() => void copyURL()}><Copy />复制链接</Button>
-        </div>
-        <div className="space-y-2 border-t pt-4">
-          <p className="text-sm font-medium">内容引用{detail ? `（${detail.references.length} 处）` : ""}</p>
-          <p className="text-xs text-muted-foreground">记录正文图片和封面的引用；无记录不代表全站未使用。</p>
-          {!detail ? (
-            error ? <Button variant="outline" onClick={() => { setError(""); setRetry((value) => value + 1) }}>重试加载详情</Button>
-              : <p role="status" className="text-sm text-muted-foreground">正在加载引用…</p>
-          ) : detail.references.length === 0 ? (
-            <p className="text-sm text-muted-foreground">暂无内容引用记录</p>
-          ) : (
-            <ul className="max-h-48 space-y-2 overflow-y-auto text-sm">
-              {detail.references.map((reference) => (
-                <li key={`${reference.content_id}:${reference.field_name}`} className="flex items-start justify-between gap-3 rounded-md border p-2">
-                  <a className="min-w-0 break-all underline underline-offset-4" href={`/admin/content?edit=${reference.content_id}`}>
-                    {reference.title || `内容 #${reference.content_id}`}
-                  </a>
-                  <span className="shrink-0 text-muted-foreground">{reference.field_name === "body" ? "正文" : reference.field_name === "cover_image" ? "封面" : reference.field_name}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div className="flex justify-end gap-2 border-t pt-4">
-          <Button variant="outline" disabled={deleting} onClick={onClose}>关闭</Button>
-          <Button variant="destructive" disabled={!detail || detail.references.length > 0 || deleting} onClick={() => setConfirmOpen(true)}>
-            <Trash2 />{detail && detail.references.length > 0 ? "内容引用中，不能删除" : "删除附件"}
-          </Button>
-        </div>
+    <Dialog open={open} onOpenChange={(open) => { if (!open && !deleting) onClose() }} onOpenChangeComplete={onOpenChangeComplete}>
+      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl">
+        <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-4 pr-2">
+          <DialogHeader>
+            <DialogTitle className="break-all pr-6">{asset.original_name || "未命名图片"}</DialogTitle>
+            <DialogDescription>附件详情与内容引用</DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-40 items-center justify-center rounded-lg border bg-muted/40 p-3">
+            <img src={asset.url} alt={asset.original_name} className="max-h-72 max-w-full object-contain" />
+          </div>
+          {error ? <InlineAlert>{error}</InlineAlert> : null}
+          {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
+          <dl className="grid grid-cols-2 gap-3 text-sm">
+            <div><dt className="text-muted-foreground">格式 / 大小</dt><dd>{asset.mime_type} · {fileSize(asset.size_bytes)}</dd></div>
+            <div><dt className="text-muted-foreground">尺寸</dt><dd>{asset.width} × {asset.height}</dd></div>
+            <div><dt className="text-muted-foreground">上传人</dt><dd className="break-all">{asset.uploaded_by || "未知"}</dd></div>
+            <div><dt className="text-muted-foreground">上传时间</dt><dd><TimeText value={asset.created_at} /></dd></div>
+          </dl>
+          <div className="space-y-2">
+            <p className="text-sm font-medium">访问地址</p>
+            <p className="select-all break-all rounded-md bg-muted p-2 text-xs">{new URL(asset.url, window.location.origin).href}</p>
+            <Button variant="outline" size="sm" onClick={() => void copyURL()}><Copy />复制链接</Button>
+          </div>
+          <div className="space-y-2 border-t pt-4">
+            <p className="text-sm font-medium">内容引用{detail ? `（${detail.references.length} 处）` : ""}</p>
+            <p className="text-xs text-muted-foreground">记录正文图片和封面的引用；无记录不代表全站未使用。</p>
+            {!detail ? (
+              error ? <Button variant="outline" onClick={() => { setError(""); setRetry((value) => value + 1) }}>重试加载详情</Button>
+                : <p role="status" className="text-sm text-muted-foreground">正在加载引用…</p>
+            ) : detail.references.length === 0 ? (
+              <p className="text-sm text-muted-foreground">暂无内容引用记录</p>
+            ) : (
+              <ScrollArea className="max-h-48" contentClassName="text-sm">
+                <ul className="space-y-2">
+                  {detail.references.map((reference) => (
+                    <li key={`${reference.content_id}:${reference.field_name}`} className="flex items-start justify-between gap-3 rounded-md border p-2">
+                      <a className="min-w-0 break-all underline underline-offset-4" href={`/admin/content?edit=${reference.content_id}`}>
+                        {reference.title || `内容 #${reference.content_id}`}
+                      </a>
+                      <span className="shrink-0 text-muted-foreground">{reference.field_name === "body" ? "正文" : reference.field_name === "cover_image" ? "封面" : reference.field_name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </ScrollArea>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 border-t pt-4">
+            <Button variant="outline" disabled={deleting} onClick={onClose}>关闭</Button>
+            <Button variant="destructive" disabled={!detail || detail.references.length > 0 || deleting} onClick={() => setConfirmOpen(true)}>
+              <Trash2 />{detail && detail.references.length > 0 ? "内容引用中，不能删除" : "删除附件"}
+            </Button>
+          </div>
+        </ScrollArea>
         <ConfirmDialog open={confirmOpen} onOpenChange={(open) => { if (!deleting) setConfirmOpen(open) }}
           title="删除附件？" description="将永久删除该图片文件和附件记录。请确认它未被其他页面或外部链接使用。"
           confirmLabel="确认删除" pending={deleting} onConfirm={() => void remove()} />
@@ -131,7 +140,7 @@ export function MediaPage() {
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
   const [uploading, setUploading] = useState(false)
-  const [selected, setSelected] = useState<MediaAsset | null>(null)
+  const [selected, setSelected, selectedDialog] = useDialogState<MediaAsset>()
   const fileInput = useRef<HTMLInputElement>(null)
   const requestKey = JSON.stringify([page, appliedSearch, revision])
   const loading = loadedKey !== requestKey
@@ -252,7 +261,7 @@ export function MediaPage() {
           </Table>
         )}
       </PaginatedTable>
-      {selected ? <MediaDetails key={selected.id} asset={selected} onClose={() => setSelected(null)} onDeleted={() => {
+      {selected ? <MediaDetails key={selected.id} asset={selected} {...selectedDialog} onClose={() => setSelected(null)} onDeleted={() => {
         setSelected(null)
         setNotice("附件已删除")
         setRevision((value) => value + 1)

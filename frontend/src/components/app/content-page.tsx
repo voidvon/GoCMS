@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react"
 import { ArrowDown, ArrowUp, FileText, ImagePlus, Library, LoaderCircle, Plus, Search, Trash2, Upload, X } from "lucide-react"
 
@@ -13,6 +14,7 @@ import {
   type CategoryItem,
   type AdminUser,
   type Content,
+  type ContentListItem,
   type ContentInput,
   type ContentTranslationItem,
   type Language,
@@ -1329,8 +1331,8 @@ export function ContentPage({ user }: { user: AdminUser }) {
   const allowed = (permission: string) => user.is_super || user.permissions.includes(permission)
   const canReview = allowed("content.review")
   // 标题与缩略图是列表的主要编辑入口，权限判断与操作列保持一致。
-  const canEditItem = (item: Content) => allowed("content.edit") && (!item.visible || canReview)
-  const [items, setItems] = useState<Content[]>([])
+  const canEditItem = (item: ContentListItem) => allowed("content.edit") && (!item.visible || canReview)
+  const [items, setItems] = useState<ContentListItem[]>([])
   const [categories, setCategories] = useState<CategoryItem[]>([])
   const [models, setModels] = useState<SystemModel[]>([])
   const [modelFields, setModelFields] = useState<ModelField[]>([])
@@ -1343,11 +1345,11 @@ export function ContentPage({ user }: { user: AdminUser }) {
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
   const [editorOpen, setEditorOpen] = useState(false)
-  const [editing, setEditing] = useState<Content | null>(null)
+  const [editing, setEditing] = useState<ContentListItem | null>(null)
   const [editingDetail, setEditingDetail] = useState<Content | null>(null)
   const [editorLoading, setEditorLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState<Content | null>(null)
+  const [deleting, setDeleting, deletingDialog] = useDialogState<ContentListItem>()
   const [deleteSaving, setDeleteSaving] = useState(false)
 
   const { activeLang, refreshLanguages } = useLanguage()
@@ -1458,7 +1460,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
     setEditorOpen(true)
   }
 
-  async function openEdit(item: Content) {
+  async function openEdit(item: ContentListItem) {
     void refreshLanguages()
     setEditing(item)
     setEditingDetail(null)
@@ -1476,10 +1478,6 @@ export function ContentPage({ user }: { user: AdminUser }) {
 
   function closeEditor(open: boolean) {
     setEditorOpen(open)
-    if (!open) {
-      setEditing(null)
-      setEditingDetail(null)
-    }
   }
 
   async function save(payload: ContentInput, publish = false) {
@@ -1632,7 +1630,12 @@ export function ContentPage({ user }: { user: AdminUser }) {
           </Table>
       </PaginatedTable>
 
-      <Dialog open={editorOpen} onOpenChange={closeEditor}>
+      <Dialog open={editorOpen} onOpenChange={closeEditor} onOpenChangeComplete={(open) => {
+        if (!open) {
+          setEditing(null)
+          setEditingDetail(null)
+        }
+      }}>
         <DialogContent className="flex h-[calc(100dvh-3rem)] max-h-[calc(100dvh-3rem)] w-full flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[min(96rem,calc(100vw-2rem))] max-sm:inset-0 max-sm:h-dvh max-sm:max-h-none max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-none">
           {editorLoading ? (
             <>
@@ -1648,7 +1651,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
         </DialogContent>
       </Dialog>
       <ConfirmDialog
-        open={Boolean(deleting)}
+        {...deletingDialog}
         onOpenChange={(open) => { if (!open) setDeleting(null) }}
         title="删除内容"
         description={deleting ? `确定删除“${deleting.title}”吗？删除后公开详情页和列表链接都会移除。` : "确认删除这条内容吗？"}

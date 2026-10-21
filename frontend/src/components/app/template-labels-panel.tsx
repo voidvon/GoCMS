@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useEffect, useMemo, useState, type FormEvent } from "react"
 import {
   BookOpen,
@@ -219,8 +220,8 @@ export function TemplateLabelsPanel() {
   const [categorySortOrder, setCategorySortOrder] = useState(0)
   const [editingCategory, setEditingCategory] = useState<TemplateLabelCategory | null>(null)
   const [categorySaving, setCategorySaving] = useState(false)
-  const [deletingItem, setDeletingItem] = useState<TemplateLabel | null>(null)
-  const [deletingCategory, setDeletingCategory] = useState<TemplateLabelCategory | null>(null)
+  const [deletingItem, setDeletingItem, deletingItemDialog] = useDialogState<TemplateLabel>()
+  const [deletingCategory, setDeletingCategory, deletingCategoryDialog] = useDialogState<TemplateLabelCategory>()
   const [categoryDeleting, setCategoryDeleting] = useState(false)
   const [reload, setReload] = useState(0)
 
@@ -1067,7 +1068,7 @@ export function TemplateLabelsPanel() {
 
       {/* 删除确认弹窗 */}
       <ConfirmDialog
-        open={Boolean(deletingItem)}
+        {...deletingItemDialog}
         onOpenChange={(open) => {
           if (!open) setDeletingItem(null)
         }}
@@ -1079,7 +1080,7 @@ export function TemplateLabelsPanel() {
       />
 
       <ConfirmDialog
-        open={Boolean(deletingCategory)}
+        {...deletingCategoryDialog}
         onOpenChange={(open) => {
           if (!open) setDeletingCategory(null)
         }}

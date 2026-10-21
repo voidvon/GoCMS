@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useCallback, useEffect, useState } from "react"
 import {
   Check,
@@ -78,20 +79,20 @@ export function ApiKeysPage() {
   const [createError, setCreateError] = useState("")
 
   // Secret display dialog (once on create or rotate)
-  const [secretKey, setSecretKey] = useState<ApiKeyWithSecret | null>(null)
+  const [secretKey, setSecretKey, secretKeyDialog] = useDialogState<ApiKeyWithSecret>()
   const [copied, setCopied] = useState(false)
 
   // Revoke Dialog State
-  const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
+  const [revokeTarget, setRevokeTarget, revokeTargetDialog] = useDialogState<ApiKey>()
   const [revokeReason, setRevokeReason] = useState("")
   const [revokePending, setRevokePending] = useState(false)
 
   // Rotate Dialog State
-  const [rotateTarget, setRotateTarget] = useState<ApiKey | null>(null)
+  const [rotateTarget, setRotateTarget, rotateTargetDialog] = useDialogState<ApiKey>()
   const [rotatePending, setRotatePending] = useState(false)
 
   // Events Dialog State
-  const [eventsTarget, setEventsTarget] = useState<ApiKey | null>(null)
+  const [eventsTarget, setEventsTarget, eventsTargetDialog] = useDialogState<ApiKey>()
   const [eventsList, setEventsList] = useState<ApiKeyEvent[]>([])
   const [eventsLoading, setEventsLoading] = useState(false)
   const [eventsError, setEventsError] = useState("")
@@ -163,9 +164,6 @@ export function ApiKeysPage() {
     try {
       const res = await createApiKey({ name: trimmedName, expires_at: expiresAt })
       setCreateOpen(false)
-      setName("")
-      setExpiryPreset("never")
-      setCustomExpiryDate("")
       if (res.data) {
         setSecretKey(res.data)
       }
@@ -351,7 +349,13 @@ export function ApiKeysPage() {
             </Table>
 
       {/* Create API Key Dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={createOpen} onOpenChange={setCreateOpen} onOpenChangeComplete={(open) => {
+        if (!open) {
+          setName("")
+          setExpiryPreset("never")
+          setCustomExpiryDate("")
+        }
+      }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>创建 API Key</DialogTitle>
@@ -428,12 +432,15 @@ export function ApiKeysPage() {
 
       {/* Secret Key Display Dialog (one-time view) */}
       <Dialog
-        open={Boolean(secretKey)}
+        {...secretKeyDialog}
         onOpenChange={(open) => {
           if (!open) {
             setSecretKey(null)
-            setCopied(false)
           }
+        }}
+        onOpenChangeComplete={(open) => {
+          secretKeyDialog.onOpenChangeComplete(open)
+          if (!open) setCopied(false)
         }}
       >
         <DialogContent className="max-w-md">
@@ -468,7 +475,6 @@ export function ApiKeysPage() {
               type="button"
               onClick={() => {
                 setSecretKey(null)
-                setCopied(false)
               }}
             >
               我已安全保存
@@ -479,7 +485,7 @@ export function ApiKeysPage() {
 
       {/* Revoke Confirmation Dialog */}
       <Dialog
-        open={Boolean(revokeTarget)}
+        {...revokeTargetDialog}
         onOpenChange={(open) => {
           if (!open) {
             setRevokeTarget(null)
@@ -528,7 +534,7 @@ export function ApiKeysPage() {
 
       {/* Rotate Confirmation Dialog */}
       <ConfirmDialog
-        open={Boolean(rotateTarget)}
+        {...rotateTargetDialog}
         onOpenChange={(open) => !open && setRotateTarget(null)}
         title="轮换 API Key？"
         description="轮换后旧 Key 会立即失效，并生成一个只能查看一次的新 Key。请先确认外部调用方可以及时切换。"
@@ -539,7 +545,7 @@ export function ApiKeysPage() {
 
       {/* Events / Audit Log Dialog */}
       <Dialog
-        open={Boolean(eventsTarget)}
+        {...eventsTargetDialog}
         onOpenChange={(open) => !open && setEventsTarget(null)}
       >
         <DialogContent className="max-w-xl">

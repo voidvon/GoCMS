@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useEffect, useState } from "react"
 import { addMonths, format } from "date-fns"
 import { ChevronLeft } from "lucide-react"
@@ -54,15 +55,15 @@ export function SiteUsersPage() {
   const [members, setMembers] = useState<MemberGroupMember[]>([])
   const [groupsDialogOpen, setGroupsDialogOpen] = useState(false)
   const [viewingGroupMembers, setViewingGroupMembers] = useState<MemberGroup | null>(null)
-  const [groupForm, setGroupForm] = useState<Partial<MemberGroup> | null>(null)
-  const [assignUser, setAssignUser] = useState<number | null>(null)
-  const [sessionUser, setSessionUser] = useState<SiteUser | null>(null)
+  const [groupForm, setGroupForm, groupFormDialog] = useDialogState<Partial<MemberGroup>>()
+  const [assignUser, setAssignUser, assignUserDialog] = useDialogState<number>()
+  const [sessionUser, setSessionUser, sessionUserDialog] = useDialogState<SiteUser>()
   const [sessionLimit, setSessionLimit] = useState("2")
   const [assignGroup, setAssignGroup] = useState<number | null>(null)
-  const [confirmation, setConfirmation] = useState<{ title: string; action: () => Promise<unknown> } | null>(null)
+  const [confirmation, setConfirmation, confirmationDialog] = useDialogState<{ title: string; action: () => Promise<unknown> }>()
   const [expiryBase, setExpiryBase] = useState(() => new Date())
   const [expires, setExpires] = useState("")
-  const [resetUser, setResetUser] = useState<SiteUser | null>(null)
+  const [resetUser, setResetUser, resetUserDialog] = useDialogState<SiteUser>()
   const [newPassword, setNewPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
@@ -83,7 +84,7 @@ export function SiteUsersPage() {
     setShowPassword(false)
     setError("")
     setNotice("")
-  }, [activeSiteId])
+  }, [activeSiteId, setAssignUser, setGroupForm, setResetUser, setSessionUser])
 
   useEffect(() => {
     let active = true
@@ -373,9 +374,11 @@ export function SiteUsersPage() {
         onOpenChange={(open) => {
           if (!open && !busy) {
             setGroupsDialogOpen(false)
-            setViewingGroupMembers(null)
             setError("")
           }
+        }}
+        onOpenChangeComplete={(open) => {
+          if (!open) setViewingGroupMembers(null)
         }}
       >
         <DialogContent showCloseButton={!busy} className="overflow-y-auto sm:max-w-4xl">
@@ -635,7 +638,7 @@ export function SiteUsersPage() {
 
       {/* 登录会话设置 Dialog */}
       <Dialog
-        open={sessionUser !== null}
+        {...sessionUserDialog}
         onOpenChange={(open) => {
           if (!open && !busy) setSessionUser(null)
         }}
@@ -703,7 +706,7 @@ export function SiteUsersPage() {
 
       {/* 设置VIP Dialog */}
       <Dialog
-        open={assignUser !== null}
+        {...assignUserDialog}
         onOpenChange={(open) => {
           if (!open && !busy) setAssignUser(null)
         }}
@@ -799,7 +802,7 @@ export function SiteUsersPage() {
 
       {/* 会员组编辑/新建 Dialog */}
       <Dialog
-        open={groupForm !== null}
+        {...groupFormDialog}
         onOpenChange={(open) => {
           if (!open && !busy) setGroupForm(null)
         }}
@@ -931,10 +934,15 @@ export function SiteUsersPage() {
 
       {/* 重置密码 Dialog */}
       <Dialog
-        open={resetUser !== null}
+        {...resetUserDialog}
         onOpenChange={(open) => {
           if (!open && !busy) {
             setResetUser(null)
+          }
+        }}
+        onOpenChangeComplete={(open) => {
+          resetUserDialog.onOpenChangeComplete(open)
+          if (!open) {
             setNewPassword("")
             setConfirmPassword("")
             setShowPassword(false)
@@ -1064,10 +1072,6 @@ export function SiteUsersPage() {
                   disabled={busy}
                   onClick={() => {
                     setResetUser(null)
-                    setNewPassword("")
-                    setConfirmPassword("")
-                    setShowPassword(false)
-                    setError("")
                   }}
                 >
                   取消
@@ -1083,7 +1087,7 @@ export function SiteUsersPage() {
 
       {/* 确认操作 Dialog */}
       <Dialog
-        open={confirmation !== null}
+        {...confirmationDialog}
         onOpenChange={(open) => {
           if (!open && !busy) setConfirmation(null)
         }}

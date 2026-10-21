@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useEffect, useState, type FormEvent } from "react"
 import { Check, Copy, FolderPlus, LoaderCircle, Pencil, Plus, Save, Search, Tag, Trash2 } from "lucide-react"
 
@@ -90,8 +91,8 @@ export function TemplateVariablesPanel() {
   const [categorySortOrder, setCategorySortOrder] = useState(0)
   const [categorySaving, setCategorySaving] = useState(false)
   const [categoryDeleting, setCategoryDeleting] = useState(false)
-  const [deletingCategory, setDeletingCategory] = useState<TemplateLabelCategory | null>(null)
-  const [deletingItem, setDeletingItem] = useState<TemplateLabel | null>(null)
+  const [deletingCategory, setDeletingCategory, deletingCategoryDialog] = useDialogState<TemplateLabelCategory>()
+  const [deletingItem, setDeletingItem, deletingItemDialog] = useDialogState<TemplateLabel>()
 
   const totalPages = Math.max(1, Math.ceil(total / 20))
   const selectedItem = items.find((item) => item.id === selectedID) ?? null
@@ -479,7 +480,7 @@ export function TemplateVariablesPanel() {
       </Dialog>
 
       <ConfirmDialog
-        open={Boolean(deletingItem)}
+        {...deletingItemDialog}
         onOpenChange={(open) => { if (!open) setDeletingItem(null) }}
         title="删除公共模板变量"
         description={deletingItem ? `确定删除“${deletingItem.name}”吗？` : "确认删除这个模板变量吗？"}
@@ -489,7 +490,7 @@ export function TemplateVariablesPanel() {
       />
 
       <ConfirmDialog
-        open={Boolean(deletingCategory)}
+        {...deletingCategoryDialog}
         onOpenChange={(open) => { if (!open) setDeletingCategory(null) }}
         title="删除变量分类"
         description={deletingCategory ? `确定删除分类“${deletingCategory.name}”吗？分类下的变量会转为未分类。` : "确认删除这个分类吗？"}

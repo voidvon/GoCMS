@@ -150,6 +150,7 @@ export function TablePagination({
 type ConfirmDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onOpenChangeComplete?: (open: boolean) => void
   title: string
   description: ReactNode
   confirmLabel: string
@@ -161,6 +162,7 @@ type ConfirmDialogProps = {
 export function ConfirmDialog({
   open,
   onOpenChange,
+  onOpenChangeComplete,
   title,
   description,
   confirmLabel,
@@ -169,7 +171,7 @@ export function ConfirmDialog({
   onConfirm,
 }: ConfirmDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} onOpenChangeComplete={onOpenChangeComplete}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>

@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   Check,
@@ -62,19 +63,19 @@ export function ModelsPage() {
   const [modelDialogOpen, setModelDialogOpen] = useState(false)
   const [editingModel, setEditingModel] = useState<Partial<SystemModel> | null>(null)
   const [modelSaving, setModelSaving] = useState(false)
-  const [modelDeleting, setModelDeleting] = useState<SystemModel | null>(null)
+  const [modelDeleting, setModelDeleting, modelDeletingDialog] = useDialogState<SystemModel>()
 
   // Dialog states for Table
   const [tableDialogOpen, setTableDialogOpen] = useState(false)
   const [editingTable, setEditingTable] = useState<Partial<ModelTable> | null>(null)
   const [tableSaving, setTableSaving] = useState(false)
-  const [tableDeleting, setTableDeleting] = useState<ModelTable | null>(null)
+  const [tableDeleting, setTableDeleting, tableDeletingDialog] = useDialogState<ModelTable>()
 
   // Dialog state for Field & Field Management Modal
   const [editingField, setEditingField] = useState<Partial<ModelField> | null>(null)
   const [fieldSaving, setFieldSaving] = useState(false)
-  const [fieldDeleting, setFieldDeleting] = useState<ModelField | null>(null)
-  const [managingTable, setManagingTable] = useState<ModelTable | null>(null)
+  const [fieldDeleting, setFieldDeleting, fieldDeletingDialog] = useDialogState<ModelField>()
+  const [managingTable, setManagingTable, managingTableDialog] = useDialogState<ModelTable>()
   const [tableFieldSubView, setTableFieldSubView] = useState<"list" | "edit">("list")
 
   const loadData = useCallback(async () => {
@@ -640,12 +641,15 @@ export function ModelsPage() {
 
       {/* Dialog: Manage Table Fields directly from Data Tables */}
       <Dialog
-        open={Boolean(managingTable)}
+        {...managingTableDialog}
         onOpenChange={(open) => {
           if (!open) {
             setManagingTable(null)
-            setTableFieldSubView("list")
           }
+        }}
+        onOpenChangeComplete={(open) => {
+          managingTableDialog.onOpenChangeComplete(open)
+          if (!open) setTableFieldSubView("list")
         }}
       >
         {managingTable ? (
@@ -924,7 +928,7 @@ export function ModelsPage() {
 
       {/* Confirm Dialogs */}
       <ConfirmDialog
-        open={Boolean(modelDeleting)}
+        {...modelDeletingDialog}
         onOpenChange={(open) => {
           if (!open) setModelDeleting(null)
         }}
@@ -934,7 +938,7 @@ export function ModelsPage() {
         onConfirm={handleDeleteModel}
       />
       <ConfirmDialog
-        open={Boolean(tableDeleting)}
+        {...tableDeletingDialog}
         onOpenChange={(open) => {
           if (!open) setTableDeleting(null)
         }}
@@ -944,7 +948,7 @@ export function ModelsPage() {
         onConfirm={handleDeleteTable}
       />
       <ConfirmDialog
-        open={Boolean(fieldDeleting)}
+        {...fieldDeletingDialog}
         onOpenChange={(open) => {
           if (!open) setFieldDeleting(null)
         }}

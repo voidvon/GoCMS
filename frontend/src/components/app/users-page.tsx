@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useEffect, useState } from "react"
 import {
   getAdminAccounts,
@@ -117,10 +118,10 @@ export function UsersPage({ currentUserID }: { currentUserID: number }) {
   const [categories, setCategories] = useState<CategoryItem[]>([])
   const [groups, setGroups] = useState<AdminGroup[]>([])
   const [permissions, setPermissions] = useState<{ key: string; label: string }[]>([])
-  const [account, setAccount] = useState<AdminAccount | null>(null)
-  const [group, setGroup] = useState<AdminGroup | null>(null)
-  const [deleteAccountTarget, setDeleteAccountTarget] = useState<AdminAccount | null>(null)
-  const [deleteGroupTarget, setDeleteGroupTarget] = useState<AdminGroup | null>(null)
+  const [account, setAccount, accountDialog] = useDialogState<AdminAccount>()
+  const [group, setGroup, groupDialog] = useDialogState<AdminGroup>()
+  const [deleteAccountTarget, setDeleteAccountTarget, deleteAccountTargetDialog] = useDialogState<AdminAccount>()
+  const [deleteGroupTarget, setDeleteGroupTarget, deleteGroupTargetDialog] = useDialogState<AdminGroup>()
   const [groupsDialogOpen, setGroupsDialogOpen] = useState(false)
   const [filterCurrentSite, setFilterCurrentSite] = useState(true)
   const [error, setError] = useState("")
@@ -555,7 +556,7 @@ export function UsersPage({ currentUserID }: { currentUserID: number }) {
 
       {/* 账号编辑 Dialog */}
       <Dialog
-        open={account !== null}
+        {...accountDialog}
         onOpenChange={(open) => {
           if (!open && !busy) {
             setAccount(null)
@@ -793,7 +794,7 @@ export function UsersPage({ currentUserID }: { currentUserID: number }) {
 
       {/* 用户组编辑 Dialog（方案 A：按站点独立配置模块权限） */}
       <Dialog
-        open={group !== null}
+        {...groupDialog}
         onOpenChange={(open) => {
           if (!open && !busy) {
             setGroup(null)
@@ -968,7 +969,7 @@ export function UsersPage({ currentUserID }: { currentUserID: number }) {
 
       {/* 删除账号确认对话框 */}
       <ConfirmDialog
-        open={deleteAccountTarget !== null}
+        {...deleteAccountTargetDialog}
         onOpenChange={(open) => {
           if (!open && !busy) setDeleteAccountTarget(null)
         }}
@@ -989,7 +990,7 @@ export function UsersPage({ currentUserID }: { currentUserID: number }) {
 
       {/* 删除用户组确认对话框 */}
       <ConfirmDialog
-        open={deleteGroupTarget !== null}
+        {...deleteGroupTargetDialog}
         onOpenChange={(open) => {
           if (!open && !busy) setDeleteGroupTarget(null)
         }}

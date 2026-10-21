@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   ChevronDown,
@@ -310,7 +311,7 @@ export function CategoriesPage() {
   const [editing, setEditing] = useState<CategoryItem | null>(null)
   const [form, setForm] = useState<CategoryInput>(emptyCategory)
   const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState<CategoryItem | null>(null)
+  const [deleting, setDeleting, deletingDialog] = useDialogState<CategoryItem>()
   const [deleteSaving, setDeleteSaving] = useState(false)
 
   const { languages, defaultLang, fallbackLang, activeLang, refreshLanguages } = useLanguage()
@@ -990,7 +991,7 @@ export function CategoriesPage() {
       </div>
 
       <ConfirmDialog
-        open={Boolean(deleting)}
+        {...deletingDialog}
         onOpenChange={(open) => {
           if (!open) setDeleting(null)
         }}

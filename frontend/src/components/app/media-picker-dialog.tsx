@@ -30,7 +30,7 @@ export function MediaPickerDialog({
   const [loadedRequest, setLoadedRequest] = useState<string | null>(null)
   const [error, setError] = useState("")
   const requestKey = `${page}:${appliedSearch}`
-  const loading = open && loadedRequest !== requestKey
+  const loading = loadedRequest !== requestKey
 
   useEffect(() => {
     if (!open) return
@@ -60,17 +60,14 @@ export function MediaPickerDialog({
     setAppliedSearch(search.trim())
   }
 
-  function handleOpenChange(nextOpen: boolean) {
-    if (!nextOpen) {
-      setLoadedRequest(null)
-      setError("")
-      setPage(1)
-    }
-    onOpenChange(nextOpen)
-  }
-
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange} onOpenChangeComplete={(open) => {
+      if (!open) {
+        setLoadedRequest(null)
+        setError("")
+        setPage(1)
+      }
+    }}>
       <DialogContent className="flex flex-col overflow-hidden sm:max-w-3xl">
         <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-4 pr-2">
           <DialogHeader>
@@ -96,7 +93,7 @@ export function MediaPickerDialog({
                   className="group overflow-hidden rounded-lg border bg-muted text-left outline-none transition hover:border-foreground/40 focus-visible:ring-3 focus-visible:ring-ring/50"
                   onClick={() => {
                     onSelect(asset)
-                    handleOpenChange(false)
+                    onOpenChange(false)
                   }}
                   title={asset.original_name || asset.url}
                 >

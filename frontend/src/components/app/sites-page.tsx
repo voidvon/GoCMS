@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useState } from "react"
 import {
   Globe,
@@ -75,7 +76,7 @@ export function SitesPage() {
   const [submitting, setSubmitting] = useState(false)
 
   // Delete Confirm Dialog state
-  const [deleteTarget, setDeleteTarget] = useState<Site | null>(null)
+  const [deleteTarget, setDeleteTarget, deleteTargetDialog] = useDialogState<Site>()
   const [deleting, setDeleting] = useState(false)
 
   // Site Settings Dialog state
@@ -745,7 +746,7 @@ export function SitesPage() {
 
       {/* Delete Confirmation */}
       <ConfirmDialog
-        open={Boolean(deleteTarget)}
+        {...deleteTargetDialog}
         onOpenChange={(open) => {
           if (!open) setDeleteTarget(null)
         }}

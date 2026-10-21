@@ -1,3 +1,4 @@
+import { useDialogState } from "@/lib/use-dialog-state"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Check, Copy, Download, FileCode, FileText, Image as ImageIcon, LoaderCircle, Save, Search, Trash2, Upload } from "lucide-react"
 
@@ -345,7 +346,7 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
   const [createOpen, setCreateOpen] = useState(false)
   const [createPath, setCreatePath] = useState("")
   const [createError, setCreateError] = useState("")
-  const [deleteTarget, setDeleteTarget] = useState<ThemeFile | null>(null)
+  const [deleteTarget, setDeleteTarget, deleteTargetDialog] = useDialogState<ThemeFile>()
 
   const customFiles = customFilesForKind(files, activeKind)
   const filteredFiles = useMemo(() => {
@@ -596,7 +597,7 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
       </Dialog>
 
       <ConfirmDialog
-        open={deleteTarget !== null}
+        {...deleteTargetDialog}
         onOpenChange={(open) => { if (!open && busy !== "delete") setDeleteTarget(null) }}
         title={`删除${title}`}
         description={deleteTarget ? `确定删除“${deleteTarget.path}”吗？此操作会立即从当前模板组资源目录中移除文件。` : "确认删除这个文件吗？"}
@@ -623,7 +624,7 @@ export function ThemePage() {
   const [savingTemplate, setSavingTemplate] = useState(false)
   const [savingAssignmentKey, setSavingAssignmentKey] = useState("")
   const [templateGroupActionID, setTemplateGroupActionID] = useState("")
-  const [pendingTheme, setPendingTheme] = useState<ThemeInfo | null>(null)
+  const [pendingTheme, setPendingTheme, pendingThemeDialog] = useDialogState<ThemeInfo>()
   const [importing, setImporting] = useState(false)
   const templateGroupInputRef = useRef<HTMLInputElement>(null)
 
@@ -907,7 +908,7 @@ export function ThemePage() {
       ) : null}
 
       <ConfirmDialog
-        open={pendingTheme !== null}
+        {...pendingThemeDialog}
         onOpenChange={(open) => {
           if (!open && templateGroupActionID === "") {
             setPendingTheme(null)

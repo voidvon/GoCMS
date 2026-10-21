@@ -255,6 +255,10 @@ export type Content = {
   translations?: Record<string, ContentTranslationItem>
 }
 
+export type ContentListItem = Pick<Content,
+  "id" | "title" | "code" | "category_id" | "cover_image" | "published_at" | "featured" | "visible"
+>
+
 export type ContentInput = Omit<Content, "id" | "route_key"> & {
   route_key?: string
   translations?: Record<string, ContentTranslationItem>
@@ -287,7 +291,7 @@ export type ContentPage = {
   page: number
   page_size: number
   total: number
-  items: Content[]
+  items: ContentListItem[]
 }
 
 export type MessageItem = {
