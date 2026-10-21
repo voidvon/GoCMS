@@ -343,6 +343,7 @@ export function TrafficPage({ user }: { user: AdminUser }) {
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-[70px]">状态</TableHead>
+                  <TableHead className="w-[170px]">域名</TableHead>
                   <TableHead>请求路径</TableHead>
                   <TableHead className="w-[80px] text-right">命中</TableHead>
                   <TableHead className="w-[90px] text-right">独立 IP</TableHead>
@@ -354,15 +355,18 @@ export function TrafficPage({ user }: { user: AdminUser }) {
               <TableBody>
                 {errors.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">
                       {loading ? "加载中…" : "当前筛选条件下没有错误记录。"}
                     </TableCell>
                   </TableRow>
                 ) : (
                   errors.map((item) => (
-                    <TableRow key={`${item.status}-${item.path}`}>
+                    <TableRow key={`${item.host}-${item.status}-${item.path}`}>
                       <TableCell><StatusBadge status={item.status} /></TableCell>
-                      <TableCell className="max-w-[420px] truncate font-mono text-xs" title={item.path}>{item.path}</TableCell>
+                      <TableCell className="max-w-[170px] truncate text-xs" title={item.host || activeSite?.domain || ""}>
+                        {item.host || activeSite?.domain || "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[360px] truncate font-mono text-xs" title={item.path}>{item.path}</TableCell>
                       <TableCell className="text-right font-medium">{item.hits}</TableCell>
                       <TableCell className="text-right text-muted-foreground">{item.unique_ips}</TableCell>
                       <TableCell className="text-right text-muted-foreground">{item.internal_hits}</TableCell>
@@ -399,6 +403,7 @@ export function TrafficPage({ user }: { user: AdminUser }) {
                 <TableRow>
                   <TableHead className="w-[160px]">时间</TableHead>
                   <TableHead className="w-[70px]">状态</TableHead>
+                  <TableHead className="w-[170px]">域名</TableHead>
                   <TableHead>请求路径</TableHead>
                   <TableHead className="w-[130px]">客户端</TableHead>
                   <TableHead className="w-[90px]">设备</TableHead>
@@ -409,7 +414,7 @@ export function TrafficPage({ user }: { user: AdminUser }) {
               <TableBody>
                 {items.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
+                    <TableCell colSpan={8} className="py-10 text-center text-sm text-muted-foreground">
                       {loading ? "加载中…" : "当前筛选条件下没有访问记录。"}
                     </TableCell>
                   </TableRow>
@@ -418,7 +423,10 @@ export function TrafficPage({ user }: { user: AdminUser }) {
                     <TableRow key={item.id}>
                       <TableCell className="text-xs text-muted-foreground"><TimeText value={item.visited_at} /></TableCell>
                       <TableCell><StatusBadge status={item.status} /></TableCell>
-                      <TableCell className="max-w-[420px] truncate font-mono text-xs" title={`${item.path}${item.query ? `?${item.query}` : ""}`}>
+                      <TableCell className="max-w-[170px] truncate text-xs" title={item.host || activeSite?.domain || ""}>
+                        {item.host || activeSite?.domain || "—"}
+                      </TableCell>
+                      <TableCell className="max-w-[360px] truncate font-mono text-xs" title={`${item.path}${item.query ? `?${item.query}` : ""}`}>
                         {item.path}
                         {item.query ? <span className="text-muted-foreground">?{item.query}</span> : null}
                       </TableCell>

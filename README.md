@@ -113,15 +113,18 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 
 ## 访问统计
 
+本地测试可用 `python3 scripts/seed-access-logs.py --reset` 生成多域名、多状态、多来源的访问与错误记录（默认站点 1，可用 `--site`、`--hosts` 指定）；`--ignore` 可预置忽略路径。脚本只写 `gocms_access_log` 与 `gocms_access_log_ignore`，不修改内容、分类、模板或站点设置。
+
 仪表盘按站点统计前台访问量和错误，数据来自 `gocms_access_log`。站点通过请求 Host 解析（与前台一致，独立语言域名归入所属站点），后台只显示当前所选站点的数据；不同站点之间不共享任何统计。
 
 - 记录范围：返回 HTML 的 2xx 页面访问，以及所有 4xx/5xx 响应（包括缺失的 CSS、JS、图片等资源）。成功的静态资源请求、3xx 跳转、`/api/` 和 `/admin/` 请求不记录，避免噪声。只记录 GET。
-- 每条记录保存路径、查询串（截断到 200 字符）、状态码、类型、客户端 IP、User-Agent 摘要、客户端类型（浏览器/爬虫/工具/其他）、设备类型（桌面/移动/平板/其他）、来源地址与来源分类（站内/站外/直接访问/无效 Referer）。站内判定不只检查域名：错误请求还要求 Referer 指向该站点真实存在的 HTML 页面（目录 URL 需有 `index.html`），否则记为 `invalid`，不计入“站内死链”。现代浏览器提供的 `Sec-Fetch-Site` 也会参与判定。
-- 仪表盘展示今日访问、24 小时访问与访客、新访客、PC/移动访客、404 数量、错误总数、站内死链地址数/命中数、累计页面、热门页面、按路径归并的错误列表和状态码分布。`internal_404_paths` 是按 URL 去重后的站内死链数，`internal_404_errors` 是命中次数，二者不要混用。
+- 每条记录保存请求域名（`host`）、路径、查询串（截断到 200 字符）、状态码、类型、客户端 IP、User-Agent 摘要、客户端类型（浏览器/爬虫/工具/其他）、设备类型（桌面/移动/平板/其他）、来源地址与来源分类（站内/站外/直接访问/无效 Referer）。`host` 保留实际请求域名（包括 `www.` 和独立语言域名），用于在多域名站点中区分错误来源；历史记录升级前为空，后台回退显示当前站点主域名。站内判定不只检查域名：错误请求还要求 Referer 指向该站点真实存在的 HTML 页面（目录 URL 需有 `index.html`），否则记为 `invalid`，不计入“站内死链”。现代浏览器提供的 `Sec-Fetch-Site` 也会参与判定。
+- 仪表盘展示今日访问、24 小时访问与访客、新访客、PC/移动访客、404 数量、错误总数、站内死链地址数/命中数、累计页面、热门页面、按“域名 + 路径 + 状态”归并的错误列表和状态码分布。错误列表与访问明细都会显示请求域名；错误列表和热门页面在卡片内滚动到底部时自动加载更多。错误类型统计位于错误卡片右侧，不占用列表下方空间。`internal_404_paths` 是按 URL 去重后的站内死链数，`internal_404_errors` 是命中次数，二者不要混用。
+- 错误列表支持按路径忽略：规则只保存路径，不带域名，因此同一路径在站点主域名、`www` 别名和独立语言域名上全部生效；完整 URL 会被规范化为路径。忽略后该路径不再进入错误总数、404/站内死链指标、错误类型分布和错误归并列表，但原始访问明细保留用于审计；忽略规则独立于访问日志保留期。
 - “访问统计”页面可按时间范围、类型、状态、客户端、设备、来源、路径、IP 和关键字过滤，查看错误归并列表或逐条访问明细，并按当前筛选条件清空日志。
 - 权限：“访问统计”查看权限为 `traffic`，清空权限为 `traffic.clear`；超级管理员默认全部可用。清空操作会写入操作日志。
 - 保留策略：默认保留 3 天，服务启动时及之后每 30 分钟清理过期记录；用 `-access-log-days` 调整保留天数。自然日边界默认跟随系统时区，可用 `-timezone Asia/Shanghai` 指定 IANA 时区；时间戳按 UTC 存储与传输，界面统一按浏览器所在时区显示。
-- 接口：`GET /api/admin/access-logs`（分页明细，`page`、`page_size`，过滤参数同页面）、`GET /api/admin/access-logs/errors`（按路径与状态归并）、`DELETE /api/admin/access-logs`（按同一组过滤参数清理）；`GET /api/admin/stats` 的 `access` 字段提供仪表盘指标。
+- 接口：`GET /api/admin/access-logs`（分页明细，`page`、`page_size`，过滤参数同页面）、`GET /api/admin/access-logs/errors`（按域名、路径与状态归并，支持 `limit`、`offset`、`sort=hits|recent`）、`GET /api/admin/access-logs/pages`（热门页面，支持 `limit`、`offset`）、`GET/POST/DELETE /api/admin/access-logs/ignores`（查看、添加、取消路径忽略；POST 传 `{"path":"..."}`，DELETE 传 `?path=...`）、`DELETE /api/admin/access-logs`（按同一组过滤参数清理）；`GET /api/admin/stats` 的 `access` 字段提供仪表盘指标。
 
 ## 留言通知
 

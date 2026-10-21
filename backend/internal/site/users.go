@@ -196,9 +196,9 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 		case "site-users", "member-groups":
 			module = "members"
 		case "access-logs":
-			// Reading the traffic log needs "traffic"; clearing it needs the
-			// stronger "traffic.clear" permission.
-			if r.Method == http.MethodDelete {
+			// Reading the traffic log and managing ignore rules needs "traffic";
+			// clearing the log itself needs the stronger "traffic.clear".
+			if r.Method == http.MethodDelete && !strings.HasPrefix(route, "/api/admin/access-logs/ignores") {
 				module = "traffic.clear"
 			} else {
 				module = "traffic"

@@ -108,6 +108,7 @@ export type AccessLogPageStat = {
 }
 
 export type AccessLogErrorStat = {
+  host: string
   path: string
   status: number
   hits: number
@@ -131,6 +132,7 @@ export type AccessLogSummary = {
 export type AccessLogItem = {
   id: number
   site_id: number
+  host: string
   day_key: string
   path: string
   query: string
@@ -163,6 +165,8 @@ export type AccessLogFilters = {
   ip?: string
   q?: string
   limit?: number
+  offset?: number
+  sort?: string
   page?: number
   page_size?: number
 }
@@ -174,8 +178,39 @@ export function getAccessLogs(filters: AccessLogFilters) {
 }
 
 export function getAccessLogErrors(filters: AccessLogFilters) {
-  return request<{ items: AccessLogErrorStat[]; total: number; site_id: number }>(
+  return request<{ items: AccessLogErrorStat[]; total: number; offset: number; limit: number; site_id: number }>(
     `/api/admin/access-logs/errors${query({ ...filters })}`,
+  )
+}
+
+export function getAccessLogPages(filters: Pick<AccessLogFilters, "limit" | "offset">) {
+  return request<{ items: AccessLogPageStat[]; total: number; offset: number; limit: number; site_id: number }>(
+    `/api/admin/access-logs/pages${query({ ...filters })}`,
+  )
+}
+
+export type AccessLogIgnore = {
+  path: string
+  created_at: string
+}
+
+export function getAccessLogIgnores() {
+  return request<{ items: AccessLogIgnore[]; total: number; site_id: number }>(
+    "/api/admin/access-logs/ignores",
+  )
+}
+
+export function addAccessLogIgnore(path: string) {
+  return request<{ ok: boolean; item: AccessLogIgnore; site_id: number }>("/api/admin/access-logs/ignores", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  })
+}
+
+export function removeAccessLogIgnore(path: string) {
+  return request<{ ok: boolean; removed: number; site_id: number }>(
+    `/api/admin/access-logs/ignores${query({ path })}`,
+    { method: "DELETE" },
   )
 }
 

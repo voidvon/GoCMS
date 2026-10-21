@@ -202,6 +202,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminAccessLogs(response, request)
 	case "/api/admin/access-logs/errors":
 		s.adminAccessLogErrors(response, request)
+	case "/api/admin/access-logs/pages":
+		s.adminAccessLogPages(response, request)
+	case "/api/admin/access-logs/ignores":
+		s.adminAccessLogIgnores(response, request)
 	case "/api/admin/content":
 		s.adminContent(response, request)
 	case "/api/admin/media":
@@ -524,6 +528,14 @@ func (s *Server) serveSiteNotFound(response http.ResponseWriter, request *http.R
 func positiveInt(value string, fallback int) int {
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed < 1 {
+		return fallback
+	}
+	return parsed
+}
+
+func nonNegativeInt(value string, fallback int) int {
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 0 {
 		return fallback
 	}
 	return parsed

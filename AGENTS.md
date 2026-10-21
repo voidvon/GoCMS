@@ -33,6 +33,15 @@ Go 使用 `gofmt`；包名小写，导出标识符使用 PascalCase。TypeScript
 
 Go 测试使用标准 `testing`，文件命名为 `*_test.go`，测试函数为 `TestXxx`。修改生成器时覆盖自定义模板绑定、任意分类名称及路径、分页和发布失败场景。未规定覆盖率门槛；优先验证行为。页面变更还需检查生成结果及视觉效果。
 
+## 前端 UI 规范
+
+- 所有可滚动区域统一使用 `@/components/ui/scroll-area` 的 `ScrollArea`，不要直接给容器添加 `overflow-y-auto`、`overflow-auto`、`overflow-x-auto` 等浏览器原生滚动条。
+- 垂直滚动使用默认 `orientation="vertical"`；表格、代码等横向滚动使用 `orientation="horizontal"`；双向滚动使用 `orientation="both"`。
+- 高度、最大高度、宽度约束放在 `className`；列表间距、内边距等放在 `contentClassName`。
+- 仅第三方组件内部无法替换的滚动容器可以例外，并在 PR 中说明原因。
+- 历史页面中的原生滚动容器在相关功能改动时一并迁移，不要求无关改动一次性全量重写。
+- 评审新页面或组件时，将“是否使用 `ScrollArea`”作为 UI 检查项；浏览器的原生滚动条样式不统一，不作为产品界面使用。
+
 ## 提交与 PR
 
 沿用历史提交格式，如 `feat(backend): ...`、`fix(frontend): ...`、`refactor(backend): ...`。PR 说明问题、修改后的行为、验证命令及结果；有关联问题时附链接，界面变更附截图，数据迁移说明兼容影响。

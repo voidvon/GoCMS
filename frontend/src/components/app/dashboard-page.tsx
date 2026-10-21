@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, type UIEvent } from "react"
 import {
   AlertTriangle,
+  Ban,
   Bug,
   Eye,
+  EyeOff,
   Inbox,
   Link2Off,
   LoaderCircle,
@@ -12,12 +14,28 @@ import {
   UsersRound,
 } from "lucide-react"
 
-import { getStats, type AccessLogMetrics, type AdminStats } from "@/lib/api"
+import {
+  addAccessLogIgnore,
+  getAccessLogErrors,
+  getAccessLogIgnores,
+  getAccessLogPages,
+  getStats,
+  removeAccessLogIgnore,
+  type AccessLogErrorStat,
+  type AccessLogIgnore,
+  type AccessLogMetrics,
+  type AccessLogPageStat,
+  type AdminStats,
+} from "@/lib/api"
 import { useSite } from "@/lib/site-context"
 import { TimeText } from "@/components/app/time-text"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -33,6 +51,8 @@ import {
 } from "@/components/ui/table"
 import { InlineAlert } from "@/components/app/app-ui"
 
+const PAGE_SIZE = 20
+
 function formatNumber(value: number) {
   return new Intl.NumberFormat("zh-CN").format(value)
 }
@@ -47,6 +67,30 @@ export function DashboardPage() {
   const { activeSite } = useSite()
   const [payload, setPayload] = useState<{ siteId?: number; stats: AdminStats } | null>(null)
   const [error, setError] = useState("")
+  const [errorRows, setErrorRows] = useState<AccessLogErrorStat[]>([])
+  const [errorTotal, setErrorTotal] = useState(0)
+  const [errorLoading, setErrorLoading] = useState(true)
+  const [errorLoadingMore, setErrorLoadingMore] = useState(false)
+  const [pageRows, setPageRows] = useState<AccessLogPageStat[]>([])
+  const [pageTotal, setPageTotal] = useState(0)
+  const [pageLoading, setPageLoading] = useState(true)
+  const [pageLoadingMore, setPageLoadingMore] = useState(false)
+  const [errorLoadError, setErrorLoadError] = useState("")
+  const [pageLoadError, setPageLoadError] = useState("")
+  const [ignoredPaths, setIgnoredPaths] = useState<AccessLogIgnore[]>([])
+  const [ignoreBusyPath, setIgnoreBusyPath] = useState("")
+  const [revision, setRevision] = useState(0)
+  const errorMoreRef = useRef(false)
+  const pageMoreRef = useRef(false)
+  const siteIdRef = useRef(activeSite?.id)
+
+  useEffect(() => {
+    siteIdRef.current = activeSite?.id
+    errorMoreRef.current = false
+    pageMoreRef.current = false
+    setIgnoredPaths([])
+    setIgnoreBusyPath("")
+  }, [activeSite?.id])
 
   useEffect(() => {
     let active = true
@@ -62,7 +106,149 @@ export function DashboardPage() {
     return () => {
       active = false
     }
-  }, [activeSite?.id])
+  }, [activeSite?.id, revision])
+
+  // The dashboard cards are independently paginated so users can scroll for
+  // more than the fixed top-N snapshot returned by /api/admin/stats. The stats
+  // request still supplies the headline cards and status breakdown.
+  useEffect(() => {
+    if (!activeSite?.id) return
+    let active = true
+    setErrorRows([])
+    setErrorTotal(0)
+    setErrorLoading(true)
+    setErrorLoadingMore(false)
+    setPageRows([])
+    setPageTotal(0)
+    setPageLoading(true)
+    setPageLoadingMore(false)
+    setErrorLoadError("")
+    setPageLoadError("")
+    Promise.allSettled([
+      getAccessLogErrors({ status_mode: "errors", sort: "recent", limit: PAGE_SIZE, offset: 0 }),
+      getAccessLogPages({ limit: PAGE_SIZE, offset: 0 }),
+      getAccessLogIgnores(),
+    ])
+      .then(([errorResult, pageResult, ignoreResult]) => {
+        if (!active) return
+        if (errorResult.status === "fulfilled") {
+          setErrorRows(errorResult.value.items)
+          setErrorTotal(errorResult.value.total)
+        } else {
+          setErrorLoadError(errorResult.reason instanceof Error ? errorResult.reason.message : "错误列表加载失败")
+        }
+        if (pageResult.status === "fulfilled") {
+          setPageRows(pageResult.value.items)
+          setPageTotal(pageResult.value.total)
+        } else {
+          setPageLoadError(pageResult.reason instanceof Error ? pageResult.reason.message : "热门页面加载失败")
+        }
+        if (ignoreResult.status === "fulfilled") {
+          setIgnoredPaths(ignoreResult.value.items)
+        } else {
+          setErrorLoadError(ignoreResult.reason instanceof Error ? ignoreResult.reason.message : "忽略列表加载失败")
+        }
+      })
+      .finally(() => {
+        if (!active) return
+        setErrorLoading(false)
+        setPageLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [activeSite?.id, revision])
+
+  const errorHasMore = errorRows.length < errorTotal
+  const pageHasMore = pageRows.length < pageTotal
+
+  function loadMoreErrors() {
+    if (errorMoreRef.current || errorLoading || !errorHasMore) return
+    const siteId = activeSite?.id
+    errorMoreRef.current = true
+    setErrorLoadingMore(true)
+    getAccessLogErrors({ status_mode: "errors", sort: "recent", limit: PAGE_SIZE, offset: errorRows.length })
+      .then((data) => {
+        if (siteIdRef.current !== siteId) return
+        setErrorRows((previous) => {
+          const seen = new Set(previous.map((item) => `${item.host}\u0000${item.status}\u0000${item.path}`))
+          return [
+            ...previous,
+            ...data.items.filter((item) => !seen.has(`${item.host}\u0000${item.status}\u0000${item.path}`)),
+          ]
+        })
+        setErrorTotal(data.total)
+      })
+      .catch((loadError: Error) => {
+        if (siteIdRef.current === siteId) setErrorLoadError(loadError.message)
+      })
+      .finally(() => {
+        errorMoreRef.current = false
+        if (siteIdRef.current === siteId) setErrorLoadingMore(false)
+      })
+  }
+
+  function loadMorePages() {
+    if (pageMoreRef.current || pageLoading || !pageHasMore) return
+    const siteId = activeSite?.id
+    pageMoreRef.current = true
+    setPageLoadingMore(true)
+    getAccessLogPages({ limit: PAGE_SIZE, offset: pageRows.length })
+      .then((data) => {
+        if (siteIdRef.current !== siteId) return
+        setPageRows((previous) => {
+          const seen = new Set(previous.map((item) => item.path))
+          return [...previous, ...data.items.filter((item) => !seen.has(item.path))]
+        })
+        setPageTotal(data.total)
+      })
+      .catch((loadError: Error) => {
+        if (siteIdRef.current === siteId) setPageLoadError(loadError.message)
+      })
+      .finally(() => {
+        pageMoreRef.current = false
+        if (siteIdRef.current === siteId) setPageLoadingMore(false)
+      })
+  }
+
+  function handleInfiniteScroll(event: UIEvent<HTMLDivElement>, loadMore: () => void, hasMore: boolean) {
+    if (!hasMore) return
+    const element = event.currentTarget
+    if (element.scrollHeight - element.scrollTop - element.clientHeight < 80) {
+      loadMore()
+    }
+  }
+
+  async function handleIgnore(pathValue: string) {
+    if (!pathValue || ignoreBusyPath) return
+    setIgnoreBusyPath(pathValue)
+    try {
+      const result = await addAccessLogIgnore(pathValue)
+      setIgnoredPaths((previous) => [result.item, ...previous.filter((item) => item.path !== result.item.path)])
+      const removed = errorRows.filter((item) => item.path === pathValue).length
+      setErrorRows((previous) => previous.filter((item) => item.path !== pathValue))
+      setErrorTotal((previous) => Math.max(0, previous - removed))
+      setRevision((value) => value + 1)
+    } catch (ignoreError) {
+      setErrorLoadError(ignoreError instanceof Error ? ignoreError.message : "添加忽略失败")
+    } finally {
+      setIgnoreBusyPath("")
+    }
+  }
+
+  async function handleUnignore(pathValue: string) {
+    if (!pathValue || ignoreBusyPath) return
+    setIgnoreBusyPath(pathValue)
+    try {
+      await removeAccessLogIgnore(pathValue)
+      setIgnoredPaths((previous) => previous.filter((item) => item.path !== pathValue))
+      setRevision((value) => value + 1)
+    } catch (ignoreError) {
+      setErrorLoadError(ignoreError instanceof Error ? ignoreError.message : "取消忽略失败")
+    } finally {
+      setIgnoreBusyPath("")
+    }
+  }
 
   // Statistics are per site, so a payload from another site must not be shown.
   const stats = payload && payload.siteId === activeSite?.id ? payload.stats : null
@@ -80,8 +266,6 @@ export function DashboardPage() {
   }
 
   const metrics: AccessLogMetrics | undefined = stats.access?.metrics
-  const topErrors = stats.access?.top_errors ?? []
-  const topPages = stats.access?.top_pages ?? []
   const statusBreakdown = stats.access?.status_breakdown ?? []
 
   const contentCards = [
@@ -179,81 +363,188 @@ export function DashboardPage() {
       ) : null}
 
       <section className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card className="flex h-[480px] min-h-0 flex-col lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">错误与死链</CardTitle>
-            <CardDescription>按最近出现时间倒序排列，最新触发的错误排在最前</CardDescription>
+            <CardAction>
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      title="忽略列表"
+                      aria-label={`忽略列表（${ignoredPaths.length} 条）`}
+                    />
+                  }
+                >
+                  <Ban />
+                </PopoverTrigger>
+                <PopoverContent side="bottom" align="end" className="w-80 p-0">
+                  <div className="border-b px-3 py-2">
+                    <p className="text-sm font-medium">已忽略路径</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">按路径匹配，所有域名生效</p>
+                  </div>
+                  <ScrollArea className="max-h-64" contentClassName="p-2">
+                    {ignoredPaths.length === 0 ? (
+                      <p className="px-2 py-4 text-center text-xs text-muted-foreground">暂无忽略路径</p>
+                    ) : (
+                      ignoredPaths.map((item) => (
+                        <div key={item.path} className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted">
+                          <span className="min-w-0 flex-1 truncate font-mono text-xs" title={item.path}>{item.path}</span>
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            disabled={ignoreBusyPath === item.path}
+                            onClick={() => void handleUnignore(item.path)}
+                          >
+                            取消忽略
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </ScrollArea>
+                </PopoverContent>
+              </Popover>
+            </CardAction>
           </CardHeader>
-          <CardContent className="px-0">
-            {topErrors.length === 0 ? (
+          <CardContent className="flex min-h-0 flex-1 flex-col px-0">
+            {errorLoadError ? (
+              <p className="px-6 pb-3 text-xs text-destructive">{errorLoadError}</p>
+            ) : null}
+            {statusBreakdown.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-6 pb-3">
+                <span className="text-xs font-medium text-muted-foreground">错误类型</span>
+                {statusBreakdown.map((item) => (
+                  <span key={item.status} className="inline-flex items-center gap-1.5">
+                    <span className={`inline-flex rounded px-1.5 py-0.5 font-mono text-xs font-medium ${statusTone(item.status)}`}>
+                      {item.status}
+                    </span>
+                    <span className="font-mono text-xs text-muted-foreground">{formatNumber(item.hits)}</span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {errorLoading ? (
+              <div className="flex h-40 items-center justify-center text-muted-foreground">
+                <LoaderCircle className="size-5 animate-spin" />
+              </div>
+            ) : errorRows.length === 0 ? (
               <p className="px-6 py-6 text-sm text-muted-foreground">当前没有记录到任何 4xx / 5xx 错误。</p>
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
+              <ScrollArea
+                className="min-h-0 flex-1"
+                orientation="both"
+                onScroll={(event) => handleInfiniteScroll(event, loadMoreErrors, errorHasMore)}
+              >
+                <Table containerClassName="overflow-visible">
+                  <TableHeader className="sticky top-0 z-20 bg-card">
                     <TableRow>
-                      <TableHead className="w-[70px]">状态</TableHead>
+                      <TableHead className="w-[64px]">状态</TableHead>
+                      <TableHead className="w-[150px]">域名</TableHead>
                       <TableHead>请求路径</TableHead>
-                      <TableHead className="w-[70px] text-right">命中</TableHead>
-                      <TableHead className="w-[80px] text-right">站内</TableHead>
-                      <TableHead className="w-[150px]">最近出现</TableHead>
+                      <TableHead className="w-[64px] text-right">命中</TableHead>
+                      <TableHead className="w-[64px] text-right">站内</TableHead>
+                      <TableHead className="w-[140px]">最近出现</TableHead>
+                      <TableHead className="w-[40px] text-right"><span className="sr-only">操作</span></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {topErrors.slice(0, 10).map((item) => (
-                      <TableRow key={`${item.status}-${item.path}`}>
+                    {errorRows.map((item) => (
+                      <TableRow key={`${item.host}-${item.status}-${item.path}`} className="group">
                         <TableCell>
                           <span className={`inline-flex rounded px-1.5 py-0.5 font-mono text-xs font-medium ${statusTone(item.status)}`}>
                             {item.status}
                           </span>
                         </TableCell>
-                        <TableCell className="max-w-[360px] truncate font-mono text-xs" title={item.path}>
+                        <TableCell className="max-w-[150px] truncate text-xs" title={item.host || activeSite?.domain || ""}>
+                          {item.host || activeSite?.domain || "—"}
+                        </TableCell>
+                        <TableCell className="max-w-[280px] truncate font-mono text-xs" title={item.path}>
                           {item.path}
                         </TableCell>
                         <TableCell className="text-right font-medium">{formatNumber(item.hits)}</TableCell>
                         <TableCell className="text-right text-muted-foreground">{formatNumber(item.internal_hits)}</TableCell>
                         <TableCell className="text-xs text-muted-foreground"><TimeText value={item.last_visited_at} /></TableCell>
+                        <TableCell className="w-[40px] text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 focus-visible:opacity-100"
+                            title="忽略此路径（全域名）"
+                            aria-label={`忽略 ${item.path}`}
+                            disabled={ignoreBusyPath === item.path}
+                            onClick={() => void handleIgnore(item.path)}
+                          >
+                            {ignoreBusyPath === item.path ? <LoaderCircle className="animate-spin" /> : <EyeOff />}
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
+                    {errorLoadingMore ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="py-4 text-center text-xs text-muted-foreground">
+                          <LoaderCircle className="mr-1.5 inline size-3.5 animate-spin" />加载更多…
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
+                    {!errorLoadingMore && !errorHasMore && errorRows.length > PAGE_SIZE ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="py-4 text-center text-xs text-muted-foreground">
+                          已加载全部
+                        </TableCell>
+                      </TableRow>
+                    ) : null}
                   </TableBody>
                 </Table>
-              </div>
+              </ScrollArea>
             )}
-            {statusBreakdown.length > 0 ? (
-              <div className="flex flex-wrap gap-2 px-6 pt-4">
-                {statusBreakdown.map((item) => (
-                  <Badge key={item.status} variant="outline" className="gap-1.5 font-mono">
-                    {item.status}
-                    <span className="text-muted-foreground">{formatNumber(item.hits)}</span>
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="flex h-[480px] min-h-0 flex-col">
           <CardHeader>
             <CardTitle className="text-base">热门页面</CardTitle>
-            <CardDescription>访问量最高的页面（已排除爬虫）</CardDescription>
+            <CardDescription>访问量最高的页面（已排除爬虫），滚动加载更多</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {topPages.length === 0 ? (
-              <p className="text-sm text-muted-foreground">还没有页面访问记录。</p>
+          <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+            {pageLoadError ? (
+              <p className="px-6 pb-3 pt-4 text-xs text-destructive">{pageLoadError}</p>
+            ) : null}
+            {pageLoading ? (
+              <div className="flex h-40 items-center justify-center text-muted-foreground">
+                <LoaderCircle className="size-5 animate-spin" />
+              </div>
+            ) : pageRows.length === 0 ? (
+              <p className="px-6 py-4 text-sm text-muted-foreground">还没有页面访问记录。</p>
             ) : (
-              topPages.map((item, index) => (
-                <div key={item.path} className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-2">
-                    <span className="mt-0.5 w-4 shrink-0 text-xs text-muted-foreground">{index + 1}</span>
-                    <div className="min-w-0">
-                      <p className="truncate font-mono text-xs" title={item.path}>{item.path}</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        {formatNumber(item.visits)} 次访问 · {formatNumber(item.unique_ips)} 位访客
-                      </p>
+              <ScrollArea
+                className="min-h-0 flex-1"
+                contentClassName="space-y-3 px-6 py-4"
+                onScroll={(event) => handleInfiniteScroll(event, loadMorePages, pageHasMore)}
+              >
+                {pageRows.map((item, index) => (
+                  <div key={item.path} className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <span className="mt-0.5 w-4 shrink-0 text-xs text-muted-foreground">{index + 1}</span>
+                      <div className="min-w-0">
+                        <p className="truncate font-mono text-xs" title={item.path}>{item.path}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {formatNumber(item.visits)} 次访问 · {formatNumber(item.unique_ips)} 位访客
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                ))}
+                {pageLoadingMore ? (
+                  <p className="py-2 text-center text-xs text-muted-foreground">
+                    <LoaderCircle className="mr-1.5 inline size-3.5 animate-spin" />加载更多…
+                  </p>
+                ) : null}
+                {!pageLoadingMore && !pageHasMore && pageRows.length > PAGE_SIZE ? (
+                  <p className="py-2 text-center text-xs text-muted-foreground">已加载全部</p>
+                ) : null}
+              </ScrollArea>
             )}
           </CardContent>
         </Card>

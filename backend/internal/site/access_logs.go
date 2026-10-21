@@ -221,11 +221,12 @@ func (s *Server) recordAccessLog(request *http.Request, result *accessResponse) 
 		query = query[:accessLogQueryLimit]
 	}
 	now := time.Now()
+	host := accessLogRequestHost(request)
 	_, err := s.database.ExecContext(ctx, `INSERT INTO "`+db.AccessLogTable+`"
-		("site_id", "day_key", "path", "query", "method", "status", "kind", "content_type", "ip",
+		("site_id", "host", "day_key", "path", "query", "method", "status", "kind", "content_type", "ip",
 		 "referer", "referer_host", "referer_kind", "user_agent", "agent_kind", "agent_label", "device_kind", "visited_at")
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		siteID, s.accessLogs.dayKey(now), path, query, request.Method, status, kind, contentType, clientIP(request),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		siteID, host, s.accessLogs.dayKey(now), path, query, request.Method, status, kind, contentType, clientIP(request),
 		referer, refererHost, refererKind, userAgent, agent.Kind, agent.Label, agent.Device, now.UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
 		log.Printf("record access log: %v", err)
@@ -365,6 +366,21 @@ func refererHostName(referer string) string {
 	return normalizeAccessLogHost(parsed.Host)
 }
 
+// accessLogRequestHost is the display form of the requested domain. Unlike
+// normalizeAccessLogHost it keeps the www prefix and the actual alias, because
+// the dashboard must distinguish www.example.com, example.com and a standalone
+// language domain that all belong to the same site.
+func accessLogRequestHost(request *http.Request) string {
+	value := strings.ToLower(strings.TrimSpace(requestHost(request)))
+	if value == "" {
+		return ""
+	}
+	if host, _, ok := splitHostPortLoose(value); ok {
+		value = host
+	}
+	return strings.TrimSuffix(value, ".")
+}
+
 // classifyAccessLogReferer separates a real navigation from a spoofed or
 // synthetic Referer header. The old implementation trusted any host that
 // belonged to the site, so scanners could label "/.aws/credentials" as an
@@ -439,6 +455,109 @@ func (s *Server) pageServed(dirs []string, urlPath string) bool {
 		}
 	}
 	return false
+}
+
+// AccessLogIgnore is one operator-supplied path suppression. The rule has no
+// host component on purpose: it applies to the same path on every domain that
+// belongs to the site (main domain, www alias, standalone language domains).
+type AccessLogIgnore struct {
+	Path      string `json:"path"`
+	CreatedAt string `json:"created_at"`
+}
+
+// normalizeAccessLogIgnorePath accepts either a path or a full URL and stores a
+// canonical path without query/fragment/trailing slash. A pasted URL such as
+// https://www.example.com/wp-admin/install.php therefore becomes
+// /wp-admin/install.php and matches every domain.
+func normalizeAccessLogIgnorePath(raw string) (string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", fmt.Errorf("忽略路径不能为空")
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "", fmt.Errorf("忽略路径无效")
+	}
+	pathValue := parsed.Path
+	if pathValue == "" {
+		if parsed.IsAbs() || parsed.Host != "" {
+			pathValue = "/"
+		} else {
+			pathValue = trimmed
+		}
+	}
+	if !strings.HasPrefix(pathValue, "/") {
+		pathValue = "/" + pathValue
+	}
+	cleaned := path.Clean(pathValue)
+	if cleaned == "." || cleaned == "" {
+		cleaned = "/"
+	}
+	if len(cleaned) > 500 {
+		return "", fmt.Errorf("忽略路径过长")
+	}
+	if strings.ContainsAny(cleaned, "\x00\r\n") {
+		return "", fmt.Errorf("忽略路径包含非法字符")
+	}
+	return cleaned, nil
+}
+
+func (s *Server) listAccessLogIgnores(ctx context.Context, siteID int64) ([]AccessLogIgnore, error) {
+	rows, err := s.database.QueryContext(ctx, `SELECT "path", "created_at" FROM "`+db.AccessLogIgnoreTable+`"
+		WHERE "site_id" = ? ORDER BY "created_at" DESC, "path" ASC`, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AccessLogIgnore{}
+	for rows.Next() {
+		var item AccessLogIgnore
+		if err := rows.Scan(&item.Path, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Server) addAccessLogIgnore(ctx context.Context, siteID int64, raw string) (AccessLogIgnore, error) {
+	pathValue, err := normalizeAccessLogIgnorePath(raw)
+	if err != nil {
+		return AccessLogIgnore{}, err
+	}
+	if _, err := s.database.ExecContext(ctx, `INSERT OR IGNORE INTO "`+db.AccessLogIgnoreTable+`" ("site_id", "path") VALUES (?, ?)`, siteID, pathValue); err != nil {
+		return AccessLogIgnore{}, err
+	}
+	var item AccessLogIgnore
+	if err := s.database.QueryRowContext(ctx, `SELECT "path", "created_at" FROM "`+db.AccessLogIgnoreTable+`" WHERE "site_id" = ? AND "path" = ?`, siteID, pathValue).Scan(&item.Path, &item.CreatedAt); err != nil {
+		return AccessLogIgnore{}, err
+	}
+	return item, nil
+}
+
+func (s *Server) removeAccessLogIgnore(ctx context.Context, siteID int64, raw string) (int64, error) {
+	pathValue, err := normalizeAccessLogIgnorePath(raw)
+	if err != nil {
+		return 0, err
+	}
+	result, err := s.database.ExecContext(ctx, `DELETE FROM "`+db.AccessLogIgnoreTable+`" WHERE "site_id" = ? AND "path" = ?`, siteID, pathValue)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+// accessLogIgnoreClause excludes operator-ignored paths from error statistics.
+// It is deliberately path-only and applies to every host of the site. Log
+// rows are kept for audit/raw inspection; only aggregation is filtered.
+func accessLogIgnoreClause(alias string) string {
+	prefix := ""
+	if alias != "" {
+		prefix = alias + "."
+	}
+	pathExpr := `CASE WHEN ` + prefix + `"path" = '/' THEN '/' ELSE RTRIM(` + prefix + `"path", '/') END`
+	return `NOT EXISTS (SELECT 1 FROM "` + db.AccessLogIgnoreTable + `" AS i
+		WHERE i."site_id" = ` + prefix + `"site_id" AND i."path" = ` + pathExpr + `)`
 }
 
 // userAgentInfo is a coarse, provider-independent classification used for
@@ -603,6 +722,7 @@ func deviceKindForAgent(lower string) string {
 type AccessLogItem struct {
 	ID          int64  `json:"id"`
 	SiteID      int64  `json:"site_id"`
+	Host        string `json:"host"`
 	DayKey      string `json:"day_key"`
 	Path        string `json:"path"`
 	Query       string `json:"query"`
@@ -652,6 +772,7 @@ type AccessLogPageStat struct {
 
 // AccessLogErrorStat is one grouped error URL, the core "what is broken" list.
 type AccessLogErrorStat struct {
+	Host            string `json:"host"`
 	Path            string `json:"path"`
 	Status          int    `json:"status"`
 	Hits            int64  `json:"hits"`
@@ -686,6 +807,7 @@ type AccessLogFilter struct {
 	DeviceKind  string
 	RefererKind string
 	Window      string
+	Sort        string
 	Path        string
 	PathPrefix  string
 	IP          string
@@ -701,6 +823,7 @@ func parseAccessLogFilter(values url.Values) AccessLogFilter {
 		DeviceKind:  strings.ToLower(strings.TrimSpace(values.Get("device_kind"))),
 		RefererKind: strings.ToLower(strings.TrimSpace(values.Get("referer_kind"))),
 		Window:      strings.ToLower(strings.TrimSpace(values.Get("window"))),
+		Sort:        strings.ToLower(strings.TrimSpace(values.Get("sort"))),
 		Path:        strings.TrimSpace(values.Get("path")),
 		PathPrefix:  strings.TrimSpace(values.Get("path_prefix")),
 		IP:          strings.TrimSpace(values.Get("ip")),
@@ -714,6 +837,7 @@ var accessLogDeviceKinds = map[string]bool{"": true, "all": true, "desktop": tru
 var accessLogRefererKinds = map[string]bool{"": true, "all": true, "internal": true, "external": true, "none": true, "invalid": true}
 var accessLogStatusModes = map[string]bool{"": true, "all": true, "errors": true, "404": true, "4xx": true, "5xx": true, "200": true, "3xx": true}
 var accessLogWindows = map[string]bool{"": true, "all": true, "today": true, "1h": true, "24h": true, "3d": true}
+var accessLogSorts = map[string]bool{"": true, "hits": true, "recent": true}
 
 func normalizeAccessLogFilter(filter AccessLogFilter) AccessLogFilter {
 	if !accessLogKinds[filter.Kind] {
@@ -733,6 +857,9 @@ func normalizeAccessLogFilter(filter AccessLogFilter) AccessLogFilter {
 	}
 	if !accessLogWindows[filter.Window] {
 		filter.Window = ""
+	}
+	if !accessLogSorts[filter.Sort] {
+		filter.Sort = ""
 	}
 	if len(filter.Path) > 300 {
 		filter.Path = filter.Path[:300]
@@ -848,22 +975,24 @@ func (s *Server) accessLogSummary(ctx context.Context, siteID int64) (AccessLogS
 		recentPC          sql.NullInt64
 		recentMobile      sql.NullInt64
 	}
-	err := s.database.QueryRowContext(ctx, `SELECT
+	ignore := accessLogIgnoreClause("l")
+	metricsQuery := `SELECT
 			COUNT(*),
 			COALESCE(SUM(CASE WHEN "kind" = 'page' AND "day_key" = ? THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN "kind" = 'error' AND "day_key" = ? THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN "kind" = 'error' AND ` + ignore + ` AND "day_key" = ? THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN "kind" = 'page' AND "visited_at" >= datetime('now', '-24 hours') THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN "kind" = 'error' AND "visited_at" >= datetime('now', '-24 hours') THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN "kind" = 'error' THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN "status" = 404 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN "status" = 404 AND "visited_at" >= datetime('now', '-24 hours') THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN "status" = 404 AND "referer_kind" = 'internal' THEN 1 ELSE 0 END), 0),
-			COUNT(DISTINCT CASE WHEN "status" = 404 AND "referer_kind" = 'internal' THEN "path" END),
+			COALESCE(SUM(CASE WHEN "kind" = 'error' AND ` + ignore + ` AND "visited_at" >= datetime('now', '-24 hours') THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN "kind" = 'error' AND ` + ignore + ` THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN "status" = 404 AND ` + ignore + ` THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN "status" = 404 AND ` + ignore + ` AND "visited_at" >= datetime('now', '-24 hours') THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN "status" = 404 AND "referer_kind" = 'internal' AND ` + ignore + ` THEN 1 ELSE 0 END), 0),
+			COUNT(DISTINCT CASE WHEN "status" = 404 AND "referer_kind" = 'internal' AND ` + ignore + ` THEN "path" END),
 			COUNT(DISTINCT CASE WHEN "kind" = 'page' AND "status" = 200 THEN "path" END),
 			COUNT(DISTINCT CASE WHEN "kind" = 'page' AND "agent_kind" <> 'bot' AND "ip" <> '' AND "visited_at" >= datetime('now', '-24 hours') THEN "ip" END),
 			COUNT(DISTINCT CASE WHEN "kind" = 'page' AND "agent_kind" <> 'bot' AND "ip" <> '' AND "device_kind" = 'desktop' AND "visited_at" >= datetime('now', '-24 hours') THEN "ip" END),
 			COUNT(DISTINCT CASE WHEN "kind" = 'page' AND "agent_kind" <> 'bot' AND "ip" <> '' AND "device_kind" = 'mobile' AND "visited_at" >= datetime('now', '-24 hours') THEN "ip" END)
-		FROM "`+db.AccessLogTable+`" WHERE "site_id" = ?`, dayKey, dayKey, siteID).
+		FROM "` + db.AccessLogTable + `" l WHERE l."site_id" = ?`
+	err := s.database.QueryRowContext(ctx, metricsQuery, dayKey, dayKey, siteID).
 		Scan(&row.totalRows, &row.todayVisits, &row.todayErrors, &row.recentVisits, &row.recentErrors,
 			&row.totalErrors, &row.totalNotFound, &row.recentNotFound, &row.internalNotF, &row.internalNotFPaths, &row.totalPages,
 			&row.recentUsers, &row.recentPC, &row.recentMobile)
@@ -916,18 +1045,18 @@ func (s *Server) accessLogSummary(ctx context.Context, siteID int64) (AccessLogS
 	_ = pageRows.Close()
 
 	errorRows, err := s.database.QueryContext(ctx, `SELECT
-			"path", "status", COUNT(*), COUNT(DISTINCT "ip"),
-			COALESCE(SUM(CASE WHEN "referer_kind" = 'internal' THEN 1 ELSE 0 END), 0),
-			MAX("visited_at"),
-			COALESCE((SELECT "referer" FROM "`+db.AccessLogTable+`" x
-				WHERE x."site_id" = l."site_id" AND x."path" = l."path" AND x."status" = l."status" AND x."referer" <> ''
+			l."host", l."path", l."status", COUNT(*), COUNT(DISTINCT l."ip"),
+			COALESCE(SUM(CASE WHEN l."referer_kind" = 'internal' THEN 1 ELSE 0 END), 0),
+			MAX(l."visited_at"),
+			COALESCE((SELECT x."referer" FROM "`+db.AccessLogTable+`" x
+				WHERE x."site_id" = l."site_id" AND x."host" = l."host" AND x."path" = l."path" AND x."status" = l."status" AND x."referer" <> ''
 				ORDER BY x."id" DESC LIMIT 1), ''),
-			COALESCE((SELECT "referer_kind" FROM "`+db.AccessLogTable+`" x
-				WHERE x."site_id" = l."site_id" AND x."path" = l."path" AND x."status" = l."status" AND x."referer" <> ''
+			COALESCE((SELECT x."referer_kind" FROM "`+db.AccessLogTable+`" x
+				WHERE x."site_id" = l."site_id" AND x."host" = l."host" AND x."path" = l."path" AND x."status" = l."status" AND x."referer" <> ''
 				ORDER BY x."id" DESC LIMIT 1), 'none')
 		FROM "`+db.AccessLogTable+`" l
-		WHERE l."site_id" = ? AND l."status" >= 400
-		GROUP BY l."path", l."status"
+		WHERE l."site_id" = ? AND l."status" >= 400 AND `+accessLogIgnoreClause("l")+`
+		GROUP BY l."host", l."path", l."status"
 		ORDER BY MAX(l."visited_at") DESC, COUNT(*) DESC LIMIT ?`, siteID, accessLogTopErrorsLimit)
 	if err != nil {
 		return summary, err
@@ -935,7 +1064,7 @@ func (s *Server) accessLogSummary(ctx context.Context, siteID int64) (AccessLogS
 	for errorRows.Next() {
 		var item AccessLogErrorStat
 		var last sql.NullString
-		if scanErr := errorRows.Scan(&item.Path, &item.Status, &item.Hits, &item.UniqueIPs, &item.InternalHits, &last, &item.LastReferer, &item.LastRefererKind); scanErr != nil {
+		if scanErr := errorRows.Scan(&item.Host, &item.Path, &item.Status, &item.Hits, &item.UniqueIPs, &item.InternalHits, &last, &item.LastReferer, &item.LastRefererKind); scanErr != nil {
 			_ = errorRows.Close()
 			return summary, scanErr
 		}
@@ -944,8 +1073,9 @@ func (s *Server) accessLogSummary(ctx context.Context, siteID int64) (AccessLogS
 	}
 	_ = errorRows.Close()
 
-	statusRows, err := s.database.QueryContext(ctx, `SELECT "status", COUNT(*) FROM "`+db.AccessLogTable+`"
-		WHERE "site_id" = ? AND "status" >= 400 GROUP BY "status" ORDER BY COUNT(*) DESC`, siteID)
+	statusRows, err := s.database.QueryContext(ctx, `SELECT l."status", COUNT(*) FROM "`+db.AccessLogTable+`" l
+		WHERE l."site_id" = ? AND l."status" >= 400 AND `+accessLogIgnoreClause("l")+`
+		GROUP BY l."status" ORDER BY COUNT(*) DESC`, siteID)
 	if err != nil {
 		return summary, err
 	}
@@ -970,7 +1100,7 @@ func (s *Server) listAccessLogs(ctx context.Context, siteID int64, filter Access
 	}
 	offset := (page - 1) * pageSize
 	queryArgs := append(append([]any{}, args...), pageSize, offset)
-	rows, err := s.database.QueryContext(ctx, `SELECT "id", "site_id", "day_key", "path", "query", "method", "status", "kind",
+	rows, err := s.database.QueryContext(ctx, `SELECT "id", "site_id", "host", "day_key", "path", "query", "method", "status", "kind",
 			"content_type", "ip", "referer", "referer_host", "referer_kind", "user_agent", "agent_kind", "agent_label", "device_kind", "visited_at"
 		FROM "`+db.AccessLogTable+`" WHERE `+where+` ORDER BY "id" DESC LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
@@ -981,7 +1111,7 @@ func (s *Server) listAccessLogs(ctx context.Context, siteID int64, filter Access
 	for rows.Next() {
 		var item AccessLogItem
 		var visited sql.NullString
-		if err := rows.Scan(&item.ID, &item.SiteID, &item.DayKey, &item.Path, &item.Query, &item.Method, &item.Status, &item.Kind,
+		if err := rows.Scan(&item.ID, &item.SiteID, &item.Host, &item.DayKey, &item.Path, &item.Query, &item.Method, &item.Status, &item.Kind,
 			&item.ContentType, &item.IP, &item.Referer, &item.RefererHost, &item.RefererKind, &item.UserAgent, &item.AgentKind, &item.AgentLabel, &item.DeviceKind, &visited); err != nil {
 			return nil, 0, err
 		}
@@ -994,47 +1124,95 @@ func (s *Server) listAccessLogs(ctx context.Context, siteID int64, filter Access
 	return items, total, nil
 }
 
-func (s *Server) listAccessLogErrors(ctx context.Context, siteID int64, filter AccessLogFilter, limit int) ([]AccessLogErrorStat, error) {
+func (s *Server) listAccessLogErrors(ctx context.Context, siteID int64, filter AccessLogFilter, limit, offset int) ([]AccessLogErrorStat, int64, error) {
 	filter = normalizeAccessLogFilter(filter)
 	where, args := s.buildAccessLogWhere(siteID, filter)
 	if filter.StatusMode == "" && filter.Status == 0 {
 		where += ` AND "status" >= 400`
 	}
+	where += ` AND ` + accessLogIgnoreClause("l")
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-	args = append(args, limit)
+	if offset < 0 {
+		offset = 0
+	}
+	var total int64
+	countQuery := `SELECT COUNT(*) FROM (SELECT 1 FROM "` + db.AccessLogTable + `" l WHERE ` + where + ` GROUP BY l."host", l."path", l."status")`
+	if err := s.database.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	orderBy := `COUNT(*) DESC, MAX(l."visited_at") DESC`
+	if filter.Sort == "recent" {
+		orderBy = `MAX(l."visited_at") DESC, COUNT(*) DESC`
+	}
+	queryArgs := append(append([]any{}, args...), limit, offset)
 	rows, err := s.database.QueryContext(ctx, `SELECT
-			l."path", l."status", COUNT(*), COUNT(DISTINCT l."ip"),
+			l."host", l."path", l."status", COUNT(*), COUNT(DISTINCT l."ip"),
 			COALESCE(SUM(CASE WHEN l."referer_kind" = 'internal' THEN 1 ELSE 0 END), 0),
 			MAX(l."visited_at"),
 			COALESCE((SELECT x."referer" FROM "`+db.AccessLogTable+`" x
-				WHERE x."site_id" = l."site_id" AND x."path" = l."path" AND x."status" = l."status" AND x."referer" <> ''
+				WHERE x."site_id" = l."site_id" AND x."host" = l."host" AND x."path" = l."path" AND x."status" = l."status" AND x."referer" <> ''
 				ORDER BY x."id" DESC LIMIT 1), ''),
 			COALESCE((SELECT x."referer_kind" FROM "`+db.AccessLogTable+`" x
-				WHERE x."site_id" = l."site_id" AND x."path" = l."path" AND x."status" = l."status" AND x."referer" <> ''
+				WHERE x."site_id" = l."site_id" AND x."host" = l."host" AND x."path" = l."path" AND x."status" = l."status" AND x."referer" <> ''
 				ORDER BY x."id" DESC LIMIT 1), 'none')
 		FROM "`+db.AccessLogTable+`" l
 		WHERE `+where+`
-		GROUP BY l."path", l."status" ORDER BY COUNT(*) DESC, MAX(l."visited_at") DESC LIMIT ?`, args...)
+		GROUP BY l."host", l."path", l."status" ORDER BY `+orderBy+` LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	items := []AccessLogErrorStat{}
 	for rows.Next() {
 		var item AccessLogErrorStat
 		var last sql.NullString
-		if err := rows.Scan(&item.Path, &item.Status, &item.Hits, &item.UniqueIPs, &item.InternalHits, &last, &item.LastReferer, &item.LastRefererKind); err != nil {
-			return nil, err
+		if err := rows.Scan(&item.Host, &item.Path, &item.Status, &item.Hits, &item.UniqueIPs, &item.InternalHits, &last, &item.LastReferer, &item.LastRefererKind); err != nil {
+			return nil, 0, err
 		}
 		item.LastVisitedAt = s.accessLogs.formatVisited(last.String)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return items, nil
+	return items, total, nil
+}
+
+func (s *Server) listAccessLogPages(ctx context.Context, siteID int64, limit, offset int) ([]AccessLogPageStat, int64, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	where := `"site_id" = ? AND "kind" = 'page' AND "status" = 200 AND "agent_kind" <> 'bot'`
+	var total int64
+	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM "`+db.AccessLogTable+`" WHERE `+where+` GROUP BY "path")`, siteID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.database.QueryContext(ctx, `SELECT "path", COUNT(*), COUNT(DISTINCT "ip"), MAX("visited_at")
+		FROM "`+db.AccessLogTable+`" WHERE `+where+`
+		GROUP BY "path" ORDER BY COUNT(*) DESC, MAX("visited_at") DESC LIMIT ? OFFSET ?`, siteID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := []AccessLogPageStat{}
+	for rows.Next() {
+		var item AccessLogPageStat
+		var last sql.NullString
+		if err := rows.Scan(&item.Path, &item.Visits, &item.UniqueIPs, &last); err != nil {
+			return nil, 0, err
+		}
+		item.LastVisitedAt = s.accessLogs.formatVisited(last.String)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }
 
 func (s *Server) clearAccessLogs(ctx context.Context, siteID int64, filter AccessLogFilter) (int64, error) {

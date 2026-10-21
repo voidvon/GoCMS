@@ -80,9 +80,32 @@ X-Robots-Tag: noindex, follow
 
 后台卡片与徽标改用去重地址数，避免把命中次数误读成地址数。
 
-### 4. 错误响应不再继承长缓存
+### 4. 多域名错误归并
+
+访问日志新增 `host` 字段，保存实际请求域名（保留 `www.`，独立语言域名也分别保留）。错误列表和访问明细按 `host + path + status` 归并/展示，仪表盘新增“域名”列。服务启动时 `EnsureAccessLog` 会自动补列并建索引，不需要手工迁移。
+
+- 新记录：显示真实请求域名。
+- 升级前的历史记录：`host=''`，后台回退显示当前站点主域名，保留期结束后自然淘汰。
+- 因此同一个 `/missing-page` 在 `www.example.com` 和 `cn.example.com` 上会显示为两条独立记录，不再混在一起。
+
+### 5. 错误响应不再继承长缓存
 
 Go 侧统一为 4xx/5xx 设置 `Cache-Control: no-store`；Nginx 侧移除 `uploads/images`、`css/js/assets` 和 HTML location 上的 `add_header ... always`，只对成功响应设置长缓存/协商缓存。
+
+### 6. 仪表盘滚动加载
+
+- `GET /api/admin/access-logs/errors` 支持 `limit`、`offset`、`sort=hits|recent`，返回真实分组总数；仪表盘使用 `sort=recent`。
+- 新增 `GET /api/admin/access-logs/pages`，支持 `limit`、`offset`，用于热门页面。
+- “错误与死链”和“热门页面”卡片内部固定最大高度，滚动到底部自动加载下一页。
+- “错误类型”统计从错误列表下方移到错误卡片右侧的窄栏，列表不再被状态徽章挤压。
+
+### 7. 忽略路径
+
+- 新增 `gocms_access_log_ignore`，按 `site_id + path` 保存规则，不保存 host，因此规则对站点所有域名生效；启动时 `EnsureAccessLogIgnore` 自动建表，无需手工迁移。
+- 完整 URL 会规范化为路径（去掉协议、域名、查询串和尾斜杠）；例如 `https://www.example.com/wp-admin/install.php` 保存为 `/wp-admin/install.php`。
+- 忽略后不再进入错误总数、404/站内死链、错误类型分布和错误归并列表；原始访问明细保留。
+- API：`GET/POST/DELETE /api/admin/access-logs/ignores`。
+- 仪表盘错误表格最后一列 hover 显示忽略图标；“错误与死链”右侧提供忽略列表入口，可取消忽略。
 
 ## 部署顺序
 
@@ -91,6 +114,16 @@ Go 侧统一为 4xx/5xx 设置 `Cache-Control: no-store`；Nginx 侧移除 `uplo
 3. 清理 Cloudflare 上已有的 404 缓存（旧缓存可能仍带 30 天 TTL）。
 4. 更新主题 `header.html`，使用 `is_404` / `seo_robots` / `seo_title` 分支。
 5. 重新发布站点，确认 404 页面、sitemap 和访问统计。
+
+## 本地测试数据
+
+```bash
+python3 scripts/seed-access-logs.py --reset
+# 或指定站点/域名
+python3 scripts/seed-access-logs.py --site 2 --hosts test.local,www.test.local --reset
+```
+
+默认写入站点 1 的 287 条记录（182 条页面访问、105 条错误、46 个错误路径），并预置 `/xmlrpc.php` 到忽略列表，便于测试滚动加载、域名列、错误类型、忽略与取消忽略。
 
 ## 验证清单
 

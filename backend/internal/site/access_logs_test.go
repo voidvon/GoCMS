@@ -160,6 +160,7 @@ func TestAccessLogRecordsPublicTraffic(t *testing.T) {
 		{"invalid referer", `SELECT COUNT(*) FROM ` + table + ` WHERE "referer_kind" = 'invalid'`, nil, 1},
 		{"recorded ip", `SELECT COUNT(*) FROM ` + table + ` WHERE "ip" = '192.0.2.1'`, nil, 9},
 		{"recorded content type", `SELECT COUNT(*) FROM ` + table + ` WHERE "status" = 404 AND "content_type" <> ''`, nil, 3},
+		{"recorded request host", `SELECT COUNT(*) FROM ` + table + ` WHERE "path" = '/missing-page' AND "host" = 'example.test'`, nil, 1},
 	}
 	for _, check := range checks {
 		if got := count(check.query, check.args...); got != check.want {
@@ -170,6 +171,7 @@ func TestAccessLogRecordsPublicTraffic(t *testing.T) {
 
 type accessLogRow struct {
 	siteID      int64
+	host        string
 	path        string
 	status      int
 	kind        string
@@ -205,6 +207,9 @@ func TestAccessLogAdminEndpoints(t *testing.T) {
 
 	insert := func(row accessLogRow) {
 		t.Helper()
+		if row.host == "" {
+			row.host = "example.test"
+		}
 		if row.ip == "" {
 			row.ip = "203.0.113.10"
 		}
@@ -233,10 +238,10 @@ func TestAccessLogAdminEndpoints(t *testing.T) {
 			}
 		}
 		if _, err := database.Exec(`INSERT INTO "`+db.AccessLogTable+`"
-			("site_id", "day_key", "path", "query", "method", "status", "kind", "content_type", "ip",
+			("site_id", "host", "day_key", "path", "query", "method", "status", "kind", "content_type", "ip",
 			 "referer", "referer_host", "referer_kind", "user_agent", "agent_kind", "agent_label", "device_kind", "visited_at")
-			VALUES (?, ?, ?, '', 'GET', ?, ?, 'text/html', ?, '', '', ?, 'ua', ?, ?, ?, ?)`,
-			row.siteID, row.dayKey, row.path, row.status, row.kind, row.ip, row.refererKind, row.agentKind, row.agentLabel, row.deviceKind, row.visitedAt); err != nil {
+			VALUES (?, ?, ?, ?, '', 'GET', ?, ?, 'text/html', ?, '', '', ?, 'ua', ?, ?, ?, ?)`,
+			row.siteID, row.host, row.dayKey, row.path, row.status, row.kind, row.ip, row.refererKind, row.agentKind, row.agentLabel, row.deviceKind, row.visitedAt); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -321,11 +326,47 @@ func TestAccessLogAdminEndpoints(t *testing.T) {
 	}
 	// The error-group endpoint stays ranked by hit count (the traffic log's
 	// "worst first" view); only the dashboard summary ranks by newest first.
-	if errors.Items[0].Path != "/b" || errors.Items[0].Status != 404 || errors.Items[0].Hits != 2 || errors.Items[0].InternalHits != 2 {
-		t.Fatalf("first error group = %+v, want /b 404 with 2 internal hits", errors.Items[0])
+	if errors.Items[0].Host != "example.test" || errors.Items[0].Path != "/b" || errors.Items[0].Status != 404 || errors.Items[0].Hits != 2 || errors.Items[0].InternalHits != 2 {
+		t.Fatalf("first error group = %+v, want example.test /b 404 with 2 internal hits", errors.Items[0])
 	}
 	if errors.Items[1].Path != "/c" || errors.Items[1].Status != 500 {
 		t.Fatalf("second error group = %+v, want /c 500", errors.Items[1])
+	}
+
+	// The dashboard loads more rows with limit/offset and asks for newest-first
+	// ordering; /c is newest, so offset=1 starts at /b.
+	errPage := siteAdminRequest(server, token, http.MethodGet, "/api/admin/access-logs/errors?limit=1&offset=1&sort=recent", "1", "")
+	if errPage.Code != http.StatusOK {
+		t.Fatalf("GET errors page = %d, body %s", errPage.Code, errPage.Body.String())
+	}
+	var errPageBody struct {
+		Items  []AccessLogErrorStat `json:"items"`
+		Total  int                  `json:"total"`
+		Offset int                  `json:"offset"`
+		Limit  int                  `json:"limit"`
+	}
+	if err := json.Unmarshal(errPage.Body.Bytes(), &errPageBody); err != nil {
+		t.Fatal(err)
+	}
+	if errPageBody.Total != 2 || errPageBody.Offset != 1 || errPageBody.Limit != 1 || len(errPageBody.Items) != 1 || errPageBody.Items[0].Path != "/b" {
+		t.Fatalf("errors page = %+v, want total 2 offset 1 limit 1 /b", errPageBody)
+	}
+
+	pagesResponse := siteAdminRequest(server, token, http.MethodGet, "/api/admin/access-logs/pages?limit=1&offset=1", "1", "")
+	if pagesResponse.Code != http.StatusOK {
+		t.Fatalf("GET pages = %d, body %s", pagesResponse.Code, pagesResponse.Body.String())
+	}
+	var pagesBody struct {
+		Items  []AccessLogPageStat `json:"items"`
+		Total  int                 `json:"total"`
+		Offset int                 `json:"offset"`
+		Limit  int                 `json:"limit"`
+	}
+	if err := json.Unmarshal(pagesResponse.Body.Bytes(), &pagesBody); err != nil {
+		t.Fatal(err)
+	}
+	if pagesBody.Total != 2 || pagesBody.Offset != 1 || pagesBody.Limit != 1 || len(pagesBody.Items) != 1 || pagesBody.Items[0].Path != "/old" {
+		t.Fatalf("pages page = %+v, want total 2 offset 1 limit 1 /old", pagesBody)
 	}
 
 	statsResponse := siteAdminRequest(server, token, http.MethodGet, "/api/admin/stats", "1", "")
@@ -370,6 +411,9 @@ func TestAccessLogAdminEndpoints(t *testing.T) {
 	// has more hits.
 	if len(stats.Access.TopErrors) < 2 || stats.Access.TopErrors[0].Path != "/c" || stats.Access.TopErrors[1].Path != "/b" {
 		t.Errorf("stats top errors = %+v, want newest /c first then /b", stats.Access.TopErrors)
+	}
+	if stats.Access.TopErrors[0].Host != "example.test" {
+		t.Errorf("stats top error host = %q, want example.test", stats.Access.TopErrors[0].Host)
 	}
 	if len(stats.Access.StatusBreakdown) != 2 {
 		t.Errorf("stats status breakdown = %+v, want 404 and 500", stats.Access.StatusBreakdown)
@@ -437,6 +481,15 @@ func TestAccessLogPermissions(t *testing.T) {
 	}
 	if response := siteAdminRequest(server, readerToken, http.MethodGet, "/api/admin/access-logs/errors", "1", ""); response.Code != http.StatusOK {
 		t.Fatalf("reader GET errors = %d, body %s", response.Code, response.Body.String())
+	}
+	if response := siteAdminRequest(server, readerToken, http.MethodGet, "/api/admin/access-logs/pages", "1", ""); response.Code != http.StatusOK {
+		t.Fatalf("reader GET pages = %d, body %s", response.Code, response.Body.String())
+	}
+	if response := siteAdminRequest(server, readerToken, http.MethodPost, "/api/admin/access-logs/ignores", "1", `{"path":"/reader-ignore"}`); response.Code != http.StatusCreated {
+		t.Fatalf("reader POST ignore = %d, body %s", response.Code, response.Body.String())
+	}
+	if response := siteAdminRequest(server, readerToken, http.MethodDelete, "/api/admin/access-logs/ignores?path=/reader-ignore", "1", ""); response.Code != http.StatusOK {
+		t.Fatalf("reader DELETE ignore = %d, body %s", response.Code, response.Body.String())
 	}
 	if response := siteAdminRequest(server, readerToken, http.MethodGet, "/api/admin/stats", "1", ""); response.Code != http.StatusOK {
 		t.Fatalf("reader GET stats = %d, body %s", response.Code, response.Body.String())
@@ -608,5 +661,160 @@ func TestAccessLogRefererFetchMetadata(t *testing.T) {
 				t.Fatalf("referer_kind = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAccessLogErrorsGroupByHost(t *testing.T) {
+	server, database, _, _ := newSiteAdminTestServer(t)
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	for _, host := range []string{"www.example.test", "cn.example.test"} {
+		if _, err := database.Exec(`INSERT INTO "`+db.AccessLogTable+`"
+			("site_id", "host", "day_key", "path", "status", "kind", "content_type", "referer_kind", "agent_kind", "agent_label", "device_kind", "visited_at")
+			VALUES (1, ?, '2026-10-21', '/same-path', 404, 'error', 'text/html', 'none', 'browser', 'Chrome', 'desktop', ?)`, host, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, _, err := server.listAccessLogErrors(context.Background(), 1, AccessLogFilter{StatusMode: "404"}, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("groups = %+v, want one group per host", items)
+	}
+	seen := map[string]bool{}
+	for _, item := range items {
+		seen[item.Host] = true
+	}
+	for _, host := range []string{"www.example.test", "cn.example.test"} {
+		if !seen[host] {
+			t.Fatalf("missing host %q in %+v", host, items)
+		}
+	}
+}
+
+func TestAccessLogIgnoreRules(t *testing.T) {
+	server, database, token, _ := newSiteAdminTestServer(t)
+	today := time.Now().In(time.Local).Format("2006-01-02")
+	now := time.Now().UTC().Format("2006-01-02 15:04:05")
+	insert := func(path string) {
+		t.Helper()
+		if _, err := database.Exec(`INSERT INTO "`+db.AccessLogTable+`"
+			("site_id", "host", "day_key", "path", "status", "kind", "content_type", "referer_kind", "agent_kind", "agent_label", "device_kind", "visited_at")
+			VALUES (1, 'example.test', ?, ?, 404, 'error', 'text/html', 'none', 'browser', 'Chrome', 'desktop', ?)`, today, path, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("/wp-admin/install.php")
+	insert("/wp-admin/install.php/")
+	insert("/real-missing")
+	if _, err := database.Exec(`UPDATE "gocms_site" SET "domain" = 'example.test' WHERE "is_default" = 1`); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := func() AccessLogMetrics {
+		t.Helper()
+		response := siteAdminRequest(server, token, http.MethodGet, "/api/admin/stats", "1", "")
+		if response.Code != http.StatusOK {
+			t.Fatalf("stats = %d, body %s", response.Code, response.Body.String())
+		}
+		var payload AdminStats
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload.Access.Metrics
+	}
+	if got := stats(); got.TotalErrors != 3 || got.TodayErrors != 3 || got.TotalNotFound != 3 {
+		t.Fatalf("before ignore = %+v, want 3 errors", got)
+	}
+
+	// A pasted full URL is normalized to the path-only rule.
+	add := siteAdminRequest(server, token, http.MethodPost, "/api/admin/access-logs/ignores", "1", `{"path":"https://www.example.test/wp-admin/install.php?x=1"}`)
+	if add.Code != http.StatusCreated {
+		t.Fatalf("add ignore = %d, body %s", add.Code, add.Body.String())
+	}
+	var added struct {
+		Item AccessLogIgnore `json:"item"`
+	}
+	if err := json.Unmarshal(add.Body.Bytes(), &added); err != nil {
+		t.Fatal(err)
+	}
+	if added.Item.Path != "/wp-admin/install.php" {
+		t.Fatalf("normalized ignore path = %q", added.Item.Path)
+	}
+
+	// Ignored paths disappear from error metrics and grouped errors, including
+	// the trailing-slash variant, while raw rows remain available for audit.
+	if got := stats(); got.TotalErrors != 1 || got.TodayErrors != 1 || got.TotalNotFound != 1 {
+		t.Fatalf("after ignore = %+v, want 1 error", got)
+	}
+	errorResponse := siteAdminRequest(server, token, http.MethodGet, "/api/admin/access-logs/errors?limit=100", "1", "")
+	if errorResponse.Code != http.StatusOK {
+		t.Fatalf("errors = %d, body %s", errorResponse.Code, errorResponse.Body.String())
+	}
+	var groups struct {
+		Items []AccessLogErrorStat `json:"items"`
+		Total int                  `json:"total"`
+	}
+	if err := json.Unmarshal(errorResponse.Body.Bytes(), &groups); err != nil {
+		t.Fatal(err)
+	}
+	if groups.Total != 1 || len(groups.Items) != 1 || groups.Items[0].Path != "/real-missing" {
+		t.Fatalf("grouped errors = %+v, want only /real-missing", groups)
+	}
+	raw := siteAdminRequest(server, token, http.MethodGet, "/api/admin/access-logs?page_size=100", "1", "")
+	if raw.Code != http.StatusOK {
+		t.Fatalf("raw logs = %d, body %s", raw.Code, raw.Body.String())
+	}
+	var rawBody struct {
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(raw.Body.Bytes(), &rawBody); err != nil {
+		t.Fatal(err)
+	}
+	if rawBody.Total != 3 {
+		t.Fatalf("raw rows = %d, want 3", rawBody.Total)
+	}
+
+	list := siteAdminRequest(server, token, http.MethodGet, "/api/admin/access-logs/ignores", "1", "")
+	if list.Code != http.StatusOK {
+		t.Fatalf("list ignores = %d, body %s", list.Code, list.Body.String())
+	}
+	var listed struct {
+		Items []AccessLogIgnore `json:"items"`
+		Total int               `json:"total"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if listed.Total != 1 || len(listed.Items) != 1 || listed.Items[0].Path != "/wp-admin/install.php" {
+		t.Fatalf("ignored list = %+v", listed)
+	}
+
+	remove := siteAdminRequest(server, token, http.MethodDelete, "/api/admin/access-logs/ignores?path=/wp-admin/install.php", "1", "")
+	if remove.Code != http.StatusOK {
+		t.Fatalf("remove ignore = %d, body %s", remove.Code, remove.Body.String())
+	}
+	if got := stats(); got.TotalErrors != 3 || got.TotalNotFound != 3 {
+		t.Fatalf("after unignore = %+v, want 3 errors", got)
+	}
+}
+
+func TestNormalizeAccessLogIgnorePath(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want string
+	}{
+		{"/wp-admin/install.php", "/wp-admin/install.php"},
+		{"https://www.example.test/wp-admin/install.php?x=1", "/wp-admin/install.php"},
+		{"wp-admin/install.php/", "/wp-admin/install.php"},
+		{"https://www.example.test", "/"},
+	} {
+		got, err := normalizeAccessLogIgnorePath(tc.in)
+		if err != nil || got != tc.want {
+			t.Errorf("normalizeAccessLogIgnorePath(%q) = %q, %v, want %q", tc.in, got, err, tc.want)
+		}
+	}
+	if _, err := normalizeAccessLogIgnorePath("  "); err == nil {
+		t.Fatal("empty ignore path accepted")
 	}
 }
