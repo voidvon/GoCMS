@@ -225,7 +225,6 @@ func (s *Server) ensureSiteThemeLocal(ctx context.Context, siteID int64) (themeR
 	return themeRoot, templateRoot, nil
 }
 
-
 func (s *Server) adminTheme(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet {
 		methodNotAllowed(response)
@@ -811,7 +810,6 @@ func (s *Server) deleteThemeFile(response http.ResponseWriter, request *http.Req
 		return
 	}
 
-
 	root, _, ok := s.themeFileSpecForRoots(kind, themeRoot, templateRoot)
 	if !ok || root == "" {
 		http.Error(response, "模板组资源目录未配置", http.StatusServiceUnavailable)
@@ -873,6 +871,27 @@ func normalizeManagedFileKind(value string) (string, error) {
 	}
 }
 
+// isPublicRootImage reports whether a filename is a standard web-root image
+// (favicon, touch icon, site logo). These files are served from the theme asset
+// root instead of /images/ so browsers and crawlers can request them directly.
+func isPublicRootImage(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "favicon.ico",
+		"favicon-16x16.png",
+		"favicon-32x32.png",
+		"favicon-48x48.png",
+		"apple-touch-icon.png",
+		"apple-touch-icon-precomposed.png",
+		"android-chrome-192x192.png",
+		"android-chrome-512x512.png",
+		"mstile-150x150.png",
+		"logo.svg",
+		"safari-pinned-tab.svg":
+		return true
+	}
+	return false
+}
+
 func normalizeCustomFilePath(kind, value string) (string, error) {
 	value = strings.TrimSpace(strings.ReplaceAll(value, `\`, "/"))
 	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, ":") {
@@ -913,6 +932,9 @@ func normalizeCustomFilePath(kind, value string) (string, error) {
 		}
 		if strings.HasPrefix(clean, "css/") || strings.HasPrefix(clean, "js/") || strings.HasPrefix(clean, "skin/") {
 			return "", errInvalidThemePath
+		}
+		if isPublicRootImage(clean) {
+			return strings.ToLower(clean), nil
 		}
 		if !strings.HasPrefix(clean, "images/") {
 			clean = pathpkg.Join("images", clean)
@@ -1088,7 +1110,41 @@ func detectedThemeImageExtension(data []byte) string {
 	if len(data) >= 12 && bytes.Equal(data[4:8], []byte("ftyp")) && bytes.Contains(data[8:12], []byte("avif")) {
 		return ".avif"
 	}
+	if isSVGImage(data) {
+		return ".svg"
+	}
 	return ""
+}
+
+// isSVGImage recognizes SVG documents without relying on browser MIME sniffing.
+func isSVGImage(data []byte) bool {
+	data = bytes.TrimSpace(bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF}))
+	if len(data) == 0 {
+		return false
+	}
+	lower := bytes.ToLower(data)
+	if bytes.HasPrefix(lower, []byte("<svg")) || bytes.HasPrefix(lower, []byte("<!doctype svg")) {
+		return true
+	}
+	return bytes.HasPrefix(lower, []byte("<?xml")) && bytes.Contains(lower, []byte("<svg"))
+}
+
+// validateSVGImage rejects active content. SVG is served from the same origin,
+// so scripts and event handlers would otherwise become stored XSS vectors.
+func validateSVGImage(data []byte) error {
+	lower := bytes.ToLower(data)
+	for _, token := range [][]byte{
+		[]byte("<script"),
+		[]byte("javascript:"),
+		[]byte("onload="),
+		[]byte("onerror="),
+		[]byte("<foreignobject"),
+	} {
+		if bytes.Contains(lower, token) {
+			return invalidThemeFileInput("SVG 包含不允许的脚本或事件属性")
+		}
+	}
+	return nil
 }
 
 func validateThemeImage(data []byte, extension string) error {
@@ -1098,6 +1154,11 @@ func validateThemeImage(data []byte, extension string) error {
 	}
 	if detected == "" || !strings.EqualFold(detected, extension) {
 		return invalidThemeFileInput("图片内容与扩展名不匹配")
+	}
+	if strings.EqualFold(extension, ".svg") {
+		if err := validateSVGImage(data); err != nil {
+			return err
+		}
 	}
 	return nil
 }

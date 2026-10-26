@@ -360,7 +360,7 @@ function CustomFilesPanel({ files, kind, onFilesChange, onNotice, onError }: Cus
   const content = fileState.key === contentKey ? fileState.content : null
   const loading = Boolean(contentKey) && fileState.key !== contentKey
   const title = activeKind === "css" ? "CSS 文件" : activeKind === "js" ? "JS 文件" : "图片文件"
-  const accept = activeKind === "css" ? ".css,text/css" : activeKind === "js" ? ".js,text/javascript" : "image/png,image/jpeg,image/gif,image/webp,image/x-icon"
+  const accept = activeKind === "css" ? ".css,text/css" : activeKind === "js" ? ".js,text/javascript" : "image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/x-icon,.ico,.svg"
 
   useEffect(() => {
     if (activeKind === "image" || !activePath) return

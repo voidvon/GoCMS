@@ -240,6 +240,37 @@ func TestAdminTemplateCustomFiles(t *testing.T) {
 		t.Fatalf("public image = %d, %d bytes", publicImage.Code, publicImage.Body.Len())
 	}
 
+	// Standard web-root assets keep their root path and are served directly.
+	var rootBody bytes.Buffer
+	rootWriter := multipart.NewWriter(&rootBody)
+	if err := rootWriter.WriteField("kind", "image"); err != nil {
+		t.Fatal(err)
+	}
+	if err := rootWriter.WriteField("path", "logo.svg"); err != nil {
+		t.Fatal(err)
+	}
+	rootPart, err := rootWriter.CreateFormFile("file", "logo.svg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootPart.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg>`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := rootWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rootResponse := request(http.MethodPost, "/api/admin/templates/files", &rootBody, rootWriter.FormDataContentType())
+	if rootResponse.Code != http.StatusCreated || !strings.Contains(rootResponse.Body.String(), `"path":"logo.svg"`) {
+		t.Fatalf("upload root image status = %d: %s", rootResponse.Code, rootResponse.Body.String())
+	}
+	rootPublic := request(http.MethodGet, "/logo.svg", nil, "")
+	if rootPublic.Code != http.StatusOK || rootPublic.Body.Len() == 0 {
+		t.Fatalf("public root image = %d, %d bytes", rootPublic.Code, rootPublic.Body.Len())
+	}
+	if got := rootPublic.Header().Get("Content-Type"); got != "image/svg+xml" {
+		t.Fatalf("public root image content type = %q", got)
+	}
+
 	traversal := request(http.MethodPut, "/api/admin/templates/files", strings.NewReader(`{"kind":"css","path":"../outside.css","content":"nope"}`), "application/json")
 	if traversal.Code != http.StatusBadRequest {
 		t.Fatalf("custom file traversal status = %d: %s", traversal.Code, traversal.Body.String())
@@ -440,4 +471,42 @@ func writeTestTheme(t *testing.T, themesRoot, id, name string) themepkg.Definiti
 		t.Fatal(err)
 	}
 	return definition
+}
+
+func TestThemeCustomRootImagePaths(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"favicon.ico", "favicon.ico"},
+		{"favicon-32x32.png", "favicon-32x32.png"},
+		{"apple-touch-icon.png", "apple-touch-icon.png"},
+		{"logo.svg", "logo.svg"},
+		{"Favicon.ICO", "favicon.ico"},
+		{"cover.png", "images/cover.png"},
+		{"images/cover.png", "images/cover.png"},
+	}
+	for _, item := range cases {
+		got, err := normalizeCustomFilePath("image", item.input)
+		if err != nil {
+			t.Fatalf("normalize %q: %v", item.input, err)
+		}
+		if got != item.want {
+			t.Fatalf("normalize %q = %q, want %q", item.input, got, item.want)
+		}
+	}
+}
+
+func TestThemeCustomSVGValidation(t *testing.T) {
+	svg := []byte(`<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0h10v10H0z"/></svg>`)
+	if got := detectedThemeImageExtension(svg); got != ".svg" {
+		t.Fatalf("detected SVG = %q", got)
+	}
+	if err := validateThemeImage(svg, ".svg"); err != nil {
+		t.Fatalf("valid SVG rejected: %v", err)
+	}
+	bad := []byte(`<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>`)
+	if err := validateThemeImage(bad, ".svg"); err == nil {
+		t.Fatal("SVG with onload accepted")
+	}
 }

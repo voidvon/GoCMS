@@ -45,6 +45,16 @@ func (s *Server) resourceRoots(r *http.Request) ([]string, string, int64, bool) 
 		}
 	}
 
+	// Standard web-root assets (favicon, touch icon, logo) live directly in the
+	// theme asset root and are served at "/" rather than under /images/.
+	rootName := strings.TrimPrefix(strings.ToLower(r.URL.Path), "/")
+	if rootName != "" && !strings.Contains(rootName, "/") && isPublicRootImage(rootName) {
+		if themeRoot == "" {
+			return nil, "", siteID, false
+		}
+		return []string{themeRoot}, rootName, siteID, true
+	}
+
 	themeRoots := func(directory string) []string {
 		if themeRoot == "" {
 			return nil
@@ -147,6 +157,15 @@ func (s *Server) serveResource(w http.ResponseWriter, r *http.Request) bool {
 		}
 		info, err := f.Stat()
 		if err == nil && info.Mode().IsRegular() {
+			switch strings.ToLower(filepath.Ext(rel)) {
+			case ".svg":
+				w.Header().Set("Content-Type", "image/svg+xml")
+				w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+			case ".ico":
+				w.Header().Set("Content-Type", "image/vnd.microsoft.icon")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+			}
 			if data, ok := s.minifiedAsset(r.Context(), siteID, root, rel, r.URL.Path, f, info); ok {
 				http.ServeContent(w, r, info.Name(), info.ModTime(), bytes.NewReader(data))
 			} else {
