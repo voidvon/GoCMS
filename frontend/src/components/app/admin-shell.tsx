@@ -321,7 +321,7 @@ type SidebarProps = Pick<NavigationProps, "activeView" | "onNavigate"> &
 
 function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarProps) {
   return (
-    <aside id="desktop-sidebar" aria-label="侧边栏" data-state={collapsed ? "collapsed" : "expanded"} className={cn("hidden shrink-0 border-r bg-muted/20 transition-[width] duration-200 motion-reduce:transition-none lg:block", collapsed ? "w-16" : "w-60")}>
+    <aside id="desktop-sidebar" aria-label="侧边栏" data-state={collapsed ? "collapsed" : "expanded"} className={cn("hidden shrink-0 border-r bg-muted/20 transition-[width] duration-200 lg:block", collapsed ? "w-16" : "w-60")}>
       <div className={cn("sticky top-0 flex h-svh flex-col py-4", collapsed ? "px-2" : "px-4")}>
         <div className={cn("flex shrink-0 items-center gap-3 py-2", collapsed ? "justify-center" : "px-2")}>
           <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">

@@ -27,3 +27,4 @@
 /legacy/
 
 .DS_Store
+.env.local
