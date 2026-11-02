@@ -142,6 +142,7 @@ func TestGenerateContentLanguagesAndSiteIsolation(t *testing.T) {
 		INSERT INTO gocms_language (site_id, code, name, site_mode, path_prefix, output_dir) VALUES
 		(2, 'en', 'Other English', 'subdir', 'foreign-english', ''),
 		(2, 'de', 'Deutsch', 'standalone', '', 'foreign-standalone');
+		UPDATE gocms_language SET domain = 'ru.example.test' WHERE site_id = 1 AND code = 'ru';
 		INSERT INTO gocms_content_translation (content_id, lang, title) VALUES (301, 'en', 'English before'), (301, 'ru', 'Russian before');
 		INSERT INTO gocms_content (id, site_id, category_id, route_key, title, visible) VALUES (901, 2, 93, 'other-site', '其他站点', 1)`); err != nil {
 		t.Fatal(err)
@@ -224,8 +225,8 @@ func TestGenerateContentStandaloneFailurePreservesAllLanguages(t *testing.T) {
 	p := incrementalFixture(t)
 	p.SiteID = 1
 	ctx := context.Background()
-	if _, err := p.DB.Exec(`INSERT INTO gocms_language (code, name, is_enabled, site_mode, output_dir)
-		VALUES ('ru', 'Russian', 1, 'standalone', 'independent')`); err != nil {
+	if _, err := p.DB.Exec(`INSERT INTO gocms_language (code, name, is_enabled, site_mode, domain, output_dir)
+		VALUES ('ru', 'Russian', 1, 'standalone', 'ru.example.test', 'independent')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.Generate(ctx); err != nil {

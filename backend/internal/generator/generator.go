@@ -1095,13 +1095,10 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		published[key] = c.published
 		if c.isStandalone {
 			if contentID == 0 {
-				langSiteURL := lang.Domain
-				if langSiteURL == "" {
-					langSiteURL = c.settings["site_url"]
-				} else if !strings.Contains(langSiteURL, "://") {
-					langSiteURL = "https://" + langSiteURL
+				langSiteURL, domainErr := standaloneIndexURL(lang.Domain)
+				if domainErr != nil {
+					return report, fmt.Errorf("%s: %w", lang.Name, domainErr)
 				}
-				langSiteURL = strings.TrimRight(langSiteURL, "/")
 
 				langUrls := sitemapURLs(c.pages)
 

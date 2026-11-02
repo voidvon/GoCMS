@@ -1131,6 +1131,22 @@ func TestStandaloneLanguageSiteGeneration(t *testing.T) {
 	if !strings.Contains(ruRobots, "Sitemap: https://ru.example.com/sitemap.xml") {
 		t.Fatalf("unexpected ru robots: %s", ruRobots)
 	}
+	for _, filename := range []string{"sitemap.html", "sitemap.xml", "llms.txt"} {
+		body := readGenerated(t, ruDir, filename)
+		if !strings.Contains(body, "news/1.html") || strings.Contains(body, "/en/") || strings.Contains(body, "example.test") {
+			t.Fatalf("standalone index %s included another target: %s", filename, body)
+		}
+	}
+	if _, err := database.Exec(`UPDATE gocms_language SET domain = '' WHERE site_id = 2 AND code = 'ru'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := publisher.Generate(ctx); err == nil {
+		t.Fatal("full publication silently reused the main domain for a standalone language")
+	}
+	if readGenerated(t, ruDir, "index.html") != ruHome || readGenerated(t, mainWeb, "index.html") != zhHome {
+		t.Fatal("missing domain changed published pages")
+	}
+
 }
 
 func TestListIndexFilePatternPagination(t *testing.T) {

@@ -29,6 +29,10 @@ make frontend
 
 发布路由记录保存于 `data/publish-pages.json`（其他站点为 `publish_<site_id>-pages.json`），用于单条更新时清理旧详情地址、过期分页，并在内容移动后更新原栏目及其父级。升级后先执行一次全站发布，可为全部内容建立完整记录；没有旧记录时，无法追溯此前改名或移动前的地址，可通过全站发布清理。单条更新先保留无关页面并暂存全部语言输出，全部准备成功后再切换目录；切换或路由记录保存失败会尝试恢复已切换目录。
 
+“网站发布”按发布目标展示索引：主站与子目录语言共用一份 `sitemap.html`、`sitemap.xml` 和 `llms.txt`；独立语言站点各自生成一份，XML 和 llms.txt 使用各自配置的域名。页面显示每个文件是否存在、最后修改时间和公开地址，已生成文件及 XML 兼容地址 `/Sitemap.xml` 均可在新窗口查看。支持单个文件、本组全部索引、全部发布目标索引三种生成范围，数据来自已发布 HTML，排除 404 页面和地图自身。独立语言模式必须配置域名；缺少域名时显示待配置，全站发布和该组索引生成会拒绝执行，不再回退套用主站域名。未发布页面的目标需先全站发布。
+
+索引接口为 `GET /api/admin/publish/indexes`（返回当前站点的目标、语言范围及文件状态）和 `POST /api/admin/publish/indexes`。POST JSON 中 `target` 为 `main`、GET 返回的独立语言目标 ID 或 `all`，`format` 为 `html`、`xml`、`llms` 或 `all`。接口需要当前站点的“网站发布”权限，与全站发布共用文件锁；跨站点目标不可访问。原 `/api/admin/publish/sitemap` 和 `/api/admin/publish/llms` 接口保留为主站索引生成入口。
+
 ```sh
 make generate  # 命令行全站生成
 make test      # Go 测试/vet + 前端构建

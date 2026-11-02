@@ -186,6 +186,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminPublish(response, request)
 	case "/api/admin/publish/content":
 		s.adminPublishContent(response, request)
+	case "/api/admin/publish/indexes":
+		s.adminPublishIndexes(response, request)
 	case "/api/admin/publish/llms":
 		s.adminLLMS(response, request)
 	case "/api/admin/publish/sitemap":

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -30,72 +29,12 @@ func (p Publisher) GenerateSitemap(ctx context.Context, format string) (string, 
 }
 
 func (p Publisher) generateIndex(ctx context.Context, format string) (string, error) {
-	format = strings.ToLower(strings.TrimSpace(format))
 	filename, ok := sitemapFilename(format)
 	if !ok {
-		return "", fmt.Errorf("不支持的网站地图格式: %s", format)
+		return "", fmt.Errorf("%w: %s", ErrIndexFormat, format)
 	}
-	if err := os.MkdirAll(p.Data, 0755); err != nil {
+	if err := p.generateIndexFiles(ctx, "main", format, false); err != nil {
 		return "", err
-	}
-	lock, err := os.OpenFile(filepath.Join(p.Data, p.lockPath()), os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return "", err
-	}
-	defer lock.Close()
-	unlock, err := acquirePublishLock(lock)
-	if err != nil {
-		return "", ErrPublishBusy
-	}
-	defer unlock()
-
-	targetWeb := p.TargetWeb()
-	if p.SiteID <= 1 {
-		if _, err := os.Stat(targetWeb); os.IsNotExist(err) && p.Web != "" {
-			if _, errWeb := os.Stat(p.Web); errWeb == nil {
-				targetWeb = p.Web
-			}
-		}
-	}
-	if targetWeb == "" {
-		targetWeb = p.Web
-	}
-	web, err := filepath.Abs(targetWeb)
-
-	if err != nil {
-		return "", err
-	}
-	if web == filepath.Dir(web) {
-		return "", fmt.Errorf("invalid web root")
-	}
-	if err := os.MkdirAll(web, 0755); err != nil {
-		return "", err
-	}
-	urls, err := publishedURLs(ctx, web)
-	if err != nil {
-		return "", err
-	}
-	base, err := configuredSiteURL(ctx, p.DB, p.SiteID)
-	if err != nil {
-		return "", err
-	}
-
-	var body []byte
-	if format == SitemapHTML {
-		body = renderSitemapHTML(urls)
-	} else if format == "llms" {
-		body, err = renderLLMS(ctx, base, urls, func(path string) (io.ReadCloser, error) { return os.Open(filepath.Join(web, filepath.FromSlash(path))) })
-		if err != nil {
-			return "", err
-		}
-	} else {
-		body = renderSitemapXML(base, urls)
-	}
-	if err := atomicWrite(filepath.Join(web, filename), body); err != nil {
-		return "", err
-	}
-	if format == SitemapXML {
-		_ = atomicWrite(filepath.Join(web, "sitemap.xml"), body)
 	}
 	return filename, nil
 }
@@ -114,6 +53,10 @@ func sitemapFilename(format string) (string, bool) {
 }
 
 func publishedURLs(ctx context.Context, web string) ([]string, error) {
+	return publishedURLsExcluding(ctx, web, nil)
+}
+
+func publishedURLsExcluding(ctx context.Context, web string, excluded []string) ([]string, error) {
 	if _, err := os.Stat(web); os.IsNotExist(err) {
 		return []string{}, nil
 	}
@@ -126,6 +69,11 @@ func publishedURLs(ctx context.Context, web string) ([]string, error) {
 			return err
 		}
 		if entry.IsDir() {
+			for _, directory := range excluded {
+				if filepath.Clean(filePath) == filepath.Clean(directory) {
+					return filepath.SkipDir
+				}
+			}
 			return nil
 		}
 		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {

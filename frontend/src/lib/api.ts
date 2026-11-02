@@ -981,15 +981,43 @@ export function deleteFeedbackField(id: number) {
 
 export type Publication = { state: "idle" | "running" | "success" | "failed"; started: string; finished: string; files: number; contents: number; error?: string; content_id?: number }
 export type SaveResponse = { ok: boolean; publication?: Publication; publish_started?: boolean }
-export function getPublication() { return request<Publication>("/api/admin/publish") }
+export function getPublication(siteId?: number) { return request<Publication>(`/api/admin/publish${query({ site_id: siteId })}`) }
 export function publishContent(id: number) {
   return request<Publication>("/api/admin/publish/content", {
     method: "POST",
     body: JSON.stringify({ id }),
   })
 }
-export function publishSite() { return request<Publication>("/api/admin/publish", { method: "POST" }) }
+export function publishSite(siteId?: number) { return request<Publication>(`/api/admin/publish${query({ site_id: siteId })}`, { method: "POST" }) }
 export type SitemapFormat = "html" | "xml"
+export type IndexFormat = SitemapFormat | "llms"
+export type PublishIndexFile = {
+  format: IndexFormat
+  path: string
+  url: string
+  exists: boolean
+  updated_at: string | null
+  aliases?: Array<{ path: string; url: string; exists: boolean }>
+}
+export type PublishTarget = {
+  id: string
+  name: string
+  mode: "subdir" | "standalone"
+  url: string
+  languages: Array<{ code: string; name: string; path: string }>
+  files: PublishIndexFile[]
+  published: boolean
+  issue?: string
+}
+export function getPublishTargets(siteId: number) {
+  return request<{ targets: PublishTarget[] }>(`/api/admin/publish/indexes${query({ site_id: siteId })}`)
+}
+export function generatePublishIndexes(siteId: number, target: string, format: IndexFormat | "all") {
+  return request<{ ok: boolean; targets: PublishTarget[] }>(`/api/admin/publish/indexes${query({ site_id: siteId })}`, {
+    method: "POST",
+    body: JSON.stringify({ target, format }),
+  })
+}
 export type SitemapResponse = { ok: boolean; format: SitemapFormat; path: string }
 export function generateSitemap(format: SitemapFormat) {
   return request<SitemapResponse>("/api/admin/publish/sitemap", {
