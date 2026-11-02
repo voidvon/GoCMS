@@ -692,8 +692,8 @@ export function getCategories(lang?: string) {
   return request<CategoryItem[]>(`/api/admin/categories${query({ lang: lang || undefined })}`)
 }
 
-export function getLanguages() {
-  return request<Language[]>("/api/admin/languages")
+export function getLanguages(siteId?: number) {
+  return request<Language[]>(`/api/admin/languages${query({ site_id: siteId })}`)
 }
 
 export function createLanguage(payload: LanguageInput) {

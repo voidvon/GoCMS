@@ -118,7 +118,7 @@ func TestLegacyLanguagePrefixRedirect(t *testing.T) {
 
 func TestLegacyLanguagePrefixesSkipsSubdirectoryLanguages(t *testing.T) {
 	server, _, _ := newLegacyRedirectTestServer(t)
-	prefixes := server.legacyLanguagePrefixes(context.Background())
+	prefixes := server.legacyLanguagePrefixes(context.Background(), 1)
 	contains := func(value string) bool {
 		for _, prefix := range prefixes {
 			if prefix == value {
@@ -135,6 +135,39 @@ func TestLegacyLanguagePrefixesSkipsSubdirectoryLanguages(t *testing.T) {
 	for _, unwanted := range []string{"es", "de"} {
 		if contains(unwanted) {
 			t.Fatalf("子目录/停用语言 %q 不应出现在前缀列表：%v", unwanted, prefixes)
+		}
+	}
+}
+
+func TestLegacyLanguagePrefixCacheIsolatesSites(t *testing.T) {
+	server, database, root := newLegacyRedirectTestServer(t)
+	site, err := db.CreateSite(context.Background(), database, &db.Site{Name: "任意乙站", Code: "beta", Domain: "beta.example.test", OutputDir: "beta"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`UPDATE gocms_language SET code = 'fr', name = 'Français' WHERE site_id = ?`, site.ID); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "beta", "products", "a")
+	if err := os.MkdirAll(target, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "index.html"), []byte("beta"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Alternate hosts to exercise a warmed cache for both sites.
+	for _, test := range []struct {
+		host, prefix string
+		status       int
+	}{
+		{"example.test", "en", http.StatusMovedPermanently},
+		{"beta.example.test", "en", http.StatusNotFound},
+		{"beta.example.test", "fr", http.StatusMovedPermanently},
+		{"example.test", "fr", http.StatusNotFound},
+	} {
+		res := legacyRedirectRequest(t, server, http.MethodGet, test.host, "/"+test.prefix+"/products/a/")
+		if res.Code != test.status {
+			t.Fatalf("%s/%s: got %d want %d", test.host, test.prefix, res.Code, test.status)
 		}
 	}
 }

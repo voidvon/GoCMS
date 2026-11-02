@@ -29,7 +29,7 @@ type AdminContentPage struct {
 }
 
 func (s *Server) queryAdminContent(ctx context.Context, siteID int64, query string, categoryID int64, includeChildren bool, lang string, page, pageSize int) (AdminContentPage, error) {
-	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx)
+	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx, siteID)
 	if lang == "" {
 		lang = defaultLang
 	}

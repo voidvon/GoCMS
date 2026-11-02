@@ -143,12 +143,6 @@ func (s *Server) invalidateSitePublication(siteID int64) {
 	}
 }
 
-func (s *Server) invalidateAllPublications() {
-	s.sitePubMu.Lock()
-	defer s.sitePubMu.Unlock()
-	s.sitePublications = make(map[int64]*publication)
-}
-
 func (s *Server) startPublish(queue bool) (generator.Report, bool) {
 
 	return s.startPublishPub(s.publication, queue)

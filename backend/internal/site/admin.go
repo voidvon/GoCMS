@@ -357,7 +357,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 	}
 
 	requestedLang := strings.TrimSpace(request.URL.Query().Get("lang"))
-	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(request.Context())
+	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(request.Context(), siteID)
 	if requestedLang == "" {
 		requestedLang = defaultLang
 	}
@@ -463,38 +463,6 @@ func (s *Server) adminCategory(response http.ResponseWriter, request *http.Reque
 }
 
 func (s *Server) saveCategory(response http.ResponseWriter, request *http.Request, id int64) {
-	var payload categoryPayload
-	if err := decodeRequest(request, &payload); err != nil {
-		http.Error(response, "invalid category payload", http.StatusBadRequest)
-		return
-	}
-	payload.Name = strings.TrimSpace(payload.Name)
-	payload.LinkURL = strings.TrimSpace(payload.LinkURL)
-	if payload.Name == "" && payload.Translations != nil {
-		defaultLang, _ := s.getDefaultAndFallbackLang(request.Context())
-		if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Name) != "" {
-			payload.Name = strings.TrimSpace(def.Name)
-			payload.SEOTitle = def.SEOTitle
-			payload.Description = def.Description
-			payload.CoverContent = def.CoverContent
-			if def.LinkURL != "" {
-				payload.LinkURL = strings.TrimSpace(def.LinkURL)
-			}
-		}
-	}
-	if payload.Name == "" {
-		http.Error(response, "category name is required", http.StatusBadRequest)
-		return
-	}
-	if payload.ParentID < 0 {
-		payload.ParentID = 0
-	}
-	if payload.OrderID < 0 {
-		payload.OrderID = 0
-	}
-	if payload.ModelID < 1 {
-		payload.ModelID = 1
-	}
 	user := s.currentAdmin(request)
 	siteID, err := s.resolveSiteID(request, user)
 	if err != nil {
@@ -520,6 +488,39 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		targetSiteID = existingSiteID
 	}
 
+	var payload categoryPayload
+	if err := decodeRequest(request, &payload); err != nil {
+		http.Error(response, "invalid category payload", http.StatusBadRequest)
+		return
+	}
+	payload.Name = strings.TrimSpace(payload.Name)
+	payload.LinkURL = strings.TrimSpace(payload.LinkURL)
+	if payload.Name == "" && payload.Translations != nil {
+		defaultLang, _ := s.getDefaultAndFallbackLang(request.Context(), targetSiteID)
+		if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Name) != "" {
+			payload.Name = strings.TrimSpace(def.Name)
+			payload.SEOTitle = def.SEOTitle
+			payload.Description = def.Description
+			payload.CoverContent = def.CoverContent
+			if def.LinkURL != "" {
+				payload.LinkURL = strings.TrimSpace(def.LinkURL)
+			}
+		}
+	}
+	if payload.Name == "" {
+		http.Error(response, "category name is required", http.StatusBadRequest)
+		return
+	}
+	if payload.ParentID < 0 {
+		payload.ParentID = 0
+	}
+	if payload.OrderID < 0 {
+		payload.OrderID = 0
+	}
+	if payload.ModelID < 1 {
+		payload.ModelID = 1
+	}
+
 	if err := s.normalizeCategoryRoutes(request.Context(), targetSiteID, id, &payload); err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
@@ -534,7 +535,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 	if requestedLang == "" {
 		requestedLang = strings.TrimSpace(request.URL.Query().Get("lang"))
 	}
-	defaultLang, _ := s.getDefaultAndFallbackLang(request.Context())
+	defaultLang, _ := s.getDefaultAndFallbackLang(request.Context(), targetSiteID)
 	if requestedLang == "" {
 		requestedLang = defaultLang
 	}

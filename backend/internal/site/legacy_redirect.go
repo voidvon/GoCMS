@@ -19,13 +19,17 @@ import (
 const legacyPrefixCacheTTL = time.Minute
 
 type legacyPrefixCache struct {
-	mu       sync.Mutex
+	mu    sync.Mutex
+	sites map[int64]legacyPrefixEntry
+}
+
+type legacyPrefixEntry struct {
 	expires  time.Time
 	prefixes []string
 }
 
 func newLegacyPrefixCache() *legacyPrefixCache {
-	return &legacyPrefixCache{}
+	return &legacyPrefixCache{sites: make(map[int64]legacyPrefixEntry)}
 }
 
 // legacyLanguagePrefixes 返回“不应出现在生成 URL 中”的语言路径前缀：
@@ -33,14 +37,15 @@ func newLegacyPrefixCache() *legacyPrefixCache {
 //   - 独立域名语言（site_mode = standalone）的语言代码与配置前缀。
 //
 // 子目录语言（site_mode = subdir 且 path_prefix 非空）的前缀是真实路径，不参与重定向。
-func (s *Server) legacyLanguagePrefixes(ctx context.Context) []string {
+func (s *Server) legacyLanguagePrefixes(ctx context.Context, siteID int64) []string {
 	if s.database == nil || s.legacyPrefixes == nil {
 		return nil
 	}
 	cache := s.legacyPrefixes
 	cache.mu.Lock()
-	if time.Now().Before(cache.expires) {
-		prefixes := cache.prefixes
+	entry := cache.sites[siteID]
+	if time.Now().Before(entry.expires) {
+		prefixes := entry.prefixes
 		cache.mu.Unlock()
 		return prefixes
 	}
@@ -49,7 +54,7 @@ func (s *Server) legacyLanguagePrefixes(ctx context.Context) []string {
 	rows, err := s.database.QueryContext(ctx, `
 		SELECT "code", "path_prefix", "site_mode"
 		FROM "`+db.LanguageTable+`"
-		WHERE "is_enabled" = 1`)
+		WHERE "site_id" = ? AND "is_enabled" = 1`, siteID)
 	if err != nil {
 		return nil
 	}
@@ -85,14 +90,13 @@ func (s *Server) legacyLanguagePrefixes(ctx context.Context) []string {
 	}
 
 	cache.mu.Lock()
-	cache.prefixes = prefixes
-	cache.expires = time.Now().Add(legacyPrefixCacheTTL)
+	cache.sites[siteID] = legacyPrefixEntry{prefixes: prefixes, expires: time.Now().Add(legacyPrefixCacheTTL)}
 	cache.mu.Unlock()
 	return prefixes
 }
 
-func (s *Server) hasLegacyLanguagePrefix(ctx context.Context, segment string) bool {
-	for _, prefix := range s.legacyLanguagePrefixes(ctx) {
+func (s *Server) hasLegacyLanguagePrefix(ctx context.Context, siteID int64, segment string) bool {
+	for _, prefix := range s.legacyLanguagePrefixes(ctx, siteID) {
 		if strings.EqualFold(prefix, segment) {
 			return true
 		}
@@ -173,7 +177,7 @@ func (s *Server) legacyLanguagePrefixRedirect(response http.ResponseWriter, requ
 		return false
 	}
 	segments := strings.SplitN(strings.TrimPrefix(rawPath, "/"), "/", 2)
-	if segments[0] == "" || !s.hasLegacyLanguagePrefix(request.Context(), segments[0]) {
+	if segments[0] == "" || !s.hasLegacyLanguagePrefix(request.Context(), site.ID, segments[0]) {
 		return false
 	}
 	target := "/"

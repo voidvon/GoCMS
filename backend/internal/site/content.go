@@ -193,6 +193,16 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 }
 
 func (s *Server) saveContent(response http.ResponseWriter, request *http.Request, id int64) {
+	user, authenticated, _ := s.authenticateRequest(request)
+	if !authenticated || user == nil {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "未登录"})
+		return
+	}
+	siteID, err := s.resolveSiteID(request, user)
+	if err != nil {
+		writeJSON(response, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
 	var payload contentPayload
 	if err := decodeRequest(request, &payload); err != nil {
 		http.Error(response, "invalid content payload", http.StatusBadRequest)
@@ -200,7 +210,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	}
 	payload.Title = strings.TrimSpace(payload.Title)
 	if payload.Title == "" && payload.Translations != nil {
-		defaultLang, _ := s.getDefaultAndFallbackLang(request.Context())
+		defaultLang, _ := s.getDefaultAndFallbackLang(request.Context(), siteID)
 		if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Title) != "" {
 			payload.Title = strings.TrimSpace(def.Title)
 			payload.Summary = def.Summary
@@ -223,16 +233,6 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	}
 	payload.Featured = normalizeFlag(payload.Featured)
 	payload.Visible = normalizeFlag(payload.Visible)
-	user, authenticated, _ := s.authenticateRequest(request)
-	if !authenticated || user == nil {
-		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "未登录"})
-		return
-	}
-	siteID, err := s.resolveSiteID(request, user)
-	if err != nil {
-		writeJSON(response, http.StatusForbidden, map[string]string{"error": err.Error()})
-		return
-	}
 	if !user.canManageCategory(payload.Category) {
 		writeJSON(response, http.StatusForbidden, map[string]string{"error": "没有目标栏目的内容权限"})
 		return
@@ -322,7 +322,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	if requestedLang == "" {
 		requestedLang = strings.TrimSpace(request.URL.Query().Get("lang"))
 	}
-	defaultLang, _ := s.getDefaultAndFallbackLang(request.Context())
+	defaultLang, _ := s.getDefaultAndFallbackLang(request.Context(), siteID)
 	if requestedLang == "" {
 		requestedLang = defaultLang
 	}
@@ -495,7 +495,7 @@ func normalizeContentDate(value string) string {
 }
 
 func (s *Server) queryContent(ctx context.Context, siteID int64, query string, categoryID int64, includeChildren bool, lang string, page, pageSize int, visibleOnly bool) (ContentPage, error) {
-	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx)
+	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx, siteID)
 	if lang == "" {
 		lang = defaultLang
 	}
@@ -718,7 +718,11 @@ func scanContent(scanner contentScanner) (Content, error) {
 }
 
 func (s *Server) readContent(ctx context.Context, id int64, lang string, visibleOnly bool) (Content, error) {
-	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx)
+	var siteID int64
+	if err := s.database.QueryRowContext(ctx, `SELECT "site_id" FROM "gocms_content" WHERE "id" = ?`, id).Scan(&siteID); err != nil {
+		return Content{}, err
+	}
+	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx, siteID)
 	if lang == "" {
 		lang = defaultLang
 	}

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react"
 import { getLanguages, type Language } from "@/lib/api"
+import { useSite } from "@/lib/site-context"
 
 const ACTIVE_LANG_STORAGE_KEY = "gocms_admin_lang"
 
@@ -50,16 +51,23 @@ function resolveAdminLang(list: Language[]): string {
 }
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
+  const { activeSiteId } = useSite()
+
+  return <SiteLanguageProvider key={activeSiteId} siteId={activeSiteId}>{children}</SiteLanguageProvider>
+}
+
+function SiteLanguageProvider({ children, siteId }: { children: ReactNode; siteId: number }) {
+  const storageKey = `${ACTIVE_LANG_STORAGE_KEY}_${siteId}`
   const [languages, setLanguages] = useState<Language[]>([])
   const [activeLang, setActiveLangState] = useState<string>(() => {
-    return localStorage.getItem(ACTIVE_LANG_STORAGE_KEY) || ""
+    return localStorage.getItem(storageKey) || ""
   })
   const [loading, setLoading] = useState(false)
 
   const refreshLanguages = useCallback(async () => {
     setLoading(true)
     try {
-      const list = await getLanguages()
+      const list = await getLanguages(siteId)
       setLanguages(list)
       const fallbackCode = resolveAdminLang(list)
       setActiveLangState((prev) => {
@@ -73,7 +81,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [siteId])
 
   useEffect(() => {
     void refreshLanguages()
@@ -81,13 +89,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   const setActiveLang = useCallback((code: string) => {
     setActiveLangState(code)
-    localStorage.setItem(ACTIVE_LANG_STORAGE_KEY, code)
-  }, [])
+    localStorage.setItem(storageKey, code)
+  }, [storageKey])
 
   const resetActiveLang = useCallback(() => {
-    localStorage.removeItem(ACTIVE_LANG_STORAGE_KEY)
+    localStorage.removeItem(storageKey)
     setActiveLangState(resolveAdminLang(languages))
-  }, [languages])
+  }, [languages, storageKey])
 
   const defaultLang = languages.find((l) => l.is_default === 1)?.code || "zh-CN"
   const adminLang = languages.find((l) => l.is_admin_default === 1)?.code || defaultLang

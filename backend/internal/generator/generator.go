@@ -829,7 +829,7 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		return report, err
 	}
 	siteIDStr := strconv.FormatInt(siteID, 10)
-	for _, name := range []string{"gocms_category", "gocms_content"} {
+	for _, name := range []string{"gocms_category", "gocms_content", db.LanguageTable} {
 		rows, readErr := readTable(ctx, tx, name)
 		if readErr != nil {
 			_ = tx.Rollback()
@@ -847,7 +847,7 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		}
 		c.tables[name] = filtered
 	}
-	for _, name := range []string{"gocms_category_translation", "gocms_content_translation", "gocms_language", "gocms_model_field"} {
+	for _, name := range []string{"gocms_category_translation", "gocms_content_translation", "gocms_model_field"} {
 		rows, _ := readOptionalTable(ctx, tx, name)
 		c.tables[name] = rows
 	}

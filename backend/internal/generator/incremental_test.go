@@ -139,6 +139,9 @@ func TestGenerateContentLanguagesAndSiteIsolation(t *testing.T) {
 	p.SiteID, p.OutputDir = 1, "custom-site"
 	if _, err := p.DB.Exec(`INSERT INTO gocms_language (code, name, is_enabled, site_mode, path_prefix, output_dir) VALUES
 		('en', 'English', 1, 'subdir', 'english', ''), ('ru', 'Russian', 1, 'standalone', '', 'independent');
+		INSERT INTO gocms_language (site_id, code, name, site_mode, path_prefix, output_dir) VALUES
+		(2, 'en', 'Other English', 'subdir', 'foreign-english', ''),
+		(2, 'de', 'Deutsch', 'standalone', '', 'foreign-standalone');
 		INSERT INTO gocms_content_translation (content_id, lang, title) VALUES (301, 'en', 'English before'), (301, 'ru', 'Russian before');
 		INSERT INTO gocms_content (id, site_id, category_id, route_key, title, visible) VALUES (901, 2, 93, 'other-site', '其他站点', 1)`); err != nil {
 		t.Fatal(err)
@@ -167,6 +170,11 @@ func TestGenerateContentLanguagesAndSiteIsolation(t *testing.T) {
 	}
 	if _, err := p.GenerateContent(ctx, 901); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("cross-site content: %v", err)
+	}
+	for _, directory := range []string{filepath.Join(p.TargetWeb(), "foreign-english"), filepath.Join(p.Web, "foreign-standalone")} {
+		if _, err := os.Stat(directory); !os.IsNotExist(err) {
+			t.Fatalf("another site's language was published at %s: %v", directory, err)
+		}
 	}
 }
 

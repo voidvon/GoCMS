@@ -279,10 +279,11 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 
 	// 3. Scan standalone language sites (exact match or language domain pattern)
 	if langRows, err := query.QueryContext(ctx, `
-		SELECT "code", "domain", "output_dir"
+		SELECT "site_id", "code", "domain", "output_dir"
 		FROM "`+LanguageTable+`"
-		WHERE "site_mode" = '`+LanguageSiteModeStandalone+`' AND "is_enabled" = 1 AND "domain" != ''`); err == nil {
+		WHERE "site_mode" = '`+LanguageSiteModeStandalone+`' AND "is_enabled" = 1 AND "domain" != '' ORDER BY "site_id", "id"`); err == nil {
 		type matchedLang struct {
+			siteID    int64
 			code      string
 			domain    string
 			outputDir string
@@ -290,17 +291,18 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 		var matchedL *matchedLang
 		for langRows.Next() {
 			var code, dom, outDir string
-			if err := langRows.Scan(&code, &dom, &outDir); err == nil {
+			var siteID int64
+			if err := langRows.Scan(&siteID, &code, &dom, &outDir); err == nil {
 				domNorm := NormalizeDomain(dom)
 				if domNorm == host || MatchHostPattern(domNorm, host) {
-					matchedL = &matchedLang{code: code, domain: domNorm, outputDir: outDir}
+					matchedL = &matchedLang{siteID: siteID, code: code, domain: domNorm, outputDir: outDir}
 					break
 				}
 			}
 		}
 		_ = langRows.Close()
 		if matchedL != nil {
-			mainSite, err := GetDefaultSite(ctx, query)
+			mainSite, err := GetSiteByID(ctx, query, matchedL.siteID)
 			if err != nil {
 				return nil, err
 			}
@@ -415,6 +417,10 @@ func CreateSite(ctx context.Context, database *sql.DB, s *Site) (*Site, error) {
 		return nil, err
 	}
 	s.ID = siteID
+
+	if err := seedSiteLanguage(ctx, tx, siteID); err != nil {
+		return nil, fmt.Errorf("seed site language: %w", err)
+	}
 
 	// Seed default site settings for new site
 	if _, err := tx.ExecContext(ctx, `
@@ -598,6 +604,7 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 
 	// Cascade delete direct site-scoped tables
 	tables := []string{
+		LanguageTable,
 		"gocms_category",
 		"gocms_content",
 		"gocms_media",

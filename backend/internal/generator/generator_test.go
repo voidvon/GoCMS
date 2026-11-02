@@ -1003,10 +1003,13 @@ func TestStandaloneLanguageSiteGeneration(t *testing.T) {
 	// 2. en (subdir)
 	// 3. ru (standalone, domain: ru.example.com, output_dir: sub_ru)
 	if _, err := database.Exec(`
-		INSERT INTO "gocms_language" ("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir")
+		INSERT INTO "gocms_language" ("site_id", "code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir")
 		VALUES
-			('en', 'English', 0, 0, 1, 10, 'en', 'subdir', '', ''),
-			('ru', 'Русский', 0, 0, 1, 20, '', 'standalone', 'ru.example.com', 'sub_ru')`); err != nil {
+			(2, 'zh-CN', '简体中文', 1, 1, 1, 0, '', 'subdir', '', ''),
+			(2, 'en', 'English', 0, 0, 1, 10, 'en', 'subdir', '', ''),
+			(2, 'ru', 'Русский', 0, 0, 1, 20, '', 'standalone', 'ru.example.com', 'sub_ru'),
+			(1, 'en', 'Other English', 0, 0, 1, 10, 'foreign-en', 'subdir', '', ''),
+			(1, 'de', 'Deutsch', 0, 0, 1, 20, '', 'standalone', 'other.example.test', 'foreign-standalone')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1069,6 +1072,14 @@ func TestStandaloneLanguageSiteGeneration(t *testing.T) {
 	// ru: https://ru.example.com/ (cross-domain standalone URL!)
 	if !strings.Contains(zhHome, "zh-CN:/;") || !strings.Contains(zhHome, "en:/en/;") || !strings.Contains(zhHome, "ru:https://ru.example.com/;") {
 		t.Fatalf("unexpected main site lang switcher: %s", zhHome)
+	}
+	if strings.Contains(zhHome, "de:") || strings.Contains(zhHome, "foreign-en") {
+		t.Fatalf("another site's languages leaked into navigation: %s", zhHome)
+	}
+	for _, directory := range []string{filepath.Join(mainWeb, "foreign-en"), filepath.Join(web, "foreign-standalone")} {
+		if _, err := os.Stat(directory); !os.IsNotExist(err) {
+			t.Fatalf("another site's language was published at %s: %v", directory, err)
+		}
 	}
 	// Verify en subdir exists on main site
 	enHome := readGenerated(t, mainWeb, "en/index.html")
