@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"gocms/internal/consent"
 	"gocms/internal/db"
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
@@ -117,6 +118,7 @@ type LanguageInfo struct {
 }
 
 type content struct {
+	consentPolicy    consent.Policy
 	tables           map[string][]Row
 	settings         map[string]string
 	templates        map[string]*template.Template
@@ -252,6 +254,15 @@ func TemplateTags() []TemplateTag {
 			Context:     "所有模板", Example: `{{range listItems .}}{{label "content-card" .}}{{end}}`,
 		},
 		{
+			Name: "consent", Category: "隐私同意", Signature: `{{with consent}}...{{end}}`,
+			Description: "返回当前站点和语言的隐私策略。主题通过 data-consent 用途标记控制可选资源，通过 data-consent-open 增加设置入口。",
+			Context:     "所有模板", Example: `<button type="button" data-consent-open>隐私设置</button>`,
+			Fields: []TemplateField{
+				{Name: ".Enabled / .Version / .Revision", Type: "bool / string", Description: "当前语言启用状态、策略版本和修订标识"},
+				{Name: ".Purposes / .Text", Type: "[]string / map[string]string", Description: "可选用途及已解析文案（自行输出时需转义）"},
+			},
+		},
+		{
 			Name: "navigation", Category: "栏目导航", Signature: `{{range navigation .}}...{{end}} 或 {{range navigation "top" .}}...{{end}}`,
 			Description: "返回指定位置的导航树（支持 'main' 主导航、'top' 顶部副导航、'footer' 底部页脚导航，默认为 'main'）。",
 			Context:     "所有模板", Example: `{{range navigation "top" .}}<a href="{{.URL}}">{{.Name}}</a>{{end}}`,
@@ -369,6 +380,7 @@ func TemplateTags() []TemplateTag {
 
 func (c *content) templateFuncs() template.FuncMap {
 	return template.FuncMap{
+		"consent":               func() consent.Policy { return c.consentPolicy },
 		"contentItems":          c.contentItems,
 		"contentItemsWithImage": c.contentItemsWithImage,
 		"setting": func(key string) string {
@@ -844,6 +856,11 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		_ = tx.Rollback()
 		return report, err
 	}
+	privacy, err := consent.Parse(c.settings[consent.SettingKey])
+	if err != nil {
+		_ = tx.Rollback()
+		return report, fmt.Errorf("隐私同意配置无效: %w", err)
+	}
 	if strings.TrimSpace(c.settings["site_url"]) == "" && siteID > 0 {
 		var domain string
 		_ = tx.QueryRowContext(ctx, `SELECT "domain" FROM "`+db.SiteTable+`" WHERE "id" = ?`, siteID).Scan(&domain)
@@ -1041,6 +1058,7 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 
 	for _, lang := range enabledLanguages {
 		c.lang = lang.Code
+		c.consentPolicy = privacy.Resolve(siteID, lang.Code)
 		c.isStandalone = (lang.SiteMode == "standalone")
 		c.currentLangInfo = lang
 		if c.isStandalone {
@@ -1101,6 +1119,9 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 					c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", langSiteURL))
 				}
 			}
+			if err = applyConsent(c.pages, c.consentPolicy); err != nil {
+				return report, err
+			}
 			if err = normalizePages(c.pages, p.Assets, p.Theme, p.SiteID); err != nil {
 				return report, err
 			}
@@ -1111,6 +1132,9 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 				removed:   c.removed,
 			})
 		} else {
+			if err = applyConsent(c.pages, c.consentPolicy); err != nil {
+				return report, err
+			}
 			for k := range c.removed {
 				mainRemoved[k] = true
 			}
@@ -1128,6 +1152,10 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 			return report, err
 		}
 		c.pages["sitemap.html"] = renderSitemapHTML(urls)
+		c.pages["sitemap.html"], err = consent.Process(c.pages["sitemap.html"], privacy.Resolve(siteID, defaultLang))
+		if err != nil {
+			return report, err
+		}
 		xmlMap := renderSitemapXML(strings.TrimRight(c.settings["site_url"], "/"), urls)
 		c.pages["sitemap.xml"] = xmlMap
 		c.pages["Sitemap.xml"] = xmlMap

@@ -40,6 +40,8 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 
 模板数据调用和受限帝国 `[e:loop]` 迁移语法见 [模板数据调用说明](docs/template-data-calls.md)；AI 自动化接入与 API Key 规范见 [AI Agent 操作指南](docs/ai-agent-guide.md)。
 
+“多语言”及站点盾牌入口可配置隐私与 Cookie 同意，支持站点默认、语言覆盖和按用途加载可选资源。配置后需全站发布，第三方追踪需由主题接入用途标记，详见 [隐私同意配置与主题接入](docs/privacy-consent.md)。
+
 版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub，且已安装 `zip` 命令。Release 每个平台上传一个 `gocms-<tag>-<os>-<arch>.zip` 压缩包，包内包含对应平台的单文件可执行文件。更新器使用 Go 标准库解压 ZIP，不依赖 Linux 安装第三方工具。可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
 
 后台“关于 GoCMS”中的“检查更新”会读取 GitHub 最新 Release。服务检测到对应平台的新版本后会下载 ZIP 压缩包、解压可执行文件、替换当前程序并自动重启；主题、模板、业务图片、数据库和已发布网站目录都不会被更新流程覆盖。`v0.1.1` 的旧更新器只支持裸可执行文件，升级到 ZIP 版本前需要手动替换一次程序。

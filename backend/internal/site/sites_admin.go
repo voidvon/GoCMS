@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"gocms/internal/consent"
 	"gocms/internal/db"
 )
 
@@ -298,6 +299,12 @@ func (s *Server) adminSiteSettings(w http.ResponseWriter, r *http.Request) {
 		if err := decodeRequest(r, &payload); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式不正确"})
 			return
+		}
+		if raw, ok := payload[consent.SettingKey]; ok {
+			if _, err := consent.Parse(raw); err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "隐私同意配置无效: " + err.Error()})
+				return
+			}
 		}
 		if err := db.SaveSiteSettingsForSite(r.Context(), s.database, siteID, payload); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
