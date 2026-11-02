@@ -25,6 +25,10 @@ make frontend
 后台：`http://127.0.0.1:1244/admin/`，网站：`http://127.0.0.1:18080/`。
 后台页面内“网站发布”支持全站重新生成；内容编辑支持“仅保存”和“保存并发布”。隐藏内容会自动提交发布任务。已有任务运行时，新的保存发布请求会排队，在当前任务结束后再读取最新数据生成。
 
+内容列表每条记录的“更新 HTML”支持单条更新：使用已保存数据，重新生成该内容详情、所属栏目及全部父级栏目的所有分页/封面页，以及首页，覆盖所有启用语言（含独立语言站点）。链接栏目跳过静态生成并继续更新其父级。栏目层级、模板、路由和分页均沿用数据库配置；其他内容详情、无关栏目和网站索引保持原样。索引可在“网站发布”中单独生成；“保存并发布”仍执行全站发布。此操作需要当前站点的“网站发布”权限，且目标内容必须在当前站点及授权栏目范围内；接口为 `POST /api/admin/publish/content`，JSON 参数 `{"id":内容ID}`，完成后返回生成结果，已有发布任务时返回 409。
+
+发布路由记录保存于 `data/publish-pages.json`（其他站点为 `publish_<site_id>-pages.json`），用于单条更新时清理旧详情地址、过期分页，并在内容移动后更新原栏目及其父级。升级后先执行一次全站发布，可为全部内容建立完整记录；没有旧记录时，无法追溯此前改名或移动前的地址，可通过全站发布清理。单条更新先保留无关页面并暂存全部语言输出，全部准备成功后再切换目录；切换或路由记录保存失败会尝试恢复已切换目录。
+
 ```sh
 make generate  # 命令行全站生成
 make test      # Go 测试/vet + 前端构建
@@ -35,6 +39,8 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 后台“模板管理”以模板组为统一入口，按首页、封面、列表、内容、标签和其他模板分类管理，并提供“自定义文件”区维护模板引用的 CSS、JS 和图片。模板组支持切换、导入和导出；模板包为 ZIP，根目录包含 `theme.json`、`templates/` 和 `assets/`，资源按需放在 `assets/css/`、`assets/js/`、`assets/skin/`、`assets/images/`。`theme.json` 可用 `template_groups` 显式绑定 HTML 文件用途，没有该字段时兼容按文件名识别。切换前会检查全局页面绑定的模板，以及每个分类当前类型对应的 `list_template`、`cover_template` 或 `detail_template`，模板组需提供这些路径对应的模板。导入后模板组保存在 `assets/theme/<id>/`，切换会记录到 `data/theme.json` 并自动重新生成网站。模板包不包含数据库、业务图片或 `web/`。
 
 模板数据调用和受限帝国 `[e:loop]` 迁移语法见 [模板数据调用说明](docs/template-data-calls.md)；AI 自动化接入与 API Key 规范见 [AI Agent 操作指南](docs/ai-agent-guide.md)。
+
+“多语言”及站点盾牌入口可配置隐私与 Cookie 同意，支持站点默认、语言覆盖和按用途加载可选资源。配置后需全站发布，第三方追踪需由主题接入用途标记，详见 [隐私同意配置与主题接入](docs/privacy-consent.md)。
 
 版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub，且已安装 `zip` 命令。Release 每个平台上传一个 `gocms-<tag>-<os>-<arch>.zip` 压缩包，包内包含对应平台的单文件可执行文件。更新器使用 Go 标准库解压 ZIP，不依赖 Linux 安装第三方工具。可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
 

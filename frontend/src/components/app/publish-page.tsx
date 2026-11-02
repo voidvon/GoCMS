@@ -230,14 +230,17 @@ export function PublishPage() {
             {sitemapError && <InlineAlert className="mt-3">{sitemapError}</InlineAlert>}
             {sitemapNotice && <p className="mt-3 text-sm text-muted-foreground">{sitemapNotice}</p>}
           </div>
+          {report?.content_id ? (
+            <p className="text-sm text-muted-foreground">最近任务：更新内容 #{report.content_id} 的 HTML、关联栏目及首页。</p>
+          ) : null}
           {report?.state === "success" && (
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
-                <p className="text-sm text-muted-foreground">生成文件</p>
+                <p className="text-sm text-muted-foreground">本次生成文件</p>
                 <p className="text-2xl font-semibold">{report.files}</p>
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">公开内容</p>
+                <p className="text-sm text-muted-foreground">本次公开内容</p>
                 <p className="text-2xl font-semibold">{report.contents}</p>
               </div>
             </div>

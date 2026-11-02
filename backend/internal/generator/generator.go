@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"gocms/internal/consent"
 	"gocms/internal/db"
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
@@ -33,12 +34,13 @@ func (r Row) n(key string) int {
 }
 
 type Report struct {
-	State    string    `json:"state"`
-	Started  time.Time `json:"started"`
-	Finished time.Time `json:"finished"`
-	Files    int       `json:"files"`
-	Contents int       `json:"contents"`
-	Error    string    `json:"error,omitempty"`
+	State     string    `json:"state"`
+	Started   time.Time `json:"started"`
+	Finished  time.Time `json:"finished"`
+	Files     int       `json:"files"`
+	Contents  int       `json:"contents"`
+	Error     string    `json:"error,omitempty"`
+	ContentID int64     `json:"content_id,omitempty"`
 }
 
 type Publisher struct {
@@ -116,6 +118,7 @@ type LanguageInfo struct {
 }
 
 type content struct {
+	consentPolicy    consent.Policy
 	tables           map[string][]Row
 	settings         map[string]string
 	templates        map[string]*template.Template
@@ -135,6 +138,11 @@ type content struct {
 	childrenCache    map[int][]Row
 	navigationCache  map[string][]NavigationItem
 	catalogCache     []ListCategory
+	partialID        int64
+	previous         *publishedLanguage
+	published        *publishedLanguage
+	removed          map[string]bool
+	affected         map[int]bool
 }
 
 // ListItem, ListCategory, ListPagination, and NavigationItem are the data
@@ -244,6 +252,15 @@ func TemplateTags() []TemplateTag {
 			Name: "label", Category: "标签模板", Signature: `{{label "content-card" .}}`,
 			Description: "渲染后台保存的标签模板。标签模板内部可以继续使用本清单中的模板标签。",
 			Context:     "所有模板", Example: `{{range listItems .}}{{label "content-card" .}}{{end}}`,
+		},
+		{
+			Name: "consent", Category: "隐私同意", Signature: `{{with consent}}...{{end}}`,
+			Description: "返回当前站点和语言的隐私策略。主题通过 data-consent 用途标记控制可选资源，通过 data-consent-open 增加设置入口。",
+			Context:     "所有模板", Example: `<button type="button" data-consent-open>隐私设置</button>`,
+			Fields: []TemplateField{
+				{Name: ".Enabled / .Version / .Revision", Type: "bool / string", Description: "当前语言启用状态、策略版本和修订标识"},
+				{Name: ".Purposes / .Text", Type: "[]string / map[string]string", Description: "可选用途及已解析文案（自行输出时需转义）"},
+			},
 		},
 		{
 			Name: "navigation", Category: "栏目导航", Signature: `{{range navigation .}}...{{end}} 或 {{range navigation "top" .}}...{{end}}`,
@@ -363,6 +380,7 @@ func TemplateTags() []TemplateTag {
 
 func (c *content) templateFuncs() template.FuncMap {
 	return template.FuncMap{
+		"consent":               func() consent.Policy { return c.consentPolicy },
 		"contentItems":          c.contentItems,
 		"contentItemsWithImage": c.contentItemsWithImage,
 		"setting": func(key string) string {
@@ -752,8 +770,21 @@ func prepareTranslatedContent(baseRows, transRows []Row, targetLang, fallbackLan
 	return result
 }
 
-func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
-	report = Report{State: "running", Started: time.Now()}
+func (p Publisher) Generate(ctx context.Context) (Report, error) {
+	return p.generate(ctx, 0)
+}
+
+// GenerateContent refreshes one entry, its category and ancestors, and home
+// pages in every enabled language, preserving the rest of the live site.
+func (p Publisher) GenerateContent(ctx context.Context, id int64) (Report, error) {
+	if id <= 0 {
+		return Report{}, fmt.Errorf("invalid content id")
+	}
+	return p.generate(ctx, id)
+}
+
+func (p Publisher) generate(ctx context.Context, contentID int64) (report Report, err error) {
+	report = Report{State: "running", Started: time.Now(), ContentID: contentID}
 	if err = os.MkdirAll(p.Data, 0755); err != nil {
 		return report, err
 	}
@@ -824,6 +855,11 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	if err != nil {
 		_ = tx.Rollback()
 		return report, err
+	}
+	privacy, err := consent.Parse(c.settings[consent.SettingKey])
+	if err != nil {
+		_ = tx.Rollback()
+		return report, fmt.Errorf("隐私同意配置无效: %w", err)
 	}
 	if strings.TrimSpace(c.settings["site_url"]) == "" && siteID > 0 {
 		var domain string
@@ -952,6 +988,26 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 
 	baseCategories := c.tables["gocms_category"]
 	baseContents := c.tables["gocms_content"]
+	if contentID != 0 {
+		found := false
+		for _, item := range baseContents {
+			if int64(item.n("id")) == contentID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return report, sql.ErrNoRows
+		}
+	}
+	previous, err := p.readPublishedPages()
+	if err != nil && contentID != 0 {
+		return report, err
+	}
+	published := publishedPages{}
+	if contentID != 0 && previous != nil {
+		published = previous
+	}
 	err = filepath.WalkDir(p.Templates, func(filePath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -992,15 +1048,17 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		return report, err
 	}
 	type standaloneBuild struct {
-		lang      LanguageInfo
 		targetWeb string
 		pages     map[string][]byte
+		removed   map[string]bool
 	}
 	var standaloneList []standaloneBuild
 	mainPages := make(map[string][]byte)
+	mainRemoved := make(map[string]bool)
 
 	for _, lang := range enabledLanguages {
 		c.lang = lang.Code
+		c.consentPolicy = privacy.Resolve(siteID, lang.Code)
 		c.isStandalone = (lang.SiteMode == "standalone")
 		c.currentLangInfo = lang
 		if c.isStandalone {
@@ -1020,45 +1078,66 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 		c.catalogCache = nil
 		sortRows(c.tables["gocms_category"], "order_id", true)
 		sortRows(c.tables["gocms_content"], "sort_order", false)
+		target := p.TargetWeb()
+		if c.isStandalone {
+			target = p.LanguageTargetWeb(lang)
+		}
+		target, err = filepath.Abs(target)
+		if err != nil {
+			return report, err
+		}
+		key := filepath.Clean(target) + ":" + lang.Code
+		c.beginPublication(contentID, previous[key])
 		if err = c.buildForLang(); err != nil {
 			return report, err
 		}
 
+		published[key] = c.published
 		if c.isStandalone {
-			langSiteURL := lang.Domain
-			if langSiteURL == "" {
-				langSiteURL = c.settings["site_url"]
-			} else if !strings.Contains(langSiteURL, "://") {
-				langSiteURL = "https://" + langSiteURL
+			if contentID == 0 {
+				langSiteURL := lang.Domain
+				if langSiteURL == "" {
+					langSiteURL = c.settings["site_url"]
+				} else if !strings.Contains(langSiteURL, "://") {
+					langSiteURL = "https://" + langSiteURL
+				}
+				langSiteURL = strings.TrimRight(langSiteURL, "/")
+
+				langUrls := sitemapURLs(c.pages)
+
+				c.pages["llms.txt"], err = renderLLMS(ctx, langSiteURL, langUrls, func(path string) (io.ReadCloser, error) {
+					return io.NopCloser(bytes.NewReader(c.pages[path])), nil
+				})
+				if err != nil {
+					return report, err
+				}
+				c.pages["sitemap.html"] = renderSitemapHTML(langUrls)
+				xmlMap := renderSitemapXML(langSiteURL, langUrls)
+				c.pages["sitemap.xml"] = xmlMap
+				c.pages["Sitemap.xml"] = xmlMap
+				if c.pages["robots.txt"] == nil && langSiteURL != "" {
+					c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", langSiteURL))
+				}
 			}
-			langSiteURL = strings.TrimRight(langSiteURL, "/")
-
-			langUrls := sitemapURLs(c.pages)
-
-			c.pages["llms.txt"], err = renderLLMS(ctx, langSiteURL, langUrls, func(path string) (io.ReadCloser, error) {
-				return io.NopCloser(bytes.NewReader(c.pages[path])), nil
-			})
-			if err != nil {
+			if err = applyConsent(c.pages, c.consentPolicy); err != nil {
 				return report, err
 			}
-			c.pages["sitemap.html"] = renderSitemapHTML(langUrls)
-			xmlMap := renderSitemapXML(langSiteURL, langUrls)
-			c.pages["sitemap.xml"] = xmlMap
-			c.pages["Sitemap.xml"] = xmlMap
-			if c.pages["robots.txt"] == nil && langSiteURL != "" {
-				c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", langSiteURL))
-			}
-
 			if err = normalizePages(c.pages, p.Assets, p.Theme, p.SiteID); err != nil {
 				return report, err
 			}
 
 			standaloneList = append(standaloneList, standaloneBuild{
-				lang:      lang,
 				targetWeb: p.LanguageTargetWeb(lang),
 				pages:     c.pages,
+				removed:   c.removed,
 			})
 		} else {
+			if err = applyConsent(c.pages, c.consentPolicy); err != nil {
+				return report, err
+			}
+			for k := range c.removed {
+				mainRemoved[k] = true
+			}
 			for k, v := range c.pages {
 				mainPages[k] = v
 			}
@@ -1066,23 +1145,28 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 	}
 
 	c.pages = mainPages
-	urls := sitemapURLs(c.pages)
-	c.pages["llms.txt"], err = renderLLMS(ctx, c.settings["site_url"], urls, func(path string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(c.pages[path])), nil })
-	if err != nil {
-		return report, err
-	}
-	c.pages["sitemap.html"] = renderSitemapHTML(urls)
-	xmlMap := renderSitemapXML(strings.TrimRight(c.settings["site_url"], "/"), urls)
-	c.pages["sitemap.xml"] = xmlMap
-	c.pages["Sitemap.xml"] = xmlMap
+	if contentID == 0 {
+		urls := sitemapURLs(c.pages)
+		c.pages["llms.txt"], err = renderLLMS(ctx, c.settings["site_url"], urls, func(path string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(c.pages[path])), nil })
+		if err != nil {
+			return report, err
+		}
+		c.pages["sitemap.html"] = renderSitemapHTML(urls)
+		c.pages["sitemap.html"], err = consent.Process(c.pages["sitemap.html"], privacy.Resolve(siteID, defaultLang))
+		if err != nil {
+			return report, err
+		}
+		xmlMap := renderSitemapXML(strings.TrimRight(c.settings["site_url"], "/"), urls)
+		c.pages["sitemap.xml"] = xmlMap
+		c.pages["Sitemap.xml"] = xmlMap
 
-	if c.pages["robots.txt"] == nil && c.settings["site_url"] != "" {
-		siteURL := strings.TrimRight(c.settings["site_url"], "/")
-		c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", siteURL))
+		if c.pages["robots.txt"] == nil && c.settings["site_url"] != "" {
+			siteURL := strings.TrimRight(c.settings["site_url"], "/")
+			c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", siteURL))
+		}
 	}
-
 	for _, row := range baseContents {
-		if row.n("visible") == 1 {
+		if row.n("visible") == 1 && (contentID == 0 || int64(row.n("id")) == contentID) {
 			report.Contents++
 		}
 	}
@@ -1094,78 +1178,109 @@ func (p Publisher) Generate(ctx context.Context) (report Report, err error) {
 
 	minifyHTML := htmlMinifyEnabled(c.settings)
 
-	// Publish main site
-	targetWeb := p.TargetWeb()
-	if err = publishPagesToDirectory(ctx, targetWeb, mainPages, minifyHTML); err != nil {
+	// Stage every language before replacing any live directory. Keep backups
+	// until all directories and their routing history have been committed.
+	var updates []*stagedPages
+	defer func() {
+		for _, update := range updates {
+			update.discard()
+		}
+	}()
+	update, err := stagePageUpdate(ctx, p.TargetWeb(), mainPages, minifyHTML, contentID != 0, mainRemoved)
+	if err != nil {
 		return report, err
 	}
-
-	// Publish standalone language sites to independent directories
-	for _, b := range standaloneList {
-		if err = publishPagesToDirectory(ctx, b.targetWeb, b.pages, minifyHTML); err != nil {
+	updates = append(updates, update)
+	for _, build := range standaloneList {
+		update, err = stagePageUpdate(ctx, build.targetWeb, build.pages, minifyHTML, contentID != 0, build.removed)
+		if err != nil {
 			return report, err
 		}
+		updates = append(updates, update)
 	}
-
+	if err = ctx.Err(); err != nil {
+		return report, err
+	}
+	if err = installPageUpdates(updates, func() error { return p.writePublishedPages(published) }); err != nil {
+		return report, err
+	}
 	return report, nil
 }
 
 func publishPagesToDirectory(ctx context.Context, targetWeb string, pages map[string][]byte, minifyHTML bool) error {
-	web, err := filepath.Abs(targetWeb)
+	update, err := stagePageUpdate(ctx, targetWeb, pages, minifyHTML, false, nil)
 	if err != nil {
 		return err
 	}
+	defer update.discard()
+	return installPageUpdates([]*stagedPages{update}, nil)
+}
+
+func stagePageUpdate(ctx context.Context, targetWeb string, pages map[string][]byte, minifyHTML, partial bool, removed map[string]bool) (_ *stagedPages, err error) {
+	web, err := filepath.Abs(targetWeb)
+	if err != nil {
+		return nil, err
+	}
 	if web == filepath.Dir(web) {
-		return fmt.Errorf("invalid web root")
+		return nil, fmt.Errorf("invalid web root")
 	}
 	if err = os.MkdirAll(filepath.Dir(web), 0755); err != nil {
-		return err
+		return nil, err
 	}
 	stage, err := os.MkdirTemp(filepath.Dir(web), ".web-stage-")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer os.RemoveAll(stage)
+	defer func() {
+		if err != nil {
+			_ = os.RemoveAll(stage)
+		}
+	}()
+	if partial {
+		if err = stagePublishedFiles(ctx, web, stage); err != nil {
+			return nil, err
+		}
+		for relative := range removed {
+			if _, replaced := pages[relative]; replaced {
+				continue
+			}
+			if !safePagePath(relative) {
+				return nil, fmt.Errorf("invalid published page path: %s", relative)
+			}
+			if err = os.Remove(filepath.Join(stage, filepath.FromSlash(relative))); err != nil && !os.IsNotExist(err) {
+				return nil, err
+			}
+		}
+	}
 
 	for relative, data := range pages {
 		if err = ctx.Err(); err != nil {
-			return err
+			return nil, err
 		}
 		if minifyHTML && isHTMLPage(relative) {
 			if data, err = minifyHTMLDocument(data); err != nil {
-				return fmt.Errorf("压缩 %s: %w", relative, err)
+				return nil, fmt.Errorf("压缩 %s: %w", relative, err)
 			}
+		}
+		if !safePagePath(relative) {
+			return nil, fmt.Errorf("invalid published page path: %s", relative)
 		}
 		path := filepath.Join(stage, filepath.FromSlash(relative))
 		if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-			return err
+			return nil, err
 		}
-		if err = os.WriteFile(path, data, 0644); err != nil {
-			return err
+		if err = atomicWrite(path, data); err != nil {
+			return nil, err
 		}
 	}
 
 	backup := web + ".previous"
-	if _, err = os.Stat(backup); err == nil {
-		return fmt.Errorf("上次发布备份仍存在: %s，请先检查恢复", backup)
+	if _, err = os.Lstat(backup); err == nil {
+		return nil, fmt.Errorf("上次发布备份仍存在: %s，请先检查恢复", backup)
+	} else if !os.IsNotExist(err) {
+		return nil, err
 	}
-	hadWeb := false
-	if _, err = os.Stat(web); err == nil {
-		if err = os.Rename(web, backup); err != nil {
-			return err
-		}
-		hadWeb = true
-	}
-	if err = os.Rename(stage, web); err != nil {
-		if hadWeb {
-			_ = os.Rename(backup, web)
-		}
-		return err
-	}
-	if hadWeb {
-		_ = os.RemoveAll(backup)
-	}
-	return nil
+	return &stagedPages{web: web, stage: stage, backup: backup}, nil
 }
 
 func sortRows(rows []Row, orderField string, category bool) {
@@ -2335,6 +2450,9 @@ func (c *content) buildForLang() error {
 		byCategory[item.n("category_id")] = append(byCategory[item.n("category_id")], item)
 	}
 	for _, item := range visible {
+		if c.partialID != 0 && int64(item.n("id")) != c.partialID {
+			continue
+		}
 		category := c.cat(item.n("category_id"))
 		view := c.contentView(item)
 		view["previous_url"], view["previous_title"] = "", ""
@@ -2350,12 +2468,18 @@ func (c *content) buildForLang() error {
 			view["next_title"] = esc(sameCategory[index+1]["title"])
 		}
 		pagePath := c.contentPagePath(item)
+		c.published.Contents[item["id"]] = publishedContent{CategoryID: item.n("category_id"), Paths: []string{pagePath}}
 		if err := c.pageTemplate(pagePath, c.categoryDetailTemplate(category), view); err != nil {
 			return err
 		}
 	}
 
 	for _, category := range c.tables["gocms_category"] {
+		if c.partialID != 0 && !c.affected[category.n("id")] {
+			continue
+		}
+		record := publishedCategory{ParentID: category.n("parent_id")}
+		c.published.Categories[category["id"]] = &record
 		if c.categoryPageType(category) == routing.PageTypeLink {
 			continue
 		}
@@ -2364,6 +2488,7 @@ func (c *content) buildForLang() error {
 		if c.categoryPageType(category) == routing.PageTypeCover {
 			view := c.categoryView(category, items, 1, pageSize)
 			pagePath := c.categoryListPagePath(category, 1)
+			record.Paths = append(record.Paths, pagePath)
 			if err := c.pageTemplate(pagePath, c.categoryCoverTemplate(category), view); err != nil {
 				return err
 			}
@@ -2373,6 +2498,7 @@ func (c *content) buildForLang() error {
 		for page := 1; page <= pages; page++ {
 			view := c.categoryView(category, items, page, pageSize)
 			pagePath := c.categoryListPagePath(category, page)
+			record.Paths = append(record.Paths, pagePath)
 			if err := c.pageTemplate(pagePath, c.categoryListTemplate(category), view); err != nil {
 				return err
 			}
@@ -2380,6 +2506,7 @@ func (c *content) buildForLang() error {
 				alias := strings.TrimPrefix(c.categoryListURL(category, 1), "/")
 				if alias != "" && !strings.HasSuffix(alias, "/") && c.pages[alias] == nil {
 					c.pages[alias] = c.pages[pagePath]
+					record.Paths = append(record.Paths, alias)
 				}
 				directory := c.categoryListDir(category)
 				if directory != "" {
@@ -2389,14 +2516,18 @@ func (c *content) buildForLang() error {
 					}
 					// Several categories may intentionally share a list directory. The
 					// first category in the configured order owns that directory index.
-					if c.pages[indexPath] == nil {
+					if c.pages[indexPath] == nil && c.ownsDirectoryIndex(category, indexPath) {
 						c.pages[indexPath] = c.pages[pagePath]
+						record.Paths = append(record.Paths, indexPath)
 					}
 				}
 			}
 		}
 	}
 
+	if c.partialID != 0 {
+		return nil
+	}
 	msgPath := "msg.html"
 	searchPath := "search.html"
 	notFoundPath := routing.NotFoundFileName

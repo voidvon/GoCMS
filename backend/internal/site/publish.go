@@ -2,6 +2,7 @@ package site
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -344,4 +345,82 @@ func (s *Server) adminLLMS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "path": "/" + filename})
+}
+
+// adminPublishContent completes a targeted refresh before reporting success.
+// It shares both the in-process publication state and the generator's file lock
+// with full publishing, including queued save-and-publish requests.
+func (s *Server) adminPublishContent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		methodNotAllowed(w)
+		return
+	}
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	user := s.currentAdmin(r)
+	siteID, err := s.resolveSiteID(r, user)
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
+	var payload struct {
+		ID int64 `json:"id"`
+	}
+	if err := decodeRequest(r, &payload); err != nil || payload.ID <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请指定有效的内容 ID"})
+		return
+	}
+	var contentSiteID, categoryID int64
+	err = s.database.QueryRowContext(r.Context(), `SELECT site_id, category_id FROM gocms_content WHERE id = ?`, payload.ID).Scan(&contentSiteID, &categoryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "读取内容失败"})
+		return
+	}
+	if siteID != contentSiteID || !user.CanManageSite(contentSiteID) || !user.canManageCategory(categoryID) {
+		http.NotFound(w, r)
+		return
+	}
+	pub := s.publicationForSite(r.Context(), siteID)
+	if pub == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "尚未配置网站发布"})
+		return
+	}
+	pub.mu.Lock()
+	if pub.report.State == "running" {
+		pub.mu.Unlock()
+		writeJSON(w, http.StatusConflict, map[string]string{"error": generator.ErrPublishBusy.Error()})
+		return
+	}
+	pub.report = generator.Report{State: "running", Started: time.Now(), ContentID: payload.ID}
+	publisher := pub.publisher
+	pub.mu.Unlock()
+
+	report, err := publisher.GenerateContent(r.Context(), payload.ID)
+	if err != nil {
+		report.State, report.Error = "failed", err.Error()
+	}
+	pub.mu.Lock()
+	pub.report = report
+	if pub.pending {
+		pub.pending = false
+		s.startPublishLocked(pub, false)
+	}
+	pub.mu.Unlock()
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, generator.ErrPublishBusy) {
+			status = http.StatusConflict
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
 }

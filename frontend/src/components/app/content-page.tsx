@@ -1,6 +1,6 @@
 import { useDialogState } from "@/lib/use-dialog-state"
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react"
-import { ArrowDown, ArrowUp, FileText, ImagePlus, Library, LoaderCircle, Plus, Search, Trash2, Upload, X } from "lucide-react"
+import { ArrowDown, ArrowUp, FileText, ImagePlus, Library, LoaderCircle, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react"
 
 import {
   createContent,
@@ -10,6 +10,7 @@ import {
   getContentItem,
   getModelFields,
   getSystemModels,
+  publishContent,
   uploadMedia,
   type CategoryItem,
   type AdminUser,
@@ -1168,7 +1169,7 @@ function ContentEditor({
           {customError ? <InlineAlert>{customError}</InlineAlert> : null}
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <div className="w-full max-w-full overflow-x-auto overscroll-x-contain pb-1">
+            <ScrollArea orientation="horizontal" className="w-full max-w-full" contentClassName="pb-1">
               <TabsList className="w-max min-w-full justify-start h-9 p-1 bg-muted/60">
                 <TabsTrigger value="base" className="flex-none">基础信息</TabsTrigger>
                 {enabledLanguages.map((lang) => (
@@ -1179,7 +1180,7 @@ function ContentEditor({
                   </TabsTrigger>
                 ))}
               </TabsList>
-            </div>
+            </ScrollArea>
 
             <TabsContent value="base" className="space-y-4 pt-2">
               {/* 顶部栏目与模型联动控制 */}
@@ -1351,6 +1352,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting, deletingDialog] = useDialogState<ContentListItem>()
   const [deleteSaving, setDeleteSaving] = useState(false)
+  const [publishingID, setPublishingID] = useState<number | null>(null)
 
   const { activeLang, refreshLanguages } = useLanguage()
 
@@ -1502,6 +1504,21 @@ export function ContentPage({ user }: { user: AdminUser }) {
     }
   }
 
+  async function refreshHTML(item: ContentListItem) {
+    if (publishingID !== null) return
+    setPublishingID(item.id)
+    setError("")
+    setNotice("")
+    try {
+      const report = await publishContent(item.id)
+      setNotice(`「${item.title}」HTML 已更新，共生成 ${report.files} 个页面，包含所属栏目、全部父级栏目及首页（所有启用语言）。`)
+    } catch (publishError) {
+      setError(publishError instanceof Error ? publishError.message : "更新 HTML 失败")
+    } finally {
+      setPublishingID(null)
+    }
+  }
+
   async function confirmDelete() {
     if (!deleting) return
     setDeleteSaving(true)
@@ -1621,6 +1638,12 @@ export function ContentPage({ user }: { user: AdminUser }) {
                   </TableCell>
                   <TableCell className="pr-4 text-right">
                     <div className="flex justify-end gap-1">
+                      {allowed("publish") ? (
+                        <Button variant="ghost" size="sm" disabled={publishingID !== null} onClick={() => refreshHTML(item)} title="更新此内容、所属栏目、全部父级栏目及首页（所有启用语言）">
+                          {publishingID === item.id ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
+                          更新 HTML
+                        </Button>
+                      ) : null}
                       <IconButton disabled={!allowed("content.delete")} variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(item)} label={`删除${item.title}`}><Trash2 /></IconButton>
                     </div>
                   </TableCell>

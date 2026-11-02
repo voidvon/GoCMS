@@ -80,11 +80,13 @@ func EnsureModels(ctx context.Context, database *sql.DB) error {
 func seedDefaultModels(ctx context.Context, database *sql.DB) error {
 	now := time.Now().Format("2006-01-02 15:04:05")
 
-	if _, err := ensureArticleModel(ctx, database, now); err != nil {
+	articleID, err := ensureArticleModel(ctx, database, now)
+	if err != nil {
 		return fmt.Errorf("ensure article model: %w", err)
 	}
 
-	if _, err := ensureProductModel(ctx, database, now); err != nil {
+	productID, err := ensureProductModel(ctx, database, now)
+	if err != nil {
 		return fmt.Errorf("ensure product model: %w", err)
 	}
 
@@ -98,10 +100,70 @@ func seedDefaultModels(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("rename keywords field: %w", err)
 	}
 
+	for _, defaults := range []struct {
+		id           int64
+		fields       []string
+		seoOrder     int
+		summaryOrder int
+	}{
+		{articleID, []string{"title", "summary", "body", "cover_image", "published_at", "source", "seo_title", "description"}, 70, 20},
+		{productID, []string{"title", "code", "price", "summary", "cover_image", "photo_list", "body", "published_at", "seo_title", "description"}, 80, 30},
+	} {
+		if err := migrateDefaultSEOOrder(ctx, database, defaults.id, defaults.fields, defaults.seoOrder, defaults.summaryOrder); err != nil {
+			return fmt.Errorf("migrate default SEO order: %w", err)
+		}
+	}
+
 	if err := MigrateCategoryAndContentModels(ctx, database); err != nil {
 		return fmt.Errorf("migrate category and content models: %w", err)
 	}
 
+	return nil
+}
+
+// migrateDefaultSEOOrder upgrades the original built-in ordering while preserving
+// custom field selections, ordering, labels and other entry metadata.
+func migrateDefaultSEOOrder(ctx context.Context, database *sql.DB, modelID int64, oldFields []string, oldSEOOrder, summaryOrder int) error {
+	var raw string
+	var tableID int64
+	if err := database.QueryRowContext(ctx, `SELECT "table_id", "entry_fields" FROM "`+ModelTable+`" WHERE "id" = ?`, modelID).Scan(&tableID, &raw); err != nil {
+		return err
+	}
+	var entries []map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
+		return nil
+	}
+	if len(entries) == len(oldFields) {
+		matches := true
+		for i, entry := range entries {
+			var name string
+			if err := json.Unmarshal(entry["field"], &name); err != nil || name != oldFields[i] {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			reordered := make([]map[string]json.RawMessage, 0, len(entries))
+			for i, entry := range entries[:len(entries)-2] {
+				reordered = append(reordered, entry)
+				if oldFields[i] == "summary" {
+					reordered = append(reordered, entries[len(entries)-2:]...)
+				}
+			}
+			encoded, err := json.Marshal(reordered)
+			if err != nil {
+				return err
+			}
+			if _, err := database.ExecContext(ctx, `UPDATE "`+ModelTable+`" SET "entry_fields" = ? WHERE "id" = ?`, string(encoded), modelID); err != nil {
+				return err
+			}
+		}
+	}
+	for i, name := range []string{"seo_title", "description"} {
+		if _, err := database.ExecContext(ctx, `UPDATE "`+ModelFieldTable+`" SET "sort_order" = ? WHERE "table_id" = ? AND "field_name" = ? AND "sort_order" = ?`, summaryOrder+i+1, tableID, name, oldSEOOrder+i*10); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -234,8 +296,8 @@ func ensureArticleModel(ctx context.Context, database *sql.DB, now string) (int6
 		{"cover_image", "缩略图", "image", "", "列表或详情展示图", 40, 1},
 		{"published_at", "发布时间", "date", "", "发布或更新时间", 50, 1},
 		{"source", "信息来源", "text", "", "如转载网站或作者单位", 60, 1},
-		{"seo_title", "SEO 标题", "text", "", "页面 SEO 标题，留空时回退为内容标题", 70, 1},
-		{"description", "描述", "textarea", "", "页面SEO描述", 80, 1},
+		{"seo_title", "SEO 标题", "text", "", "页面 SEO 标题，留空时回退为内容标题", 21, 1},
+		{"description", "描述", "textarea", "", "页面SEO描述", 22, 1},
 	}
 
 	for _, f := range fields {
@@ -253,12 +315,12 @@ func ensureArticleModel(ctx context.Context, database *sql.DB, now string) (int6
 		entryFieldsJSON, _ := json.Marshal([]map[string]string{
 			{"field": "title", "label": "信息标题"},
 			{"field": "summary", "label": "内容摘要"},
+			{"field": "seo_title", "label": "SEO 标题"},
+			{"field": "description", "label": "描述"},
 			{"field": "body", "label": "正文内容"},
 			{"field": "cover_image", "label": "缩略图"},
 			{"field": "published_at", "label": "发布时间"},
 			{"field": "source", "label": "信息来源"},
-			{"field": "seo_title", "label": "SEO 标题"},
-			{"field": "description", "label": "描述"},
 		})
 		mustFieldsJSON, _ := json.Marshal([]string{"title"})
 
@@ -336,8 +398,8 @@ func ensureProductModel(ctx context.Context, database *sql.DB, now string) (int6
 		{"cover_image", "产品图片", "image", "", "产品主图或外观展示图", 50, 1},
 		{"photo_list", "产品图集", "morepic", "", "产品多角度细节实拍与图集展示", 60, 0},
 		{"published_at", "发布时间", "date", "", "发布或更新时间", 70, 1},
-		{"seo_title", "SEO 标题", "text", "", "页面 SEO 标题，留空时回退为内容标题", 80, 1},
-		{"description", "描述", "textarea", "", "页面SEO描述", 90, 1},
+		{"seo_title", "SEO 标题", "text", "", "页面 SEO 标题，留空时回退为内容标题", 31, 1},
+		{"description", "描述", "textarea", "", "页面SEO描述", 32, 1},
 	}
 
 	for _, f := range fields {
@@ -357,12 +419,12 @@ func ensureProductModel(ctx context.Context, database *sql.DB, now string) (int6
 			{"field": "code", "label": "产品型号"},
 			{"field": "price", "label": "参考价格"},
 			{"field": "summary", "label": "产品简介"},
+			{"field": "seo_title", "label": "SEO 标题"},
+			{"field": "description", "label": "描述"},
 			{"field": "cover_image", "label": "产品图片"},
 			{"field": "photo_list", "label": "产品图集"},
 			{"field": "body", "label": "详细说明"},
 			{"field": "published_at", "label": "发布时间"},
-			{"field": "seo_title", "label": "SEO 标题"},
-			{"field": "description", "label": "描述"},
 		})
 		mustFieldsJSON, _ := json.Marshal([]string{"title"})
 

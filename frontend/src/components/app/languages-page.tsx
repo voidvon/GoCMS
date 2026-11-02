@@ -19,6 +19,8 @@ import {
   type LanguageInput,
 } from "@/lib/api"
 import { useLanguage } from "@/lib/language-context"
+import { useSite } from "@/lib/site-context"
+import { ConsentSettingsDialog } from "@/components/app/consent-settings-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -50,6 +52,8 @@ import {
 import { ConfirmDialog, InlineAlert } from "@/components/app/app-ui"
 
 export function LanguagesPage() {
+  const { activeSiteId, activeSite } = useSite()
+  const [privacyLanguage, setPrivacyLanguage] = useState<string | null>(null)
   const {
     languages,
     refreshLanguages,
@@ -207,6 +211,9 @@ export function LanguagesPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" onClick={() => setPrivacyLanguage("")}>
+          <ShieldCheck className="size-4 mr-2" />隐私与 Cookie
+        </Button>
         <Button size="sm" onClick={openCreate}>
           <Plus className="size-4 mr-2" />
           新增语言
@@ -350,6 +357,9 @@ export function LanguagesPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="icon" className="size-8" onClick={() => setPrivacyLanguage(lang.code)} title="该语言的隐私与 Cookie 同意" aria-label={`${lang.name}隐私与 Cookie 同意`}>
+                          <ShieldCheck className="size-3.5" />
+                        </Button>
                         {lang.is_default !== 1 && (
                           <Button
                             variant="ghost"
@@ -417,6 +427,7 @@ export function LanguagesPage() {
           </Table>
 
       {/* Add / Edit Dialog */}
+      {privacyLanguage !== null && <ConsentSettingsDialog key={`${activeSiteId}:${privacyLanguage}`} siteId={activeSiteId} siteName={activeSite?.name || "当前站点"} initialLanguage={privacyLanguage} onClose={() => setPrivacyLanguage(null)} />}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

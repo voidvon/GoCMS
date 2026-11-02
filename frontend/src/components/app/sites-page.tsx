@@ -7,6 +7,7 @@ import {
   Plus,
   RefreshCw,
   Settings,
+  ShieldCheck,
   Star,
   Trash2,
   CheckCircle2,
@@ -44,10 +45,13 @@ import {
 } from "@/components/ui/table"
 import { ConfirmDialog, InlineAlert } from "@/components/app/app-ui"
 import { showSuccess } from "@/components/app/admin-notifications"
+import { ConsentSettingsDialog } from "@/components/app/consent-settings-dialog"
+import { ScrollArea } from "@/components/ui/scroll-area"
 
 export function SitesPage() {
   const { sites, refreshSites, loading, activeSiteId, setActiveSite } = useSite()
   const [error, setError] = useState("")
+  const [privacySite, setPrivacySite] = useState<Site | null>(null)
 
   // Add / Edit Dialog state
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -123,7 +127,7 @@ export function SitesPage() {
       })
       const custom: Array<{ key: string; value: string }> = []
       for (const [k, v] of Object.entries(data)) {
-        if (!stdKeys.has(k) && k !== "keywords" && k !== "description" && k !== "icp") {
+        if (!stdKeys.has(k) && k !== "keywords" && k !== "description" && k !== "icp" && k !== "consent_config") {
           custom.push({ key: k, value: v })
         }
       }
@@ -387,6 +391,16 @@ export function SitesPage() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                          onClick={() => setPrivacySite(site)}
+                          title="隐私与 Cookie 同意"
+                          aria-label={`${site.name}隐私与 Cookie 同意`}
+                        >
+                          <ShieldCheck className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground"
                           onClick={() => void handleOpenSettings(site)}
                           title="站点参数配置"
                         >
@@ -422,6 +436,7 @@ export function SitesPage() {
       </div>
 
       {/* Add/Edit Site Dialog */}
+      {privacySite && <ConsentSettingsDialog key={privacySite.id} siteId={privacySite.id} siteName={privacySite.name} onClose={() => setPrivacySite(null)} />}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -573,11 +588,11 @@ export function SitesPage() {
 
       {/* Site Parameters / Global Settings Dialog */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
-        <DialogContent className="max-w-2xl flex flex-col">
+        <DialogContent className="max-w-2xl flex flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>站点参数配置 - {settingsSite?.name}</DialogTitle>
             <DialogDescription>
-              配置该站点的全局变量与模板标签参数（对应模板中的 {"{{setting \"key\"}}"} ），保存后静态发布即时生效。
+              配置该站点的全局变量与模板标签参数（对应模板中的 {"{{setting \"key\"}}"} ），保存后请执行全站发布。
             </DialogDescription>
           </DialogHeader>
           {settingsError && <InlineAlert>{settingsError}</InlineAlert>}
@@ -586,7 +601,8 @@ export function SitesPage() {
               <LoaderCircle className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : (
-            <form onSubmit={handleSaveSettings} className="space-y-4 overflow-y-auto pr-1 flex-1 py-2">
+            <ScrollArea className="min-h-0 flex-1" contentClassName="pr-1 py-2">
+            <form onSubmit={handleSaveSettings} className="space-y-4">
               <div className="space-y-3 rounded-lg border p-3.5 bg-muted/20">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">基础与链接</h4>
                 <div className="grid grid-cols-2 gap-3">
@@ -740,6 +756,7 @@ export function SitesPage() {
                 </Button>
               </DialogFooter>
             </form>
+            </ScrollArea>
           )}
         </DialogContent>
       </Dialog>
