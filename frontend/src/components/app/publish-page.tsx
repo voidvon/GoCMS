@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ArrowUpRight, CodeXml, ExternalLink, FileText, Globe, Languages, LoaderCircle, RefreshCw } from "lucide-react"
+import { ExternalLink, LoaderCircle, RefreshCw } from "lucide-react"
 import { generatePublishIndexes, getPublication, getPublishTargets, publishSite, type IndexFormat, type Publication, type PublishIndexFile, type PublishTarget } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { InlineAlert } from "@/components/app/app-ui"
 import { showSuccess } from "@/components/app/admin-notifications"
 import { useSite } from "@/lib/site-context"
@@ -18,57 +19,25 @@ const indexLabels: Record<IndexFormat, { title: string; description: string }> =
 
 type IndexJob = { target: string; format: IndexFormat | "all" }
 
-function IndexFileRow({ file, target, generating, disabled, onGenerate }: {
-  file: PublishIndexFile
-  target: PublishTarget
+const indexFormats: IndexFormat[] = ["html", "xml", "llms"]
+
+function IndexFileCell({ file, label, generating, disabled, onGenerate }: {
+  file?: PublishIndexFile
+  label: string
   generating: boolean
   disabled: boolean
   onGenerate: () => void
 }) {
-  const { title, description } = indexLabels[file.format]
-  const Icon = file.format === "xml" ? CodeXml : FileText
-  const canView = file.exists && !target.issue
-
   return (
-    <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-      <div className="flex min-w-0 items-start gap-3">
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <Icon className="size-4" />
-        </span>
-        <div className="min-w-0 space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-medium">{title}</p>
-            <Badge variant="outline" className="font-normal text-muted-foreground">{file.exists ? "已生成" : "未生成"}</Badge>
-          </div>
-          <p className="text-xs text-muted-foreground">{description}</p>
-          {canView ? (
-            <a className="inline-flex items-center gap-1 break-all text-xs text-primary hover:underline" href={file.url} target="_blank" rel="noopener noreferrer">
-              {file.url}<ArrowUpRight className="size-3 shrink-0" />
-            </a>
-          ) : <p className="break-all font-mono text-xs text-muted-foreground">{target.url ? file.url : file.path}</p>}
-          {file.aliases?.map(alias => (
-            <p key={alias.path} className="text-xs text-muted-foreground">
-              兼容地址：{alias.exists && !target.issue ? (
-                <a className="inline-flex items-center gap-1 break-all text-primary hover:underline" href={alias.url} target="_blank" rel="noopener noreferrer">
-                  {alias.path}<ArrowUpRight className="size-3 shrink-0" />
-                </a>
-              ) : <span className="font-mono">{alias.path} · 未生成</span>}
-            </p>
-          ))}
-          {file.updated_at && <p className="text-xs text-muted-foreground">更新于 <TimeText value={file.updated_at} mode="datetime" /></p>}
-        </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-2 pl-12 sm:pl-4">
-        {canView ? (
-          <Button size="sm" variant="outline" nativeButton={false} role="link" aria-label={`查看${target.name}的${title}`} render={<a href={file.url} target="_blank" rel="noopener noreferrer" />}>
-            <ExternalLink />查看
-          </Button>
-        ) : <Button size="sm" variant="outline" disabled><ExternalLink />查看</Button>}
-        <Button size="sm" variant="outline" disabled={disabled} onClick={onGenerate} aria-label={`生成${target.name}的${title}`}>
-          {generating ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-          {generating ? "生成中…" : "生成"}
+    <div className="flex items-center gap-1">
+      {file?.exists ? (
+        <Button size="sm" variant="link" className="px-0" nativeButton={false} aria-label={`查看${label}`} render={<a href={file.url} target="_blank" rel="noopener noreferrer" />}>
+          查看<ExternalLink className="size-3" />
         </Button>
-      </div>
+      ) : <span className="text-xs text-muted-foreground">未生成</span>}
+      <Button size="icon-sm" variant="ghost" disabled={disabled || !file} onClick={onGenerate} aria-label={`生成${label}`} title={`生成${label}`}>
+        {generating ? <LoaderCircle className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+      </Button>
     </div>
   )
 }
@@ -82,7 +51,6 @@ export function PublishPage() {
   const [indexError, setIndexError] = useState("")
   const [starting, setStarting] = useState(false)
   const [job, setJob] = useState<IndexJob | null>(null)
-  const [notice, setNotice] = useState("")
   const previousReport = useRef<Publication | null>(null)
   const isPublishing = useRef(false)
   const mounted = useRef(false)
@@ -163,14 +131,12 @@ export function PublishPage() {
   async function generate(target: string, format: IndexFormat | "all") {
     setJob({ target, format })
     setIndexError("")
-    setNotice("")
     try {
       const result = await generatePublishIndexes(activeSiteId, target, format)
       if (!mounted.current) return
       setTargets(result.targets)
       const name = target === "all" ? "全部发布目标" : targets.find(item => item.id === target)?.name || "当前发布目标"
       const message = `${name}的${format === "all" ? "全部索引" : indexLabels[format].title}已生成。`
-      setNotice(message)
       showSuccess(message)
     } catch (e) {
       if (mounted.current) {
@@ -233,7 +199,7 @@ export function PublishPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <h2 className="font-semibold">网站索引</h2>
-          <p className="text-sm text-muted-foreground">主站合并子目录语言；独立语言站点各自生成。单独生成索引时使用已发布页面。</p>
+          <p className="text-sm text-muted-foreground">每种语言一行；子目录语言共用主站索引，生成时会一起更新。</p>
         </div>
         <div className="flex shrink-0 gap-2">
           <Button size="sm" variant="outline" disabled={busy || targetsLoading} onClick={() => void refreshTargets()} aria-label="刷新文件状态">
@@ -246,35 +212,65 @@ export function PublishPage() {
         </div>
       </div>
       {indexError && <InlineAlert>{indexError}</InlineAlert>}
-      {notice && <p role="status" className="text-sm text-green-600 dark:text-green-400">{notice}</p>}
       {targetsLoading && targets.length === 0 && <p role="status" className="flex items-center gap-2 py-8 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />正在读取发布目标…</p>}
 
-      {targets.map(target => {
-        const standalone = target.mode === "standalone"
-        const Icon = standalone ? Languages : Globe
-        const groupGenerating = job?.target === "all" || (job?.target === target.id && job.format === "all")
-        const disabled = busy || targetsLoading || !target.published || Boolean(target.issue)
-        return (
-          <Card key={target.id} className="gap-0 py-0" aria-label={`${target.name}发布目标`}>
-            <div className="flex flex-col gap-4 border-b bg-muted/25 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
-              <div className="flex min-w-0 items-start gap-3">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-lg border bg-background"><Icon className="size-5 text-muted-foreground" /></span>
-                <div className="min-w-0 space-y-2">
-                  <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{target.name}{standalone ? "独立站" : ""}</h3><Badge variant="outline">{standalone ? "独立域名" : "主站与子目录"}</Badge></div>
-                  {target.url ? <a className="inline-flex items-center gap-1 break-all text-sm text-muted-foreground hover:text-foreground hover:underline" href={target.url + "/"} target="_blank" rel="noopener noreferrer">{target.url}<ArrowUpRight className="size-3 shrink-0" /></a> : <p className="text-sm text-muted-foreground">{standalone ? "待配置域名" : "使用当前访问地址"}</p>}
-                  <div className="flex flex-wrap gap-2">{target.languages.map(language => <span key={language.code} className="rounded-md border bg-background px-2 py-1 text-xs text-muted-foreground">{language.name} <span className="font-mono">{language.path}</span></span>)}</div>
-                  {!target.issue && !target.published && <p className="text-xs text-muted-foreground">尚无已发布页面，请先执行全站发布。</p>}
-                </div>
-              </div>
-              <Button size="sm" variant="outline" disabled={disabled} onClick={() => void generate(target.id, "all")} aria-label={`生成${target.name}的本组索引`}>
-                {groupGenerating ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}生成本组索引
-              </Button>
-            </div>
-            {target.issue && <div className="border-b px-4 py-3 sm:px-5"><InlineAlert>{target.issue}。请检查<a className="underline" href={standalone ? "/admin/languages" : "/admin/sites"}>{standalone ? "多语言配置" : "站点配置"}</a>。</InlineAlert></div>}
-            <div className="divide-y">{target.files.map(file => <IndexFileRow key={file.path} file={file} target={target} generating={Boolean(groupGenerating || (job?.target === target.id && job.format === file.format))} disabled={disabled} onGenerate={() => void generate(target.id, file.format)} />)}</div>
-          </Card>
-        )
-      })}
+      <div className="overflow-hidden rounded-lg border">
+        <ScrollArea orientation="horizontal" className="w-full">
+          <Table containerClassName="overflow-visible" className="min-w-[760px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="pl-4">语言</TableHead>
+                <TableHead>类型</TableHead>
+                <TableHead>发布地址</TableHead>
+                {indexFormats.map(format => <TableHead key={format}>{indexLabels[format].title}</TableHead>)}
+                <TableHead className="pr-4 text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {targets.flatMap(target => target.languages.map(language => {
+                const disabled = busy || targetsLoading || !target.published || Boolean(target.issue)
+                const groupGenerating = job?.target === "all" || (job?.target === target.id && job.format === "all")
+                const address = `${target.url.replace(/\/$/, "")}/${language.path.replace(/^\//, "")}`
+                return (
+                  <TableRow key={`${target.id}:${language.code}`}>
+                    <TableCell className="pl-4">
+                      <p className="font-medium">{language.name} <span className="ml-1 text-xs font-normal text-muted-foreground">{language.code}</span></p>
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{target.mode === "standalone" ? "独立站点" : "主站索引"}</TableCell>
+                    <TableCell className="max-w-64 whitespace-normal">
+                      {target.issue ? (
+                        <a className="text-xs text-destructive underline" href={target.mode === "standalone" ? "/admin/languages" : "/admin/sites"}>{target.issue}，前往配置</a>
+                      ) : <a className="break-all text-xs text-muted-foreground hover:text-foreground hover:underline" href={address} target="_blank" rel="noopener noreferrer">{address}</a>}
+                    </TableCell>
+                    {indexFormats.map(format => (
+                      <TableCell key={format}>
+                        {target.issue ? <span className="text-xs text-muted-foreground">待配置</span> : (
+                          <IndexFileCell
+                            file={target.files.find(file => file.format === format)}
+                            label={`${language.name}的${indexLabels[format].title}`}
+                            generating={Boolean(groupGenerating || (job?.target === target.id && job.format === format))}
+                            disabled={disabled}
+                            onGenerate={() => void generate(target.id, format)}
+                          />
+                        )}
+                      </TableCell>
+                    ))}
+                    <TableCell className="pr-4 text-right">
+                      <Button size="sm" variant="outline" disabled={disabled} onClick={() => void generate(target.id, "all")} aria-label={`生成${language.name}的全部索引`}>
+                        {groupGenerating && <LoaderCircle className="animate-spin" />}生成索引
+                      </Button>
+                      {!target.issue && !target.published && <p className="mt-1 text-xs text-muted-foreground">请先全站发布</p>}
+                    </TableCell>
+                  </TableRow>
+                )
+              }))}
+              {!targetsLoading && targets.every(target => target.languages.length === 0) && (
+                <TableRow><TableCell colSpan={7} className="h-24 text-center text-muted-foreground">暂无启用语言</TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </ScrollArea>
+      </div>
     </ScrollArea>
   )
 }
