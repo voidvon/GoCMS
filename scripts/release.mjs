@@ -139,11 +139,7 @@ function updateVersion(version) {
 }
 
 const releaseTargets = [
-  ["darwin", "arm64"],
-  ["darwin", "amd64"],
   ["linux", "amd64"],
-  ["linux", "arm64"],
-  ["windows", "amd64"],
 ]
 
 function createReleaseAssets(tag) {
@@ -196,6 +192,7 @@ if (releaseTag !== currentTag && (releaseExists(releaseTag) || localTagExists(re
 }
 
 console.log(`准备发布 ${releaseTag}`)
+console.log(`发布平台：${releaseTargets.map(([goos, goarch]) => `${goos}/${goarch}`).join(", ")}`)
 if (releaseVersion !== packageJson.version) {
   console.log(`版本号：${packageJson.version} -> ${releaseVersion}`)
 }
