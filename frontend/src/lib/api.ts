@@ -829,8 +829,10 @@ export type AdminNotificationPage = {
   unread: number
 }
 
-export function getAdminNotifications(limit = 50) {
-  return request<AdminNotificationPage>(`/api/admin/notifications${query({ limit })}`)
+export function getAdminNotifications(limit = 50, background = false) {
+  return request<AdminNotificationPage>(`/api/admin/notifications${query({ limit })}`, {
+    headers: background ? { "X-GoCMS-Background": "1" } : undefined,
+  })
 }
 
 export function markAdminNotificationsRead(payload: { ids?: number[]; all?: boolean }) {
@@ -981,7 +983,11 @@ export function deleteFeedbackField(id: number) {
 
 export type Publication = { state: "idle" | "running" | "success" | "failed"; started: string; finished: string; files: number; contents: number; error?: string; content_id?: number }
 export type SaveResponse = { ok: boolean; publication?: Publication; publish_started?: boolean }
-export function getPublication(siteId?: number) { return request<Publication>(`/api/admin/publish${query({ site_id: siteId })}`) }
+export function getPublication(siteId?: number, background = false) {
+  return request<Publication>(`/api/admin/publish${query({ site_id: siteId })}`, {
+    headers: background ? { "X-GoCMS-Background": "1" } : undefined,
+  })
+}
 export function publishContent(id: number) {
   return request<Publication>("/api/admin/publish/content", {
     method: "POST",

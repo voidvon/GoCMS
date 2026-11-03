@@ -74,9 +74,9 @@ export function PublishPage() {
     mounted.current = true
     void refreshTargets()
     let active = true
-    const refresh = async () => {
+    const refresh = async (background = false) => {
       try {
-        const next = await getPublication(activeSiteId)
+        const next = await getPublication(activeSiteId, background)
         if (!active) return
         const previous = previousReport.current
         if ((isPublishing.current || previous?.state === "running") && next.state === "success") {
@@ -96,7 +96,7 @@ export function PublishPage() {
       }
     }
     void refresh()
-    const timer = setInterval(refresh, 2000)
+    const timer = setInterval(() => void refresh(true), 2000)
     return () => {
       active = false
       mounted.current = false

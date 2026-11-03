@@ -51,16 +51,8 @@ type Server struct {
 
 func New(database *sql.DB, siteRoot string) (*Server, error) {
 	if database != nil {
-		if _, err := database.Exec(`
-			CREATE TABLE IF NOT EXISTS "gocms_admin_session" (
-				"token" TEXT PRIMARY KEY,
-				"username" TEXT NOT NULL,
-				"expires_at" INTEGER NOT NULL
-			)`); err != nil {
-			return nil, fmt.Errorf("create admin session table: %w", err)
-		}
-		if _, err := database.Exec(`CREATE INDEX IF NOT EXISTS "idx_gocms_admin_session_expiry" ON "gocms_admin_session" ("expires_at")`); err != nil {
-			return nil, fmt.Errorf("create admin session index: %w", err)
+		if err := ensureAdminSessions(database); err != nil {
+			return nil, err
 		}
 		if err := db.EnsureSites(context.Background(), database); err != nil {
 			return nil, err
@@ -144,6 +136,7 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		if !s.authorizeAdminRoute(response, request, lowerAdminPath) {
 			return
 		}
+		s.renewAdminSession(response, request)
 		if request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodPatch || request.Method == http.MethodDelete {
 			user, _ := request.Context().Value(contentScopeKey{}).(*AdminUser)
 			if user != nil {

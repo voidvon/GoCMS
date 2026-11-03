@@ -34,9 +34,9 @@ export function NotificationBell({ siteId, onNavigate, panelSide = "bottom" }: N
   const [unread, setUnread] = useState(0)
   const [marking, setMarking] = useState(false)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (background = false) => {
     try {
-      const page = await getAdminNotifications()
+      const page = await getAdminNotifications(50, background)
       setItems(page.items)
       setUnread(page.unread)
       return page
@@ -79,7 +79,7 @@ export function NotificationBell({ siteId, onNavigate, panelSide = "bottom" }: N
   // background and nobody should have to reload to notice them.
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void load()
+      if (document.visibilityState === "visible") void load(true)
     }, 60_000)
     return () => window.clearInterval(timer)
   }, [load])

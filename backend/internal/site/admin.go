@@ -228,7 +228,7 @@ func (s *Server) adminLogin(response http.ResponseWriter, request *http.Request)
 				http.Error(response, "session error", http.StatusInternalServerError)
 				return
 			}
-			http.SetCookie(response, sessionCookie(token, 86400))
+			http.SetCookie(response, sessionCookie(token, int(adminSessionIdleTimeout/time.Second)))
 			_, _ = s.database.ExecContext(request.Context(), `INSERT INTO gocms_admin_login (username, success, ip) VALUES (?, 1, ?)`, credentials.Username, clientIP(request))
 			writeJSON(response, http.StatusOK, map[string]any{"user": *user})
 			return
@@ -267,7 +267,7 @@ func (s *Server) adminLogin(response http.ResponseWriter, request *http.Request)
 		http.Error(response, "session error", http.StatusInternalServerError)
 		return
 	}
-	http.SetCookie(response, sessionCookie(token, 86400))
+	http.SetCookie(response, sessionCookie(token, int(adminSessionIdleTimeout/time.Second)))
 	_, _ = s.database.ExecContext(request.Context(), `INSERT INTO gocms_admin_login (username, success, ip) VALUES (?, 1, ?)`, user.Username, clientIP(request))
 	writeJSON(response, http.StatusOK, map[string]any{"user": user})
 }
@@ -953,7 +953,7 @@ func (s *Server) adminSessionUser(request *http.Request) (*AdminUser, bool) {
 	var username string
 	err = s.database.QueryRowContext(request.Context(), `
 		SELECT "username" FROM "gocms_admin_session"
-		WHERE "token" = ? AND "expires_at" > ?`, cookie.Value, time.Now().Unix()).
+		WHERE "token" = ? AND "expires_at" > ? AND "absolute_expires_at" > ?`, cookie.Value, time.Now().Unix(), time.Now().Unix()).
 		Scan(&username)
 	if err != nil || username == "" {
 		return nil, false
@@ -1017,13 +1017,14 @@ func (s *Server) createSession(username string) (string, error) {
 		return "", err
 	}
 	token := base64.RawURLEncoding.EncodeToString(tokenBytes)
-	expiresAt := time.Now().Add(24 * time.Hour).Unix()
+	now := time.Now()
+	expiresAt := now.Add(adminSessionIdleTimeout).Unix()
 	if _, err := s.database.Exec(`
 		DELETE FROM "gocms_admin_session" WHERE "expires_at" <= ?`, time.Now().Unix()); err != nil {
 		return "", fmt.Errorf("clean expired sessions: %w", err)
 	}
 	if _, err := s.database.Exec(`
-		INSERT INTO "gocms_admin_session" ("token", "username", "expires_at") VALUES (?, ?, ?)`, token, username, expiresAt); err != nil {
+		INSERT INTO "gocms_admin_session" ("token", "username", "expires_at", "absolute_expires_at") VALUES (?, ?, ?, ?)`, token, username, expiresAt, now.Add(adminSessionAbsoluteTimeout).Unix()); err != nil {
 		return "", fmt.Errorf("store admin session: %w", err)
 	}
 	return token, nil
