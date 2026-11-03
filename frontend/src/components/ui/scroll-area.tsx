@@ -1,4 +1,5 @@
 import type { ComponentProps } from "react"
+import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area"
 import { cn } from "cn"
 
 type ScrollAreaProps = ComponentProps<"div"> & {
@@ -16,25 +17,44 @@ function ScrollArea({
   ...props
 }: ScrollAreaProps) {
   return (
-    <div
+    <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
-      className={cn(
-        "relative min-h-0 min-w-0 overscroll-contain",
-        "[scrollbar-color:color-mix(in_oklab,var(--muted-foreground)_38%,transparent)_transparent] [scrollbar-width:thin]",
-        "[&::-webkit-scrollbar]:size-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/35 [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/55",
-        orientation === "vertical" && "overflow-x-hidden overflow-y-auto",
-        orientation === "horizontal" && "overflow-x-auto overflow-y-hidden",
-        orientation === "both" && "overflow-auto",
-        className,
-        viewportClassName
-      )}
+      className={cn("relative grid min-h-0 min-w-0 grid-rows-[minmax(0,1fr)] overflow-hidden", className)}
       {...props}
     >
-      <div data-slot="scroll-area-content" className={contentClassName}>
-        {children}
-      </div>
-    </div>
+      <ScrollAreaPrimitive.Viewport
+        data-slot="scroll-area-viewport"
+        className={cn(
+          "min-h-0 min-w-0 max-h-[inherit] overscroll-contain rounded-[inherit] outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+          orientation === "vertical" && "overflow-x-hidden!",
+          orientation === "horizontal" && "overflow-y-hidden!",
+          viewportClassName
+        )}
+      >
+        <div data-slot="scroll-area-content" className={contentClassName}>
+          {children}
+        </div>
+      </ScrollAreaPrimitive.Viewport>
+      {orientation !== "horizontal" && <ScrollBar />}
+      {orientation !== "vertical" && <ScrollBar orientation="horizontal" />}
+      <ScrollAreaPrimitive.Corner />
+    </ScrollAreaPrimitive.Root>
   )
 }
 
-export { ScrollArea }
+function ScrollBar({ orientation = "vertical" }: { orientation?: "vertical" | "horizontal" }) {
+  return (
+    <ScrollAreaPrimitive.Scrollbar
+      data-slot="scroll-area-scrollbar"
+      orientation={orientation}
+      className={cn(
+        "flex touch-none select-none p-px transition-opacity",
+        orientation === "vertical" ? "h-full w-2.5 border-l border-l-transparent" : "h-2.5 flex-col border-t border-t-transparent"
+      )}
+    >
+      <ScrollAreaPrimitive.Thumb data-slot="scroll-area-thumb" className="relative flex-1 rounded-full bg-border" />
+    </ScrollAreaPrimitive.Scrollbar>
+  )
+}
+
+export { ScrollArea, ScrollBar }

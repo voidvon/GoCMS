@@ -4,6 +4,7 @@ import { generatePublishIndexes, getPublication, getPublishTargets, publishSite,
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { InlineAlert } from "@/components/app/app-ui"
 import { showSuccess } from "@/components/app/admin-notifications"
 import { useSite } from "@/lib/site-context"
@@ -194,7 +195,7 @@ export function PublishPage() {
   const stateLabel = running ? "正在发布" : report?.state === "success" ? "发布完成" : report?.state === "failed" ? "发布失败" : "尚未发布"
 
   return (
-    <div className="space-y-6">
+    <ScrollArea className="h-full" contentClassName="space-y-6 pb-1 pr-3">
       {error && <InlineAlert>{error}</InlineAlert>}
       {report?.error && <InlineAlert>{report.error}</InlineAlert>}
       <Card>
@@ -274,6 +275,6 @@ export function PublishPage() {
           </Card>
         )
       })}
-    </div>
+    </ScrollArea>
   )
 }
