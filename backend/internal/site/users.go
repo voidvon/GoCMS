@@ -23,6 +23,10 @@ var adminPermissions = []struct {
 	{"content.delete", "删除内容"}, {"content.review", "审核并公开内容"},
 	{"media", "附件管理"}, {"messages", "信息反馈"},
 	{"members", "会员管理"},
+	{"payments", "支付与交易管理"},
+	{"payments.configure", "配置支付账户"},
+	{"payments.refund", "发起支付退款"},
+	{"payments.fulfill", "处理订单交付"},
 	{"models", "系统模型"}, {"theme", "模板管理"},
 	{"publish", "网站发布"}, {"languages", "语言配置"},
 	{"logs", "查看操作日志"},
@@ -134,6 +138,16 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 		module = "login_logs"
 	}
 	*r = *r.WithContext(context.WithValue(r.Context(), contentScopeKey{}, u))
+	if module == "geography" {
+		if u.IsSuper && session {
+			return true
+		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "地址数据仅允许超级管理员通过后台管理"})
+		return false
+	}
+	if module == "payments" {
+		return s.authorizePaymentOperation(w, r, u, session)
+	}
 	// API keys cannot administer accounts or groups or member accounts even when owned by a super administrator.
 	if module == "users" || module == "groups" || module == "site-users" || module == "member-groups" {
 		if !session {

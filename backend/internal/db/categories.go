@@ -55,16 +55,17 @@ func EnsureUnifiedCategories(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	for name, definition := range map[string]string{
-		"site_id":        "INTEGER NOT NULL DEFAULT 1",
-		"list_page_size": "INTEGER NOT NULL DEFAULT 14",
-		"page_type":      "TEXT NOT NULL DEFAULT 'list'",
-		"cover_template": "TEXT NOT NULL DEFAULT ''",
-		"seo_title":      "TEXT NOT NULL DEFAULT ''",
-		"description":    "TEXT NOT NULL DEFAULT ''",
-		"cover_content":  "TEXT NOT NULL DEFAULT ''",
-		"model_id":       "INTEGER NOT NULL DEFAULT 1",
-		"link_url":       "TEXT NOT NULL DEFAULT ''",
-		"nav_position":   "TEXT NOT NULL DEFAULT 'main'",
+		"site_id":          "INTEGER NOT NULL DEFAULT 1",
+		"list_page_size":   "INTEGER NOT NULL DEFAULT 14",
+		"page_type":        "TEXT NOT NULL DEFAULT 'list'",
+		"cover_template":   "TEXT NOT NULL DEFAULT ''",
+		"seo_title":        "TEXT NOT NULL DEFAULT ''",
+		"description":      "TEXT NOT NULL DEFAULT ''",
+		"cover_content":    "TEXT NOT NULL DEFAULT ''",
+		"model_id":         "INTEGER NOT NULL DEFAULT 1",
+		"link_url":         "TEXT NOT NULL DEFAULT ''",
+		"nav_position":     "TEXT NOT NULL DEFAULT 'main'",
+		"commerce_enabled": "INTEGER NOT NULL DEFAULT 0",
 	} {
 		if err := ensureTableColumn(ctx, database, unifiedCategoryTable, name, definition); err != nil {
 			return err

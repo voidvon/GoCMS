@@ -17,6 +17,7 @@ import {
   getSystemModels,
   getThemeFiles,
   updateCategory,
+  type AdminUser,
   type CategoryInput,
   type CategoryItem,
   type CategoryTranslationItem,
@@ -27,6 +28,8 @@ import {
   type ThemeTemplateGroup,
 } from "@/lib/api"
 import { useLanguage } from "@/lib/language-context"
+import { useSite } from "@/lib/site-context"
+import { Switch } from "@/components/ui/switch"
 import { buildCategoryTree, flattenCategoryTree, type CategoryNode } from "@/lib/category-tree"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,7 +38,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog, IconButton, InlineAlert } from "@/components/app/app-ui"
-import { showSuccess } from "@/components/app/admin-notifications"
+import { showError, showSuccess } from "@/components/app/admin-notifications"
 import { cn } from "@/lib/utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
@@ -95,6 +98,7 @@ function buildInitialCategoryTranslations(
 }
 
 const emptyCategory: CategoryInput = {
+  commerce_enabled: false,
   name: "",
   parent_id: 0,
   order_id: 0,
@@ -112,31 +116,37 @@ const emptyCategory: CategoryInput = {
   link_url: "",
 }
 
+// Groups suggest defaults; administrators may bind any installed template.
+function preferTemplates(preferred: ThemeFile[], all: ThemeFile[]) {
+  const paths = new Set(preferred.map((file) => file.path))
+  return [...preferred, ...all.filter((file) => !paths.has(file.path))]
+}
+
 function getCoverTemplates(templateGroups: ThemeTemplateGroup[], templateFiles: ThemeFile[]) {
   const group = templateGroups.find((g) => g.key === "cover")
   if (group?.files && group.files.length > 0) {
-    return group.files
+    return preferTemplates(group.files, templateFiles)
   }
   const matching = templateFiles.filter((f) => f.path.toLowerCase().includes("cover"))
   if (matching.length > 0) {
-    return matching
+    return preferTemplates(matching, templateFiles)
   }
-  return [{ path: "category_cover.html", size: 0, modified_at: "" }]
+  return templateFiles.length ? templateFiles : [{ path: "category_cover.html", size: 0, modified_at: "" }]
 }
 
 function getListTemplates(templateGroups: ThemeTemplateGroup[], templateFiles: ThemeFile[]) {
   const group = templateGroups.find((g) => g.key === "list")
   if (group?.files && group.files.length > 0) {
-    return group.files
+    return preferTemplates(group.files, templateFiles)
   }
   const matching = templateFiles.filter((f) => {
     const p = f.path.toLowerCase()
     return p.includes("list") || p.includes("sort")
   })
   if (matching.length > 0) {
-    return matching
+    return preferTemplates(matching, templateFiles)
   }
-  return [{ path: "category_list.html", size: 0, modified_at: "" }]
+  return templateFiles.length ? templateFiles : [{ path: "category_list.html", size: 0, modified_at: "" }]
 }
 
 function defaultListPath(_parentID: number, parent?: CategoryItem) {
@@ -186,6 +196,7 @@ function categoryInput(category: CategoryItem, templateGroups: ThemeTemplateGrou
 
   return {
     name: category.name,
+    commerce_enabled: category.commerce_enabled ?? false,
     parent_id: category.parent_id,
     order_id: category.order_id,
     route_id: category.route_id,
@@ -298,7 +309,10 @@ function CategoryRow({
   )
 }
 
-export function CategoriesPage() {
+export function CategoriesPage({ user }: { user: AdminUser }) {
+  const { activeSiteId } = useSite()
+  const permissions = user.site_permissions?.[activeSiteId] ?? user.permissions
+  const canManageCommerce = user.is_super || permissions.includes("*") || permissions.includes("payments")
   const [categories, setCategories] = useState<CategoryItem[]>([])
   const [models, setModels] = useState<SystemModel[]>([])
   const [templateFiles, setTemplateFiles] = useState<ThemeFile[]>([])
@@ -448,7 +462,7 @@ export function CategoriesPage() {
       relevant = getListTemplates(templateGroups, templateFiles)
     } else {
       const files = templateGroups.find((group) => group.key === dimension)?.files
-      relevant = files && files.length > 0 ? files : templateFiles
+      relevant = files && files.length > 0 ? preferTemplates(files, templateFiles) : templateFiles
     }
     if (relevant.some((file) => file.path === current)) return relevant
     return current
@@ -507,6 +521,7 @@ export function CategoriesPage() {
       const defaultLink = translations[defaultLang]?.link_url !== undefined ? translations[defaultLang].link_url : form.link_url
       const payload: CategoryInput = {
         ...form,
+        commerce_enabled: canManageCommerce ? form.commerce_enabled : undefined,
         name: defaultName,
         seo_title: translations[defaultLang]?.seo_title ?? form.seo_title,
         description: translations[defaultLang]?.description ?? form.description,
@@ -533,7 +548,7 @@ export function CategoriesPage() {
         closeEditor()
       }
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "分类保存失败")
+      showError(saveError, "分类保存失败")
     } finally {
       setSaving(false)
     }
@@ -620,7 +635,7 @@ export function CategoriesPage() {
             <>
               <Tabs value={categoryActiveTab} onValueChange={setCategoryActiveTab} className="flex min-h-0 flex-1 flex-col w-full gap-0">
                 <div className="flex h-12 shrink-0 items-center border-b bg-muted/30 px-4">
-                  <div className="w-full max-w-full overflow-x-auto overscroll-x-contain">
+                  <ScrollArea orientation="horizontal" className="w-full max-w-full">
                     <TabsList className="h-8 w-max min-w-full justify-start p-1">
                       <TabsTrigger className="flex-none" value="base">基础数据</TabsTrigger>
                       {enabledLanguages.map((lang) => (
@@ -631,7 +646,7 @@ export function CategoriesPage() {
                         </TabsTrigger>
                       ))}
                     </TabsList>
-                  </div>
+                  </ScrollArea>
                 </div>
 
                 <TabsContent value="base" className="flex min-h-0 flex-1 flex-col mt-0">
@@ -675,6 +690,7 @@ export function CategoriesPage() {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="space-y-2 rounded-lg border p-3 sm:col-span-2"><div className="flex items-center justify-between gap-3"><Label htmlFor="category-commerce-enabled">允许本分类内容在线销售</Label><Switch id="category-commerce-enabled" disabled={!canManageCommerce || saving || form.page_type === "link"} checked={!!form.commerce_enabled} onCheckedChange={(enabled) => update("commerce_enabled", enabled)} /></div><p className="text-xs text-muted-foreground">开启后，在本分类的内容编辑中配置规格和价格。标题、介绍和封面直接使用原内容；子分类需分别开启。关闭后停止新订单购买，保留已有销售配置及历史订单。</p>{!canManageCommerce && <p className="text-xs text-muted-foreground">修改此配置需要“支付与交易管理”权限。</p>}</div>
                     <div className="space-y-2">
                       <Label>导航显示位置</Label>
                       <div className="flex flex-wrap gap-4">{[["main","主导航"],["top","顶部副导航"],["footer","底部页脚导航"]].map(([key,label]) => <label key={key} className="flex items-center gap-2"><input type="checkbox" checked={(form.nav_position || "main").split(",").includes(key)} onChange={(e) => { const s = new Set((form.nav_position || "main").split(",")); e.target.checked ? s.add(key) : s.delete(key); update("nav_position", Array.from(s).filter(Boolean).join(",") || "none") }} />{label}</label>)}</div>

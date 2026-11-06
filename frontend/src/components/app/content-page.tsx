@@ -1,6 +1,6 @@
 import { useDialogState } from "@/lib/use-dialog-state"
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react"
-import { ArrowDown, ArrowUp, FileText, ImagePlus, Library, LoaderCircle, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react"
+import { ArrowDown, ArrowUp, ExternalLink, FileText, ImagePlus, Library, LoaderCircle, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react"
 
 import {
   createContent,
@@ -26,6 +26,9 @@ import {
   updateContent,
 } from "@/lib/api"
 import { useLanguage } from "@/lib/language-context"
+import { useSite } from "@/lib/site-context"
+import { showError, showSuccess } from "@/components/app/admin-notifications"
+import { ContentCommerceEditor, commerceDraft, commercePayload } from "@/components/app/content-commerce-editor"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -673,6 +676,7 @@ function SingleImageField({
 
 function ContentEditor({
   canReview,
+  canManageCommerce,
   content,
   categories,
   models,
@@ -682,6 +686,7 @@ function ContentEditor({
   saving,
 }: {
   canReview: boolean
+  canManageCommerce: boolean
   content: ContentInput
   categories: CategoryItem[]
   models: SystemModel[]
@@ -698,6 +703,7 @@ function ContentEditor({
       : [{ id: 1, code: defaultLang || "zh-CN", name: "默认语言", is_default: 1, is_enabled: 1, is_fallback: 0, is_admin_default: 1, sort_order: 0, path_prefix: "" }]
   }, [languages, defaultLang])
 
+  const [sale, setSale] = useState(() => commerceDraft(content.commerce))
   const [activeTab, setActiveTab] = useState("base")
   const [form, setForm] = useState({ ...content, visible: canReview ? content.visible : 0 })
   const [translations, setTranslations] = useState<Record<string, ContentTranslationItem>>(() => {
@@ -710,6 +716,7 @@ function ContentEditor({
 
   useEffect(() => {
     setForm({ ...content, visible: canReview ? content.visible : 0 })
+    setSale(commerceDraft(content.commerce))
     setTranslations(buildInitialContentTranslations(content, defaultLang, enabledLanguages))
   }, [content, defaultLang, enabledLanguages, canReview])
 
@@ -1115,8 +1122,12 @@ function ContentEditor({
     }
 
     setCustomError("")
+    let salePayload: ContentInput["commerce"]
+    try { salePayload = canManageCommerce ? commercePayload(sale) : undefined }
+    catch (error) { showError(error); setActiveTab("base"); return }
     const payload: ContentInput = {
       ...form,
+      commerce: salePayload,
       title: defaultTitle,
       summary: defaultTrans?.summary ?? form.summary,
       content: defaultTrans?.content ?? form.content,
@@ -1245,6 +1256,8 @@ function ContentEditor({
                 </div>
               )}
 
+              {(categories.find((category) => category.id === form.category_id)?.commerce_enabled || sale) && <ContentCommerceEditor value={sale} onChange={setSale} categoryEnabled={!!categories.find((category) => category.id === form.category_id)?.commerce_enabled} disabled={!canManageCommerce || saving} />}
+
               {/* 发布与展示属性 */}
               <div className="space-y-3 rounded-lg border p-3.5 bg-card">
                 <p className="text-sm font-semibold text-muted-foreground border-b pb-1.5">发布与展示属性</p>
@@ -1329,7 +1342,9 @@ function ContentEditor({
 }
 
 export function ContentPage({ user }: { user: AdminUser }) {
-  const allowed = (permission: string) => user.is_super || user.permissions.includes(permission)
+  const { activeSiteId } = useSite()
+  const permissions = user.site_permissions?.[activeSiteId] ?? user.permissions
+  const allowed = (permission: string) => user.is_super || permissions.includes("*") || permissions.includes(permission)
   const canReview = allowed("content.review")
   // 标题与缩略图是列表的主要编辑入口，权限判断与操作列保持一致。
   const canEditItem = (item: ContentListItem) => allowed("content.edit") && (!item.visible || canReview)
@@ -1427,6 +1442,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
       return emptyContent
     }
     return {
+      commerce: editingDetail.commerce,
       title: editingDetail.title,
       code: editingDetail.code,
       category_id: editingDetail.category_id,
@@ -1488,7 +1504,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
       const result = editing
         ? await updateContent(editing.id, payload, publish, activeLang)
         : await createContent(payload, publish, activeLang)
-      setNotice(publicationMessage(result))
+      showSuccess(publicationMessage(result))
       closeEditor(false)
       setLoading(true)
       const targetPage = editing ? page : 1
@@ -1497,7 +1513,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
       setItems(response.items)
       setTotal(response.total)
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "保存失败")
+      showError(saveError, "保存失败")
     } finally {
       setSaving(false)
       setLoading(false)
@@ -1616,14 +1632,27 @@ export function ContentPage({ user }: { user: AdminUser }) {
                         {item.cover_image ? <img src={item.cover_image} alt="" className="size-full object-contain" /> : <FileText className="size-4" />}
                       </button>
                       <div className="min-w-0">
-                        <button
-                          type="button"
-                          className="block max-w-full truncate text-left font-medium enabled:cursor-pointer enabled:hover:text-primary enabled:hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-default"
-                          onClick={() => openEdit(item)}
-                          disabled={!canEditItem(item)}
-                        >
-                          {item.title}
-                        </button>
+                        <div className="flex min-w-0 items-center gap-1">
+                          <button
+                            type="button"
+                            className="min-w-0 truncate text-left font-medium enabled:cursor-pointer enabled:hover:text-primary enabled:hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-default"
+                            onClick={() => openEdit(item)}
+                            disabled={!canEditItem(item)}
+                          >
+                            {item.title}
+                          </button>
+                          <IconButton
+                            variant="ghost"
+                            size="icon-sm"
+                            className="size-6 text-muted-foreground hover:text-primary"
+                            label={!item.visible ? "隐藏内容没有公开页面" : !item.url ? "前台地址暂不可用，请检查语言及路由配置" : `新窗口打开前台页面：${item.title}`}
+                            disabled={!item.visible || !item.url}
+                            nativeButton={false}
+                            render={<a href={item.visible && item.url ? item.url : undefined} target="_blank" rel="noopener noreferrer" />}
+                          >
+                            <ExternalLink className="size-3.5" />
+                          </IconButton>
+                        </div>
                         <p className="truncate text-xs text-muted-foreground">{item.code || "无编号"} · #{item.id}</p>
                       </div>
                     </div>
@@ -1670,7 +1699,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
                 <LoaderCircle className="size-5 animate-spin" />
               </div>
             </>
-          ) : <ContentEditor canReview={canReview} key={`${editing?.id ?? "new"}-${activeLang}`} content={formContent} categories={categories} models={models} modelFields={modelFields} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
+          ) : <ContentEditor canManageCommerce={allowed("payments")} canReview={canReview} key={`${editing?.id ?? "new"}-${activeLang}`} content={formContent} categories={categories} models={models} modelFields={modelFields} onSave={save} onCancel={() => closeEditor(false)} saving={saving} />}
         </DialogContent>
       </Dialog>
       <ConfirmDialog

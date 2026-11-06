@@ -45,7 +45,7 @@ func TestAdminContentListOmitsHeavyFieldsAndKeepsDetail(t *testing.T) {
 	if page.Total != 20 || len(page.Items) != 20 {
 		t.Fatalf("total = %d, items = %d", page.Total, len(page.Items))
 	}
-	fields := []string{"id", "category_id", "title", "code", "cover_image", "published_at", "featured", "visible"}
+	fields := []string{"id", "category_id", "title", "code", "cover_image", "published_at", "featured", "visible", "url"}
 	for _, item := range page.Items {
 		if len(item) != len(fields) {
 			t.Fatalf("list returned unexpected fields: %v", item)

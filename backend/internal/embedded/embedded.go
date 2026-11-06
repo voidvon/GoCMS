@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-// The release build places the admin SPA and the default publishing templates
+// The release build places both SPAs and the default publishing templates
 // in this directory before compiling the binary. bootstrap.txt keeps the Go
 // package buildable before the generated assets have been prepared.
 //
@@ -24,6 +24,9 @@ func assetFS(path string) (fs.FS, error) {
 func FrontendFS() (fs.FS, error) {
 	return assetFS(filepath.Join("frontend", "dist"))
 }
+
+// StorefrontFS returns the embedded customer SPA filesystem.
+func StorefrontFS() (fs.FS, error) { return assetFS(filepath.Join("storefront", "dist")) }
 
 func templateFS() (fs.FS, error) {
 	return assetFS("templates")
@@ -77,4 +80,13 @@ func copyFS(source func() (fs.FS, error), destination string) error {
 		}
 		return os.WriteFile(target, data, 0644)
 	})
+}
+
+// ReadTemplate returns a bundled template for explicit installation by an admin.
+func ReadTemplate(name string) ([]byte, error) {
+	root, err := templateFS()
+	if err != nil {
+		return nil, err
+	}
+	return fs.ReadFile(root, name)
 }

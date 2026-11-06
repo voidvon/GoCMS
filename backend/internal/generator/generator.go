@@ -118,6 +118,7 @@ type LanguageInfo struct {
 }
 
 type content struct {
+	siteID           int64
 	consentPolicy    consent.Policy
 	tables           map[string][]Row
 	settings         map[string]string
@@ -233,6 +234,11 @@ type TemplateTag struct {
 // list next to templateFuncs so the documentation and parser evolve together.
 func TemplateTags() []TemplateTag {
 	return []TemplateTag{
+		{
+			Name: "currentSiteID", Category: "全局设置", Signature: `{{currentSiteID}}`,
+			Description: "返回当前发布站点 ID，供主题区分本地偏好等站点级数据；与语言、域名及分类无关。",
+			Context:     "所有模板", Example: `<script data-site-id="{{currentSiteID}}" data-language="{{currentLang}}"></script>`,
+		},
 		{
 			Name: "setting", Category: "全局设置", Signature: `{{setting "site_name"}}`,
 			Description: "读取站点设置并进行 HTML 转义，适合输出站点名称、网址等文本。",
@@ -433,8 +439,9 @@ func (c *content) templateFuncs() template.FuncMap {
 		"listPagination": func(row Row) ListPagination {
 			return c.listPagination(row)
 		},
-		"currentLang": func() string { return c.lang },
-		"languages":   func(_ ...any) []LanguageInfo { return c.languagesNav() },
+		"currentSiteID": func() int64 { return c.siteID },
+		"currentLang":   func() string { return c.lang },
+		"languages":     func(_ ...any) []LanguageInfo { return c.languagesNav() },
 		"morepic": func(val any) []PhotoItem {
 			if val == nil {
 				return nil
@@ -816,6 +823,7 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 	}()
 
 	c := &content{
+		siteID:           siteID,
 		tables:           map[string][]Row{},
 		settings:         map[string]string{},
 		templates:        map[string]*template.Template{},

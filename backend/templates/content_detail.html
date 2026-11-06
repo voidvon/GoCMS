@@ -4,9 +4,10 @@
 {{end}}
 {{end}}
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{currentLang}}">
 <head>
   <meta charset="UTF-8">
+  {{include "site-language.html" .}}
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{if .seo_title}}{{.seo_title}}{{else}}{{.title}}{{end}} - {{setting "site_name"}}</title>
   <meta name="description" content="{{.description}}">
@@ -24,6 +25,7 @@
       <p class="content-meta">{{.published_at}}{{if .source}} | {{.source}}{{end}}</p>
       {{if .summary}}<p class="content-summary">{{.summary}}</p>{{end}}
       {{if and .image (ne .image "/images/nopicture.gif")}}<p><img src="{{.image}}" alt="{{.title}}" class="content-image"></p>{{end}}
+      {{include "commerce-purchase.html" .}}
       <div class="content-body">{{.body}}</div>
       <nav class="content-neighbors">{{if .previous_url}}<a href="{{.previous_url}}">上一条：{{.previous_title}}</a>{{end}}{{if .next_url}} <a href="{{.next_url}}">下一条：{{.next_title}}</a>{{end}}</nav>
     </article>

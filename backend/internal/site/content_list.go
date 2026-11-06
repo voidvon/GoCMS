@@ -2,9 +2,11 @@ package site
 
 import (
 	"context"
+	"net/url"
 	"strings"
 
 	"gocms/internal/db"
+	"gocms/internal/routing"
 )
 
 // AdminContentItem contains only the fields used by the admin content table.
@@ -18,6 +20,7 @@ type AdminContentItem struct {
 	PublishedAt string `json:"published_at"`
 	Featured    int64  `json:"featured"`
 	Visible     int64  `json:"visible"`
+	URL         string `json:"url"`
 }
 
 type AdminContentPage struct {
@@ -57,7 +60,104 @@ func (s *Server) queryAdminContent(ctx context.Context, siteID int64, query stri
 	if err := s.populateAdminContentTitles(ctx, items, lang, defaultLang, fallbackLang); err != nil {
 		return AdminContentPage{}, err
 	}
+	if err := s.populateAdminContentURLs(ctx, siteID, items, lang); err != nil {
+		return AdminContentPage{}, err
+	}
 	return AdminContentPage{Query: query, Page: page, PageSize: pageSize, Total: total, Items: items}, nil
+}
+
+func (s *Server) populateAdminContentURLs(ctx context.Context, siteID int64, items []AdminContentItem, lang string) error {
+	if len(items) == 0 {
+		return nil
+	}
+	settings, err := db.LoadSiteSettingsForSite(ctx, s.database, siteID)
+	if err != nil {
+		return err
+	}
+	base := strings.TrimRight(strings.TrimSpace(settings["site_url"]), "/")
+	if base == "" {
+		var domain string
+		if err := s.database.QueryRowContext(ctx, `SELECT domain FROM gocms_site WHERE id=?`, siteID).Scan(&domain); err != nil {
+			return err
+		}
+		if domain = db.NormalizeDomain(domain); domain != "" {
+			base = "https://" + domain
+		}
+	}
+	languages, err := s.getLanguages(ctx, siteID)
+	if err != nil {
+		return err
+	}
+	prefix := ""
+	available := false
+	for _, language := range languages {
+		if language.Code != lang || language.IsEnabled != 1 {
+			continue
+		}
+		available = true
+		if language.IsDefault != 1 {
+			if language.SiteMode == db.LanguageSiteModeStandalone {
+				base = strings.TrimRight(strings.TrimSpace(language.Domain), "/")
+				if base == "" {
+					return nil
+				}
+				if !strings.Contains(base, "://") {
+					base = "https://" + base
+				}
+			} else {
+				prefix = strings.Trim(strings.TrimSpace(language.PathPrefix), "/")
+				if prefix == "" {
+					prefix = strings.ToLower(language.Code)
+				}
+				prefix = "/" + prefix
+			}
+		}
+		break
+	}
+	if !available {
+		return nil
+	}
+	if base != "" {
+		parsed, err := url.Parse(base)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return nil
+		}
+	}
+	placeholders := make([]string, len(items))
+	args := []any{routing.DefaultDetailPath, routing.DefaultDetailPattern, siteID}
+	indexes := make(map[int64]int, len(items))
+	for i, item := range items {
+		placeholders[i] = "?"
+		args = append(args, item.ID)
+		indexes[item.ID] = i
+	}
+	// Fetch route metadata for this page together; keep bodies and translations
+	// out of the compact list, and avoid one database query per content item.
+	rows, err := s.database.QueryContext(ctx, `SELECT c.id,COALESCE(c.route_key,''),
+		COALESCE(NULLIF(category.detail_path,''),?),COALESCE(NULLIF(category.detail_file_pattern,''),?)
+		FROM gocms_content c LEFT JOIN gocms_category category ON category.id=c.category_id AND category.site_id=c.site_id
+		WHERE c.site_id=? AND c.id IN (`+strings.Join(placeholders, ",")+`)`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var key, directory, pattern string
+		if err := rows.Scan(&id, &key, &directory, &pattern); err != nil {
+			return err
+		}
+		directory, err := routing.NormalizeDirectory(directory)
+		if err != nil {
+			continue
+		}
+		filename, err := routing.RenderDetailFilenameValue(pattern, key)
+		if err != nil {
+			continue
+		}
+		items[indexes[id]].URL = base + prefix + routing.DetailURL(directory, filename)
+	}
+	return rows.Err()
 }
 
 func (s *Server) populateAdminContentTitles(ctx context.Context, items []AdminContentItem, lang, defaultLang, fallbackLang string) error {

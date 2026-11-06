@@ -100,6 +100,7 @@ type AdminStats struct {
 }
 
 type CategoryItem struct {
+	CommerceEnabled   bool                               `json:"commerce_enabled"`
 	ID                int64                              `json:"id"`
 	Name              string                             `json:"name"`
 	ParentID          int64                              `json:"parent_id"`
@@ -128,6 +129,7 @@ type CategoryItem struct {
 }
 
 type categoryPayload struct {
+	CommerceEnabled   *bool                              `json:"commerce_enabled,omitempty"`
 	Lang              string                             `json:"lang,omitempty"`
 	Translations      map[string]CategoryTranslationItem `json:"translations,omitempty"`
 	Name              string                             `json:"name"`
@@ -368,7 +370,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		       c."list_path", c."list_file_pattern", c."list_template", c."cover_template", c."detail_path",
 		       c."detail_file_pattern", c."detail_template", COALESCE(c."seo_title", ''), COALESCE(c."description", ''),
 		       COALESCE(c."cover_content", ''), COALESCE(c."model_id", 1), COALESCE(c."link_url", ''),
-		       COALESCE(c."nav_position", 'main')
+		       COALESCE(c."nav_position", 'main'), COALESCE(c."commerce_enabled",0)
 		FROM "gocms_category" c
 		WHERE c."site_id" = ?
 		ORDER BY c."parent_id", c."order_id", c."id"`, siteID)
@@ -383,7 +385,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		if err := rows.Scan(&item.ID, &item.Name, &item.ParentID, &item.OrderID, &item.ListPageSize, &item.PageType, &item.RouteID,
 			&item.ContentCount, &item.ListPath, &item.ListFilePattern, &item.ListTemplate,
 			&item.CoverTemplate, &item.DetailPath, &item.DetailFilePattern, &item.DetailTemplate,
-			&item.SEOTitle, &item.Description, &item.CoverContent, &item.ModelID, &item.LinkURL, &item.NavPosition); err != nil {
+			&item.SEOTitle, &item.Description, &item.CoverContent, &item.ModelID, &item.LinkURL, &item.NavPosition, &item.CommerceEnabled); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
@@ -493,6 +495,9 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		http.Error(response, "invalid category payload", http.StatusBadRequest)
 		return
 	}
+	if payload.CommerceEnabled != nil && !s.authorizeContentCommerce(response, request, targetSiteID) {
+		return
+	}
 	payload.Name = strings.TrimSpace(payload.Name)
 	payload.LinkURL = strings.TrimSpace(payload.LinkURL)
 	if payload.Name == "" && payload.Translations != nil {
@@ -542,10 +547,20 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 
 	if id == 0 {
 		if err := s.nextCategoryOrder(request.Context(), siteID, payload.ParentID, &payload.OrderID); err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
+			commerceError(response, err)
 			return
 		}
-		result, err := s.database.ExecContext(request.Context(), `
+	}
+	transaction, err := s.database.BeginTx(request.Context(), nil)
+	if err != nil {
+		commerceError(response, err)
+		return
+	}
+	defer transaction.Rollback()
+	savedID := id
+
+	if id == 0 {
+		result, err := transaction.ExecContext(request.Context(), `
 			INSERT INTO "gocms_category"
 			("site_id", "name", "parent_id", "order_id", "list_page_size", "page_type", "route_id", "list_path", "list_file_pattern", "list_template", "cover_template", "detail_path", "detail_file_pattern", "detail_template", "seo_title", "description", "cover_content", "model_id", "link_url", "nav_position")
 			VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -559,24 +574,34 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
+		savedID = newID
 		routeID := payload.RouteID
 		if routeID <= 0 {
 			routeID = newID
 		}
-		if _, err := s.database.ExecContext(request.Context(), `UPDATE "gocms_category" SET "route_id" = ? WHERE "id" = ?`, routeID, newID); err != nil {
+		if _, err := transaction.ExecContext(request.Context(), `UPDATE "gocms_category" SET "route_id" = ? WHERE "id" = ?`, routeID, newID); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
 		if payload.Translations != nil && len(payload.Translations) > 0 {
-			_ = s.saveCategoryTranslations(request.Context(), s.database, newID, payload.Translations)
+			if err := s.saveCategoryTranslations(request.Context(), transaction, newID, payload.Translations); err != nil {
+				commerceError(response, err)
+				return
+			}
 		} else {
-			_ = s.saveCategoryTranslations(request.Context(), s.database, newID, map[string]CategoryTranslationItem{
+			if err := s.saveCategoryTranslations(request.Context(), transaction, newID, map[string]CategoryTranslationItem{
 				requestedLang: {Name: payload.Name, SEOTitle: payload.SEOTitle, Description: payload.Description, CoverContent: payload.CoverContent, LinkURL: payload.LinkURL},
-			})
+			}); err != nil {
+				commerceError(response, err)
+				return
+			}
 		}
 	} else {
 		if payload.Translations != nil && len(payload.Translations) > 0 {
-			_ = s.saveCategoryTranslations(request.Context(), s.database, id, payload.Translations)
+			if err := s.saveCategoryTranslations(request.Context(), transaction, id, payload.Translations); err != nil {
+				commerceError(response, err)
+				return
+			}
 			if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Name) != "" {
 				payload.Name = def.Name
 				payload.SEOTitle = def.SEOTitle
@@ -587,9 +612,12 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 				}
 			}
 		} else {
-			_ = s.saveCategoryTranslations(request.Context(), s.database, id, map[string]CategoryTranslationItem{
+			if err := s.saveCategoryTranslations(request.Context(), transaction, id, map[string]CategoryTranslationItem{
 				requestedLang: {Name: payload.Name, SEOTitle: payload.SEOTitle, Description: payload.Description, CoverContent: payload.CoverContent, LinkURL: payload.LinkURL},
-			})
+			}); err != nil {
+				commerceError(response, err)
+				return
+			}
 		}
 
 		routeID := payload.RouteID
@@ -598,7 +626,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		}
 
 		if requestedLang == defaultLang || payload.Translations != nil {
-			result, err := s.database.ExecContext(request.Context(), `
+			result, err := transaction.ExecContext(request.Context(), `
 				UPDATE "gocms_category" SET "name" = ?, "parent_id" = ?, "order_id" = ?, "route_id" = ?, "list_page_size" = ?, "page_type" = ?,
 				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "seo_title" = ?, "description" = ?, "cover_content" = ?, "model_id" = ?, "link_url" = ?, "nav_position" = ? WHERE "id" = ?`,
 				payload.Name, payload.ParentID, payload.OrderID, routeID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.SEOTitle, payload.Description, payload.CoverContent, payload.ModelID, payload.LinkURL, payload.NavPosition, id)
@@ -612,7 +640,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 				return
 			}
 		} else {
-			result, err := s.database.ExecContext(request.Context(), `
+			result, err := transaction.ExecContext(request.Context(), `
 				UPDATE "gocms_category" SET "parent_id" = ?, "order_id" = ?, "route_id" = ?, "list_page_size" = ?, "page_type" = ?,
 				"list_path" = ?, "list_file_pattern" = ?, "list_template" = ?, "cover_template" = ?, "detail_path" = ?, "detail_file_pattern" = ?, "detail_template" = ?, "model_id" = ?, "link_url" = ?, "nav_position" = ? WHERE "id" = ?`,
 				payload.ParentID, payload.OrderID, routeID, payload.ListPageSize, payload.PageType, payload.ListPath, payload.ListFilePattern, payload.ListTemplate, payload.CoverTemplate, payload.DetailPath, payload.DetailFilePattern, payload.DetailTemplate, payload.ModelID, payload.LinkURL, payload.NavPosition, id)
@@ -626,6 +654,16 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 				return
 			}
 		}
+	}
+	if payload.CommerceEnabled != nil {
+		if _, err := transaction.ExecContext(request.Context(), `UPDATE gocms_category SET commerce_enabled=? WHERE id=? AND site_id=?`, *payload.CommerceEnabled, savedID, targetSiteID); err != nil {
+			commerceError(response, err)
+			return
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		commerceError(response, err)
+		return
 	}
 	s.contentSaved(response, request)
 }

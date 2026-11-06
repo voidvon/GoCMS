@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"gocms/internal/commerce"
 	"gocms/internal/db"
 	"gocms/internal/routing"
 )
@@ -15,6 +16,7 @@ import (
 // Content is the runtime content model. Historical source rows are imported
 // into this shape once and are never read by the runtime afterward.
 type Content struct {
+	Commerce      *commerce.Product                 `json:"commerce,omitempty"`
 	ID            int64                             `json:"id"`
 	RouteKey      string                            `json:"route_key"`
 	Category      int64                             `json:"category_id"`
@@ -49,6 +51,7 @@ type ContentPage struct {
 }
 
 type contentPayload struct {
+	Commerce      *commerce.Product                 `json:"commerce,omitempty"`
 	Lang          string                            `json:"lang,omitempty"`
 	Translations  map[string]ContentTranslationItem `json:"translations,omitempty"`
 	RouteKey      string                            `json:"route_key,omitempty"`
@@ -160,6 +163,11 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
 		}
+		item.Commerce, err = s.commerce.Product(request.Context(), contentSiteID, id)
+		if err != nil {
+			commerceError(response, err)
+			return
+		}
 		writeJSON(response, http.StatusOK, item)
 		return
 	}
@@ -206,6 +214,9 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	var payload contentPayload
 	if err := decodeRequest(request, &payload); err != nil {
 		http.Error(response, "invalid content payload", http.StatusBadRequest)
+		return
+	}
+	if payload.Commerce != nil && !s.authorizeContentCommerce(response, request, siteID) {
 		return
 	}
 	payload.Title = strings.TrimSpace(payload.Title)
@@ -384,6 +395,12 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 			http.Error(response, "media reference error", http.StatusInternalServerError)
 			return
 		}
+		if payload.Commerce != nil {
+			if err := s.commerce.SaveProduct(request.Context(), transaction, targetSiteID, newID, *payload.Commerce); err != nil {
+				contentCommerceError(response, err)
+				return
+			}
+		}
 		if err := transaction.Commit(); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -470,6 +487,12 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		if err := syncContentMediaRefs(request.Context(), transaction, id, payload.Content, payload.CoverImage); err != nil {
 			http.Error(response, "media reference error", http.StatusInternalServerError)
 			return
+		}
+		if payload.Commerce != nil {
+			if err := s.commerce.SaveProduct(request.Context(), transaction, targetSiteID, id, *payload.Commerce); err != nil {
+				contentCommerceError(response, err)
+				return
+			}
 		}
 		if err := transaction.Commit(); err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)

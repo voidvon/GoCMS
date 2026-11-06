@@ -24,6 +24,7 @@
 | `settingHTML` | `{{settingHTML "footer_html"}}`，输出受信任的原始 HTML |
 | `include` | `{{include "header.html" .}}`，渲染公共模板 |
 | `label` | `{{label "card" .}}`，渲染后台标签模板 |
+| `currentSiteID` | `{{currentSiteID}}`，当前发布站点 ID，供公共模板隔离 localStorage 等站点级状态 |
 | `currentLang` | `{{currentLang}}`，当前语言代码 |
 | `languages` | `{{range languages}}...{{end}}`，语言导航，字段 `.Code`、`.Name`、`.URL`、`.Current` |
 

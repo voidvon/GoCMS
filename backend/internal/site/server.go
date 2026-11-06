@@ -15,7 +15,9 @@ import (
 	"sync"
 
 	"gocms/internal/captcha"
+	"gocms/internal/commerce"
 	"gocms/internal/db"
+	"gocms/internal/geography"
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
 	"gocms/internal/templatelabel"
@@ -23,27 +25,36 @@ import (
 )
 
 type Server struct {
-	database         *sql.DB
-	siteRoot         string
-	fileServe        http.Handler
-	frontendRoot     string
-	frontendFS       fs.FS
-	frontendDevProxy http.Handler
-	assetsRoot       string
-	themeRoot        string
-	templateRoot     string
-	themeBase        string
-	themeData        string
-	activeTheme      theme.Definition
-	themeMu          sync.RWMutex
-	publication      *publication
-	sitePubMu        sync.Mutex
-	sitePublications map[int64]*publication
-	updateMu         sync.Mutex
-	updateActive     bool
-	captcha          *captcha.Service
-	accessLogs       *accessLogConfig
-	legacyPrefixes   *legacyPrefixCache
+	geography                  *geography.Store
+	commerce                   *commerce.Service
+	paymentKeyMu               sync.Mutex
+	paymentKeyPath             string
+	paymentKeySource           string
+	paymentKeyEnvironmentError error
+	database                   *sql.DB
+	siteRoot                   string
+	fileServe                  http.Handler
+	frontendRoot               string
+	frontendFS                 fs.FS
+	frontendDevProxy           http.Handler
+	storefrontRoot             string
+	storefrontFS               fs.FS
+	storefrontDevProxy         http.Handler
+	assetsRoot                 string
+	themeRoot                  string
+	templateRoot               string
+	themeBase                  string
+	themeData                  string
+	activeTheme                theme.Definition
+	themeMu                    sync.RWMutex
+	publication                *publication
+	sitePubMu                  sync.Mutex
+	sitePublications           map[int64]*publication
+	updateMu                   sync.Mutex
+	updateActive               bool
+	captcha                    *captcha.Service
+	accessLogs                 *accessLogConfig
+	legacyPrefixes             *legacyPrefixCache
 	// feishuClient overrides the HTTP client used for Feishu webhook pushes
 	// (tests point it at a local server); nil means the default client.
 	feishuClient *http.Client
@@ -64,6 +75,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 			return nil, err
 		}
 		if err := db.EnsureSiteUsers(context.Background(), database); err != nil {
+			return nil, err
+		}
+		if err := db.EnsureCommerce(context.Background(), database); err != nil {
 			return nil, err
 		}
 		if err := db.EnsureAuditLog(context.Background(), database); err != nil {
@@ -89,14 +103,18 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create captcha service: %w", err)
 	}
-	return &Server{
+	server := &Server{
 		database:       database,
 		siteRoot:       siteRoot,
 		fileServe:      http.FileServer(http.Dir(siteRoot)),
 		captcha:        captSvc,
 		accessLogs:     newAccessLogConfig(),
 		legacyPrefixes: newLegacyPrefixCache(),
-	}, nil
+	}
+	if err := server.configurePayments(); err != nil {
+		return nil, err
+	}
+	return server, nil
 }
 
 func (s *Server) Handler() http.Handler {
@@ -104,6 +122,22 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) {
+	if strings.HasPrefix(request.URL.Path, "/api/geography/") {
+		s.publicGeography(response, request)
+		return
+	}
+	if request.URL.Path == "/shop" || strings.HasPrefix(request.URL.Path, "/shop/") {
+		s.serveStorefront(response, request)
+		return
+	}
+	if strings.HasPrefix(request.URL.Path, "/api/payments/webhooks/") {
+		s.paymentWebhook(response, request)
+		return
+	}
+	if strings.HasPrefix(request.URL.Path, "/api/commerce/") {
+		s.publicCommerce(response, request)
+		return
+	}
 	if strings.HasPrefix(request.URL.Path, "/api/v1/") {
 		s.memberAPI(response, request)
 		return
@@ -145,6 +179,14 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 				defer s.recordOperation(user.Username, request, capture)
 			}
 		}
+	}
+	if lowerAdminPath == "/api/admin/geography" || strings.HasPrefix(lowerAdminPath, "/api/admin/geography/") {
+		s.adminGeography(response, request)
+		return
+	}
+	if lowerAdminPath == "/api/admin/payments" || strings.HasPrefix(lowerAdminPath, "/api/admin/payments/") {
+		s.adminPayments(response, request)
+		return
 	}
 	switch lowerAdminPath {
 	case "/api/auth/register":
@@ -441,9 +483,17 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 	}
 
 	if s.database != nil {
-		matched, err := db.GetSiteByHost(request.Context(), s.database, requestHost(request))
+		// Match resource/API routing: configured domains take precedence, while
+		// unmatched local hosts can carry an explicit development site selector.
+		siteID, err := s.resolvePublicSiteID(request)
+		if err != nil {
+			http.Error(response, err.Error(), http.StatusForbidden)
+			return
+		}
+		matched, err := db.GetSiteByID(request.Context(), s.database, siteID)
 		if err != nil || matched == nil {
-			matched, _ = db.GetDefaultSite(request.Context(), s.database)
+			http.NotFound(response, request)
+			return
 		}
 		if matched != nil {
 			if matched.Status != "active" {

@@ -1,0 +1,30 @@
+{
+  "operation": "sandbox-manual-mark-paid",
+  "requested_by": "user",
+  "operator": "codex",
+  "note": "人工沙箱模拟成功（用户授权，仅用于后续订单与交付验证）；PingPong 原交易失败 302001，未实际收款，不能用于验证服务商退款。",
+  "order_before": {
+    "id": "ord_a488c45cc850210d38b66d7ff01036e1",
+    "site_id": 2,
+    "amount": 7900,
+    "currency": "USD",
+    "status": "unpaid",
+    "fulfillment_status": "pending",
+    "paid_attempt": "",
+    "updated_at": "2026-11-06 17:30:23"
+  },
+  "attempt_before": {
+    "id": "pay_e9b22a966e7816adafdf61565e65dce1",
+    "order_id": "ord_a488c45cc850210d38b66d7ff01036e1",
+    "account_id": 1,
+    "status": "failed",
+    "transaction_id": "26110600000052549690",
+    "payment_url": "https://sandbox-safepay.pingpongx.com?token=EU:vr_YVR8u7rn7C1gG97DOg9KngM-3mL0ptXSDXqj4rdsXS2I9GBJzK7SBxCz56raQqQ0UnAAWJFJ2R-zBJ6juSw==",
+    "error": "",
+    "next_sync": 1793987093,
+    "created_at": "2026-11-06 17:30:23",
+    "updated_at": "2026-11-06 17:42:53",
+    "environment": "sandbox"
+  },
+  "outbox_before": []
+}

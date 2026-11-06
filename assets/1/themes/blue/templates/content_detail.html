@@ -1,5 +1,5 @@
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html lang="{{currentLang}}" xmlns="http://www.w3.org/1999/xhtml">
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
 <title>{{.title}} - {{setting "site_name"}}</title>
@@ -16,6 +16,7 @@
       <p class="content-meta">{{.published_at}}{{if .source}} | {{.source}}{{end}}</p>
       {{if .summary}}<div class="content-summary">{{.summary}}</div>{{end}}
       {{if and .image (ne .image "/images/nopicture.gif")}}<p><img src="{{.image}}" alt="{{.title}}" class="content-image" /></p>{{end}}
+      {{include "commerce-purchase.html" .}}
       <div class="content-body">{{.body}}</div>
       <div class="content-neighbors">{{if .previous_url}}上一条：<a href="{{.previous_url}}">{{.previous_title}}</a>{{end}}{{if .next_url}}　下一条：<a href="{{.next_url}}">{{.next_title}}</a>{{end}}</div>
     </div>

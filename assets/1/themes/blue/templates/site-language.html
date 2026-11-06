@@ -1,0 +1,27 @@
+<script data-site-id="{{currentSiteID}}" data-language="{{currentLang}}">
+(() => {
+  const script = document.currentScript
+  const site = script.dataset.siteId
+  const language = (script.dataset.language || "").trim()
+  if (!/^[1-9]\d*$/.test(site) || !language) return
+  const key = "gocms-site-language:" + site
+  const remember = () => {
+    const value = document.documentElement.lang.trim()
+    if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)) return
+    try {
+      if (localStorage.getItem(key) !== value) localStorage.setItem(key, value)
+    } catch {}
+  }
+  // The generated language is authoritative. This context never changes the
+  // separate manual language preference owned by the shopping app.
+  document.documentElement.lang = language
+  remember()
+  window.addEventListener("pageshow", remember)
+  window.addEventListener("focus", remember)
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) remember() })
+  document.addEventListener("click", remember, true)
+  document.addEventListener("auxclick", remember, true)
+  document.addEventListener("submit", remember, true)
+  new MutationObserver(remember).observe(document.documentElement, { attributes: true, attributeFilter: ["lang"] })
+})()
+</script>

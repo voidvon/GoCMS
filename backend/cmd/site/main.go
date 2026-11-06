@@ -40,6 +40,8 @@ func main() {
 	themeOverride := flag.String("theme", "", "theme resource directory override")
 	timezone := flag.String("timezone", "", "IANA time zone used for access statistics day boundaries (empty uses the system zone)")
 	accessLogDays := flag.Int("access-log-days", 3, "retention in days for the public access log")
+	storefront := flag.String("storefront", defaults.storefront, "built customer SPA; empty uses embedded resources")
+	storefrontDev := flag.String("storefront-dev", defaults.storefrontDev, "customer Vite dev server URL; empty disables dev proxy")
 	flag.Parse()
 
 	if *templates == "" {
@@ -81,6 +83,13 @@ func main() {
 		log.Fatal(err)
 	}
 	server.ConfigurePublishing(themeDefinition.TemplatesRoot, *data, *frontend, *assets, themeDefinition.AssetsRoot)
+	if err := server.ConfigurePaymentKey(*data); err != nil {
+		log.Fatal(err)
+	}
+	if err := server.ConfigureGeography(*data); err != nil {
+		log.Fatal(err)
+	}
+	defer server.CloseGeography()
 	server.ConfigureThemeCatalog(themeDir, *data, themeDefinition)
 	accessLogLocation := time.Local
 	if strings.TrimSpace(*timezone) != "" {
@@ -99,6 +108,10 @@ func main() {
 			log.Fatalf("invalid frontend-dev URL %q: %v", *frontendDev, err)
 		}
 	}
+	bundledStorefront, _ := embedded.StorefrontFS()
+	if err := server.ConfigureStorefront(*storefront, *storefrontDev, bundledStorefront); err != nil {
+		log.Fatalf("invalid storefront configuration: %v", err)
+	}
 	httpServer := &http.Server{
 		Addr:    *address,
 		Handler: server.Handler(),
@@ -108,6 +121,7 @@ func main() {
 	defer stop()
 
 	server.StartAccessLogMaintenance(shutdownCtx)
+	server.StartPaymentMaintenance(shutdownCtx)
 
 	go func() {
 		<-shutdownCtx.Done()
@@ -123,7 +137,7 @@ func main() {
 }
 
 type runtimePathDefaults struct {
-	root, database, templates, data, frontend, frontendDev, assets string
+	root, database, templates, data, frontend, frontendDev, assets, storefront, storefrontDev string
 }
 
 func runtimeDefaults() runtimePathDefaults {
@@ -131,13 +145,15 @@ func runtimeDefaults() runtimePathDefaults {
 	if err == nil && isDirectory(filepath.Join(workingDirectory, "templates")) &&
 		isDirectory(filepath.Join(workingDirectory, "..", "assets")) {
 		return runtimePathDefaults{
-			root:        filepath.Join("..", "web"),
-			database:    filepath.Join("..", "data", "site.db"),
-			templates:   "templates",
-			data:        filepath.Join("..", "data"),
-			frontend:    filepath.Join("..", "frontend", "dist"),
-			frontendDev: "http://127.0.0.1:1244",
-			assets:      filepath.Join("..", "assets"),
+			root:          filepath.Join("..", "web"),
+			database:      filepath.Join("..", "data", "site.db"),
+			templates:     "templates",
+			data:          filepath.Join("..", "data"),
+			frontend:      filepath.Join("..", "frontend", "dist"),
+			frontendDev:   "http://127.0.0.1:1244",
+			storefront:    filepath.Join("..", "storefront", "dist"),
+			storefrontDev: "http://127.0.0.1:1245",
+			assets:        filepath.Join("..", "assets"),
 		}
 	}
 

@@ -8,6 +8,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const embeddedRoot = resolve(root, "backend/internal/embedded/assets")
 const sources = [
   [resolve(root, "frontend/dist"), join(embeddedRoot, "frontend/dist")],
+  [resolve(root, "storefront/dist"), join(embeddedRoot, "storefront/dist")],
   [resolve(root, "backend/templates"), join(embeddedRoot, "templates")],
 ]
 
@@ -21,4 +22,4 @@ for (const [source, destination] of sources) {
   cpSync(source, destination, { recursive: true })
 }
 
-console.log("已同步前端和默认模板到 Go 嵌入资源目录")
+console.log("已同步管理后台、购物前台和默认模板到 Go 嵌入资源目录")

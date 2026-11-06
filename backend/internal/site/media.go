@@ -373,12 +373,15 @@ func (s *Server) readMedia(ctx context.Context, id int64) (MediaAsset, error) {
 
 func (s *Server) deleteMedia(response http.ResponseWriter, request *http.Request, asset MediaAsset) {
 	var references int64
-	if err := s.database.QueryRowContext(request.Context(), `SELECT COUNT(*) FROM "gocms_media_ref" WHERE "media_id" = ?`, asset.ID).Scan(&references); err != nil {
+	if err := s.database.QueryRowContext(request.Context(), `SELECT
+ (SELECT COUNT(*) FROM gocms_media_ref WHERE media_id=?) +
+ (SELECT COUNT(*) FROM gocms_commerce_offer WHERE site_id=? AND image_url=? AND archived=0) +
+ (SELECT COUNT(*) FROM gocms_commerce_order_item i JOIN gocms_commerce_order o ON o.id=i.order_id WHERE o.site_id=? AND i.image_url=?)`, asset.ID, asset.SiteID, asset.URL, asset.SiteID, asset.URL).Scan(&references); err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
 	if references > 0 {
-		http.Error(response, "图片正在被内容使用，不能删除", http.StatusConflict)
+		http.Error(response, "图片正在被内容、售卖项或订单使用，不能删除", http.StatusConflict)
 		return
 	}
 	diskPath, err := s.mediaDiskPath(asset.URL)
@@ -514,19 +517,29 @@ func normalizeMediaURL(value string) string {
 	return imagePath
 }
 
-// MediaReference identifies a recorded content field using an asset.
+// MediaReference identifies content or commerce records using an asset.
 type MediaReference struct {
 	ContentID int64  `json:"content_id"`
 	Title     string `json:"title"`
 	FieldName string `json:"field_name"`
+	URL       string `json:"url,omitempty"`
 }
 
 func (s *Server) readMediaReferences(ctx context.Context, id int64) ([]MediaReference, error) {
 	rows, err := s.database.QueryContext(ctx, `
- SELECT ref."content_id", COALESCE(content."title", ''), ref."field_name"
- FROM "gocms_media_ref" AS ref
- LEFT JOIN "gocms_content" AS content ON content."id" = ref."content_id"
- WHERE ref."media_id" = ? ORDER BY ref."content_id", ref."field_name"`, id)
+ SELECT ref.content_id, COALESCE(content.title, ''), ref.field_name, ''
+ FROM gocms_media_ref ref
+ LEFT JOIN gocms_content content ON content.id=ref.content_id
+ WHERE ref.media_id=?
+ UNION ALL
+ SELECT 0, '售卖项：' || offer.name, 'offer:' || offer.id, '/admin/payments'
+ FROM gocms_commerce_offer offer JOIN gocms_media media ON media.site_id=offer.site_id AND media.public_path=offer.image_url
+ WHERE media.id=? AND offer.archived=0
+ UNION ALL
+ SELECT 0, '订单：' || item.order_id, 'order:' || item.order_id, '/admin/payments'
+ FROM gocms_commerce_order_item item JOIN gocms_commerce_order orders ON orders.id=item.order_id
+ JOIN gocms_media media ON media.site_id=orders.site_id AND media.public_path=item.image_url
+ WHERE media.id=?`, id, id, id)
 	if err != nil {
 		return nil, err
 	}
@@ -534,7 +547,7 @@ func (s *Server) readMediaReferences(ctx context.Context, id int64) ([]MediaRefe
 	references := make([]MediaReference, 0)
 	for rows.Next() {
 		var reference MediaReference
-		if err := rows.Scan(&reference.ContentID, &reference.Title, &reference.FieldName); err != nil {
+		if err := rows.Scan(&reference.ContentID, &reference.Title, &reference.FieldName, &reference.URL); err != nil {
 			return nil, err
 		}
 		references = append(references, reference)

@@ -8,6 +8,6 @@
     "cover": ["category_cover.html"],
     "list": ["category_list.html", "product_category_list.html", "service_category_list.html"],
     "content": ["content_detail.html", "product_detail.html"],
-    "public": ["contact.html", "msg.html", "search.html", "site-footer.html", "site-header.html", "site-home-footer.html"]
+    "public": ["contact.html", "msg.html", "search.html", "site-footer.html", "site-header.html", "site-home-footer.html", "commerce-purchase.html", "site-language.html"]
   }
 }

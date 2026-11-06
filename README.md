@@ -1,12 +1,13 @@
 # GoCMS 静态 CMS
 
-Go + SQLite 内容服务、React 管理后台、Go 模板静态发布。
+Go + SQLite 内容服务、React 管理后台与购物前台、Go 模板静态发布。
 
 ## 目录
 
 - `backend/`：Go 模块，`cmd/site` 服务、`cmd/generate` 发布、`cmd/migrate` 导入、`cmd/reset-password` 密码重置。
 - `backend/templates/`：无主题包时使用的默认 Go 模板；页面布局在主题模板中维护。发布版会把默认模板编入可执行文件，并在首次运行时初始化到外部目录，之后保留外部修改。
 - `frontend/`：Vite + React 管理后台，shadcn Base UI Nova；官方组件保持原样，业务封装放 `src/components/app/`。
+- `storefront/`：独立 Vite + React 购物前台，复用同一套官方 UI 源码；购物车、结算、订单及独立登录注册位于 `/shop/`，随 Go 服务部署；商品列表和详情复用主题生成的 HTML。
 - `assets/theme/<id>/`：已安装模板组的模板和自定义文件，属于可更改的外部资源；升级程序不会覆盖它。`theme.json` 中的 `template_groups` 映射模板文件用途。
 - `assets/images/`：内容封面、正文和详情介绍图，属于运行时业务资源，不纳入 Git；服务直接读取，不参与发布复制。
 - `web/`：生成的 HTML 和 Sitemap.xml，不纳入 Git；发布只替换此目录。
@@ -15,14 +16,18 @@ Go + SQLite 内容服务、React 管理后台、Go 模板静态发布。
 
 ## 本地运行
 
-在项目根目录分别打开两个终端：
+首次安装分别执行 `cd frontend && npm ci` 和 `cd storefront && npm ci`。然后在项目根目录运行 `make dev`，或分别打开三个终端：
 
 ```sh
 make backend
 make frontend
+make storefront
 ```
 
-后台：`http://127.0.0.1:1244/admin/`，网站：`http://127.0.0.1:18080/`。
+后台：`http://127.0.0.1:1244/admin/`，购物前台：`http://127.0.0.1:1244/shop/`（也可直接访问 `http://127.0.0.1:1245/shop/`），网站可直接在 `http://127.0.0.1:1244/` 调试，也可访问 Go 服务的 `http://127.0.0.1:18080/`。购物前台的目录、页面和扩展方式见 [购物前台架构与接入](docs/storefront.md)。
+
+开发时 Vite 保留 `/admin/` 及内部模块、热更新请求，将前台页面、资源和 API 统一代理到 Go 服务。后台切换站点后，开发专用 Cookie 会将当前站点传递给代理，因此内容标题旁的新窗口链接、前台资源和 API 使用同一站点；使用前先打开或刷新后台。已配置并匹配的域名仍优先决定站点，此 Cookie 不参与生产环境。前台展示已发布 HTML，修改内容后仍需点击“更新 HTML”或发布；主题模板改动后重新发布即可查看结果。Vite 配置改动通常会自动重启开发服务，未生效时重新运行 `make frontend`。
+
 后台页面内“网站发布”支持全站重新生成；内容编辑支持“仅保存”和“保存并发布”。隐藏内容会自动提交发布任务。已有任务运行时，新的保存发布请求会排队，在当前任务结束后再读取最新数据生成。
 
 内容列表每条记录的“更新 HTML”支持单条更新：使用已保存数据，重新生成该内容详情、所属栏目及全部父级栏目的所有分页/封面页，以及首页，覆盖所有启用语言（含独立语言站点）。链接栏目跳过静态生成并继续更新其父级。栏目层级、模板、路由和分页均沿用数据库配置；其他内容详情、无关栏目和网站索引保持原样。索引可在“网站发布”中单独生成；“保存并发布”仍执行全站发布。此操作需要当前站点的“网站发布”权限，且目标内容必须在当前站点及授权栏目范围内；接口为 `POST /api/admin/publish/content`，JSON 参数 `{"id":内容ID}`，完成后返回生成结果，已有发布任务时返回 409。
@@ -45,6 +50,8 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 模板数据调用和受限帝国 `[e:loop]` 迁移语法见 [模板数据调用说明](docs/template-data-calls.md)；AI 自动化接入与 API Key 规范见 [AI Agent 操作指南](docs/ai-agent-guide.md)。
 
 “多语言”及站点盾牌入口可配置隐私与 Cookie 同意，支持站点默认、语言覆盖和按用途加载可选资源。配置后需全站发布，第三方追踪需由主题接入用途标记，详见 [隐私同意配置与主题接入](docs/privacy-consent.md)。
+
+后台“支付管理”支持按站点配置 PingPong Checkout v4，提供商品或服务的一次性付款、多明细订单、订单查询、全额退款与人工交付记录。独立购物前台提供购物车、结算、订单和登录注册页面；商品展示继续复用生成的 HTML。超级管理员可在后台生成、文件导入及备份支付加密密钥，接管已有环境变量密钥；支持渠道 JSON 导入和购买模板安装；分类开启销售后，直接在内容编辑中配置多种规格及各自价格，复用内容封面，主题通过公开交易 API 接入，详见 [支付模块接入说明](docs/payments.md)。
 
 版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub，且已安装 `zip` 命令。Release 仅构建并上传 Linux amd64 的 `gocms-<tag>-linux-amd64.zip` 压缩包，包内包含对应平台的单文件可执行文件。更新器使用 Go 标准库解压 ZIP，不依赖 Linux 安装第三方工具。可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
 
@@ -192,7 +199,7 @@ cd backend
 
 Go 同时提供 `/admin/`（发布版内置前端）、`/api/` 和公开静态站点。`/images/` 依次映射到 `assets/images/` 和当前主题的 `assets/images/`，`/css/`、`/js/`、`/skin/` 映射到当前主题对应目录，网站页面读取 `web/`。发布不复制图片，也不创建符号链接。Nginx 可直接反向代理 Go；如果由 Nginx 提供静态文件，应按相同顺序配置这些资源目录，页面映射到 `web/`。外网部署由反向代理提供 HTTPS。
 
-命令行发布和 Go 服务支持 `-assets` 指定资源根目录，并支持 `-theme` 指定主题目录覆盖活动主题配置。没有覆盖参数时，程序从 `assets/theme/` 和 `data/theme.json` 解析活动主题；没有活动记录时选择已安装主题中的第一个。服务还支持 `-access-log-days`（访问日志保留天数，默认 3）和 `-timezone`（访问统计自然日边界使用的 IANA 时区，默认系统时区）。发布版可执行文件会把管理后台和默认 Go 模板编入自身，模板首次运行时写入外部 `templates/`；Release 单文件不包含主题目录，部署时需要在外部 `assets/theme/<id>/` 提供主题资源，修改后直接生效。备份应包括 `data/site.db`、运行时的 `assets/images/`、`assets/theme/` 和 `templates/`。
+命令行发布和 Go 服务支持 `-assets` 指定资源根目录，并支持 `-theme` 指定主题目录覆盖活动主题配置。没有覆盖参数时，程序从 `assets/theme/` 和 `data/theme.json` 解析活动主题；没有活动记录时选择已安装主题中的第一个。服务还支持 `-access-log-days`（访问日志保留天数，默认 3）和 `-timezone`（访问统计自然日边界使用的 IANA 时区，默认系统时区）。发布版可执行文件会把管理后台、购物前台和默认 Go 模板编入自身，模板首次运行时写入外部 `templates/`；Release 单文件不包含主题目录，部署时需要在外部 `assets/theme/<id>/` 提供主题资源，修改后直接生效。备份应包括 `data/site.db`、运行时的 `assets/images/`、`assets/theme/` 和 `templates/`。
 
 登录仅接受 Argon2id。新导入 Access 后必须重新设置管理员密码：
 

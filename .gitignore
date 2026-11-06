@@ -3,12 +3,15 @@
 /data/publish*.json
 /data/publish*.lock
 /data/theme*.json
+payment.key
+.payment-key-*
 /bin/
 /.web-stage-*/
 /web.previous/
 
 # Generated files compiled into the single executable.
 /backend/internal/embedded/assets/frontend/
+/backend/internal/embedded/assets/storefront/
 /backend/internal/embedded/assets/templates/
 /backend/tmp/
 

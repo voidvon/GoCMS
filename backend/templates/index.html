@@ -4,9 +4,10 @@
 {{end}}
 {{end}}
 <!doctype html>
-<html lang="zh-CN">
+<html lang="{{currentLang}}">
 <head>
   <meta charset="UTF-8">
+  {{include "site-language.html" .}}
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{setting "site_name"}}</title>
   <meta name="description" content="{{setting "site_description"}}">

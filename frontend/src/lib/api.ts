@@ -1,3 +1,5 @@
+import { getErrorMessage } from "@/lib/errors"
+
 export type AdminUser = {
   category_ids: number[] | null
   site_ids?: number[] | null
@@ -9,6 +11,61 @@ export type AdminUser = {
   group_id: number
   permissions: string[]
 }
+
+export type PaymentAccount = {
+  id: number; public_id: string; name: string; provider: string; environment: string
+  client_id: string; merchant_id: string; currency: string; public_url: string; return_path: string; enabled: boolean
+}
+export type PaymentAccountInput = Omit<PaymentAccount, "id" | "public_id"> & { secret: string }
+export type CommerceSpecification = { name: string; value: string }
+export type CommerceVariant = { id: number; sku: string; specifications: CommerceSpecification[]; amount: number; enabled: boolean }
+export type CommerceProduct = { enabled: boolean; kind: "physical" | "digital" | "service"; currency: string; variants: CommerceVariant[] }
+export type CommerceOffer = {
+  sku?: string; specifications?: CommerceSpecification[]
+  id: number; name: string; kind: "physical" | "digital" | "service"; amount: number
+  currency: string; image_url: string; content_id: number | null; enabled: boolean
+}
+export type PaymentAttempt = {
+  id: string; account_id: number; status: string; transaction_id: string; error: string; created_at: string
+}
+export type PaymentRefund = {
+  id: string; attempt_id: string; amount: number; currency: string; status: string; refund_id: string; error: string
+}
+export type CommerceOrderLine = CommerceOffer & { quantity: number }
+export type CommerceOrder = {
+  items: CommerceOrderLine[]
+  id: string; buyer_id: number; amount: number; currency: string; status: string; fulfillment_status: string
+  email: string; customer_name: string; created_at: string; paid_attempt: string; item: CommerceOffer; quantity: number
+  address: { street: string; postcode: string; city: string; state: string; country: string }
+  attempts?: PaymentAttempt[]; refunds?: PaymentRefund[]
+}
+export type PaymentEvent = { id: string; reference: string; kind: string; status: string; created_at: string }
+export type PaymentStatus = { key_configured: boolean; key_source: "none" | "environment" | "file"; key_can_initialize: boolean; key_requires_restore: boolean; key_can_export: boolean; key_can_adopt: boolean; api_version: string }
+export const getPaymentStatus = () => request<PaymentStatus>("/api/admin/payments/status")
+export const initializePaymentKey = (input: { mode: "generate" | "import"; key?: string }) => request<{ ok: boolean }>("/api/admin/payments/key", { method: "POST", body: JSON.stringify(input) })
+export const adoptPaymentKey = () => request<{ ok: boolean }>("/api/admin/payments/key/adopt", { method: "POST", body: "{}" })
+export const installPaymentTemplate = () => request<{ template: string }>("/api/admin/payments/checkout-template", { method: "POST", body: "{}" })
+export async function exportPaymentKey() {
+  const response = await fetch(endpoint("/api/admin/payments/key/export"), {
+    method: "POST", credentials: "include", cache: "no-store",
+    headers: { "X-Site-Id": String(getActiveSiteId()), "Content-Type": "application/json" }, body: "{}",
+  })
+  if (!response.ok) {
+    const payload: unknown = await response.json().catch(() => null)
+    throw new Error(getErrorMessage(payload, "密钥备份下载失败"))
+  }
+  return response.blob()
+}
+export const getPaymentAccounts = () => request<{ items: PaymentAccount[] }>("/api/admin/payments/accounts")
+export const createPaymentAccount = (input: PaymentAccountInput) => request<PaymentAccount>("/api/admin/payments/accounts", { method: "POST", body: JSON.stringify(input) })
+export const updatePaymentAccount = (input: PaymentAccount) => request(`/api/admin/payments/accounts/${input.id}`, { method: "PUT", body: JSON.stringify({ name: input.name, enabled: input.enabled }) })
+export const getCommerceOrders = (page = 1) => request<{ items: CommerceOrder[] }>(`/api/admin/payments/orders?page=${page}`)
+export const getCommerceOrder = (id: string) => request<CommerceOrder>(`/api/admin/payments/orders/${id}`)
+export const getPaymentEvents = (page = 1) => request<{ items: PaymentEvent[] }>(`/api/admin/payments/events?page=${page}`)
+export const syncPayment = (id: string) => request(`/api/admin/payments/attempts/${id}/sync`, { method: "POST", body: "{}" })
+export const refundPayment = (id: string) => request(`/api/admin/payments/attempts/${id}/refund`, { method: "POST", body: "{}" })
+export const syncPaymentRefund = (id: string) => request(`/api/admin/payments/refunds/${id}/sync`, { method: "POST", body: "{}" })
+export const fulfillCommerceOrder = (id: string, status: string) => request(`/api/admin/payments/orders/${id}/fulfillment`, { method: "PUT", body: JSON.stringify({ status }) })
 
 export type Site = {
   id: number
@@ -231,6 +288,7 @@ export type ContentTranslationItem = {
 }
 
 export type Content = {
+  commerce?: CommerceProduct
   id: number
   route_key: string
   title: string
@@ -257,7 +315,7 @@ export type Content = {
 
 export type ContentListItem = Pick<Content,
   "id" | "title" | "code" | "category_id" | "cover_image" | "published_at" | "featured" | "visible"
->
+> & { url?: string }
 
 export type ContentInput = Omit<Content, "id" | "route_key"> & {
   route_key?: string
@@ -417,6 +475,7 @@ export type CategoryTranslationItem = {
 }
 
 export type CategoryItem = {
+  commerce_enabled?: boolean
   id: number
   name: string
   parent_id: number
@@ -601,6 +660,7 @@ export function setActiveSiteId(id: number) {
   currentActiveSiteId = id
   try {
     localStorage.setItem("gocms_active_site_id", String(id))
+    if (import.meta.env.DEV) document.cookie = `gocms_dev_site_id=${id}; Path=/; SameSite=Lax`
   } catch {}
 }
 
@@ -633,13 +693,7 @@ async function request<T>(path: string, init: RequestInit = {}) {
     ? await response.json()
     : await response.text()
   if (!response.ok) {
-    const message =
-      typeof payload === "object" && payload !== null && "error" in payload
-        ? String(payload.error)
-        : typeof payload === "string" && payload
-          ? payload
-          : `请求失败（${response.status}）`
-    throw new Error(message)
+    throw new Error(getErrorMessage(payload, `请求失败（${response.status}）`))
   }
   return payload as T
 }
@@ -1217,6 +1271,7 @@ export function generateLLMS() {
 }
 
 export type MediaReference = {
+  url?: string
   content_id: number
   title: string
   field_name: string
@@ -1278,3 +1333,10 @@ export const resetSiteUserPassword = (id: number, password: string, siteId?: num
     body: JSON.stringify({ id, password }),
   })
 
+
+export type GeographyDataset = { id: number; version: string; created_at: string; countries: number; regions: number; cities: number; active: boolean }
+export type GeographyStatus = { datasets: GeographyDataset[]; job: { running: boolean; stage: string; error?: string }; source: string; license: string }
+export const getGeographyStatus = () => request<GeographyStatus>("/api/admin/geography")
+export const downloadGeography = () => request("/api/admin/geography/download", { method: "POST", body: "{}" })
+export const uploadGeography = (body: FormData) => request("/api/admin/geography/import", { method: "POST", body })
+export const activateGeography = (id: number) => request("/api/admin/geography/activate", { method: "POST", body: JSON.stringify({ id }) })

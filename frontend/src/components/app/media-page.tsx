@@ -92,22 +92,22 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
             <Button variant="outline" size="sm" onClick={() => void copyURL()}><Copy />复制链接</Button>
           </div>
           <div className="space-y-2 border-t pt-4">
-            <p className="text-sm font-medium">内容引用{detail ? `（${detail.references.length} 处）` : ""}</p>
-            <p className="text-xs text-muted-foreground">记录正文图片和封面的引用；无记录不代表全站未使用。</p>
+            <p className="text-sm font-medium">资源引用{detail ? `（${detail.references.length} 处）` : ""}</p>
+            <p className="text-xs text-muted-foreground">记录正文、封面、售卖项和订单图片的引用；无记录不代表全站未使用。</p>
             {!detail ? (
               error ? <Button variant="outline" onClick={() => { setError(""); setRetry((value) => value + 1) }}>重试加载详情</Button>
                 : <p role="status" className="text-sm text-muted-foreground">正在加载引用…</p>
             ) : detail.references.length === 0 ? (
-              <p className="text-sm text-muted-foreground">暂无内容引用记录</p>
+              <p className="text-sm text-muted-foreground">暂无资源引用记录</p>
             ) : (
               <ScrollArea className="max-h-48" contentClassName="text-sm">
                 <ul className="space-y-2">
                   {detail.references.map((reference) => (
                     <li key={`${reference.content_id}:${reference.field_name}`} className="flex items-start justify-between gap-3 rounded-md border p-2">
-                      <a className="min-w-0 break-all underline underline-offset-4" href={`/admin/content?edit=${reference.content_id}`}>
+                      <a className="min-w-0 break-all underline underline-offset-4" href={reference.url || `/admin/content?edit=${reference.content_id}`}>
                         {reference.title || `内容 #${reference.content_id}`}
                       </a>
-                      <span className="shrink-0 text-muted-foreground">{reference.field_name === "body" ? "正文" : reference.field_name === "cover_image" ? "封面" : reference.field_name}</span>
+                      <span className="shrink-0 text-muted-foreground">{reference.field_name === "body" ? "正文" : reference.field_name === "cover_image" ? "封面" : reference.url ? "交易图片" : reference.field_name}</span>
                     </li>
                   ))}
                 </ul>
@@ -117,7 +117,7 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
           <div className="flex justify-end gap-2 border-t pt-4">
             <Button variant="outline" disabled={deleting} onClick={onClose}>关闭</Button>
             <Button variant="destructive" disabled={!detail || detail.references.length > 0 || deleting} onClick={() => setConfirmOpen(true)}>
-              <Trash2 />{detail && detail.references.length > 0 ? "内容引用中，不能删除" : "删除附件"}
+              <Trash2 />{detail && detail.references.length > 0 ? "资源引用中，不能删除" : "删除附件"}
             </Button>
           </div>
         </ScrollArea>

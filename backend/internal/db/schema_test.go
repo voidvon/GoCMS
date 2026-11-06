@@ -22,6 +22,15 @@ func TestCreateSchemaContainsOnlyRuntimeTables(t *testing.T) {
 	}
 	defer rows.Close()
 	want := map[string]bool{
+		"gocms_commerce_product":        false,
+		"gocms_commerce_offer":          false,
+		"gocms_commerce_order":          false,
+		"gocms_commerce_order_item":     false,
+		"gocms_payment_account":         false,
+		"gocms_payment_attempt":         false,
+		"gocms_payment_refund":          false,
+		"gocms_payment_event":           false,
+		"gocms_commerce_outbox":         false,
 		"gocms_site":                    false,
 		"gocms_site_setting":            false,
 		"gocms_language":                false,
