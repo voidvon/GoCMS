@@ -18,6 +18,7 @@ import (
 	"gocms/internal/commerce"
 	"gocms/internal/db"
 	"gocms/internal/geography"
+	"gocms/internal/memberoauth"
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
 	"gocms/internal/templatelabel"
@@ -25,6 +26,11 @@ import (
 )
 
 type Server struct {
+	oauthMu        sync.RWMutex
+	oauthVault     *memberoauth.Vault
+	oauthKeyPath   string
+	googleIdentity func(context.Context, memberoauth.Config, string, string, string) (googleClaims, error)
+
 	geography                  *geography.Store
 	commerce                   *commerce.Service
 	paymentKeyMu               sync.Mutex
@@ -75,6 +81,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 			return nil, err
 		}
 		if err := db.EnsureSiteUsers(context.Background(), database); err != nil {
+			return nil, err
+		}
+		if err := memberoauth.Ensure(context.Background(), database); err != nil {
 			return nil, err
 		}
 		if err := db.EnsureCommerce(context.Background(), database); err != nil {
@@ -138,6 +147,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.publicCommerce(response, request)
 		return
 	}
+	if (strings.HasPrefix(request.URL.Path, "/api/auth/google/") || strings.HasPrefix(request.URL.Path, "/api/auth/facebook/")) || request.URL.Path == "/api/auth/providers" {
+		s.googleAuth(response, request)
+		return
+	}
 	if strings.HasPrefix(request.URL.Path, "/api/v1/") {
 		s.memberAPI(response, request)
 		return
@@ -186,6 +199,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 	if lowerAdminPath == "/api/admin/payments" || strings.HasPrefix(lowerAdminPath, "/api/admin/payments/") {
 		s.adminPayments(response, request)
+		return
+	}
+	if strings.HasPrefix(lowerAdminPath, "/api/admin/member-login") {
+		s.adminMemberLogin(response, request)
 		return
 	}
 	switch lowerAdminPath {

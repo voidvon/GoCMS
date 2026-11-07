@@ -129,61 +129,13 @@ func (s Service) Login(ctx context.Context, identifier, password, ip, agent stri
 			_, _ = s.DB.ExecContext(ctx, "UPDATE gocms_user SET site_ids=? WHERE id=?", string(newJSON), id)
 		}
 	}
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return Profile{}, "", err
-	}
-	token := base64.RawURLEncoding.EncodeToString(b)
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return Profile{}, "", err
 	}
 	defer tx.Rollback()
-
-	// Acquire the SQLite write lock before counting to serialize concurrent logins.
-	if _, err = tx.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE expires_at<=?", time.Now().Unix()); err != nil {
-		return Profile{}, "", err
-	}
-	var limit int
-	if err = tx.QueryRowContext(ctx, "SELECT max_sessions FROM gocms_user WHERE id=? AND status='active' AND password_hash=?", id, encoded).Scan(&limit); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Profile{}, "", ErrUnauthorized
-		}
-		return Profile{}, "", err
-	}
-	// Only the supplied live session belonging to this account can be replaced.
-	if currentToken != "" {
-		if _, err = tx.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE user_id=? AND token_hash=?", id, TokenHash(currentToken)); err != nil {
-			return Profile{}, "", err
-		}
-	}
-	var count int
-	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM gocms_user_session WHERE user_id=?", id).Scan(&count); err != nil {
-		return Profile{}, "", err
-	}
-	if count >= limit {
-		return Profile{}, "", ErrSessionLimit
-	}
-	// Recheck the hash/status so concurrent disable or password change cannot create
-	// a session after revocation.
-	result, err := tx.ExecContext(ctx, "INSERT INTO gocms_user_session(token_hash,user_id,expires_at,ip,user_agent) SELECT ?,id,?,?,? FROM gocms_user WHERE id=? AND status='active' AND password_hash=?", TokenHash(token), time.Now().Add(30*24*time.Hour).Unix(), ip, agent, id, encoded)
+	token, err := createSession(ctx, tx, id, encoded, identifier, ip, agent, currentToken)
 	if err != nil {
-		return Profile{}, "", err
-	}
-	n, err := result.RowsAffected()
-	if err != nil {
-		return Profile{}, "", err
-	}
-	if n != 1 {
-		return Profile{}, "", ErrUnauthorized
-	}
-	if _, err = tx.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE expires_at<=?", time.Now().Unix()); err != nil {
-		return Profile{}, "", err
-	}
-	if _, err = tx.ExecContext(ctx, "UPDATE gocms_user SET last_login_at=CURRENT_TIMESTAMP,last_login_ip=? WHERE id=?", ip, id); err != nil {
-		return Profile{}, "", err
-	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO gocms_user_login(user_id,identifier,success,ip) VALUES(?,?,1,?)", id, identifier, ip); err != nil {
 		return Profile{}, "", err
 	}
 	if err = tx.Commit(); err != nil {
@@ -191,6 +143,64 @@ func (s Service) Login(ctx context.Context, identifier, password, ip, agent stri
 	}
 	profile, err := s.Profile(ctx, id)
 	return profile, token, err
+}
+
+// createSession is shared by password and verified external identity logins.
+// The caller holds a transaction; status, credential snapshot and limits are rechecked.
+func createSession(ctx context.Context, tx *sql.Tx, id int64, encoded, identifier, ip, agent, currentToken string) (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	token := base64.RawURLEncoding.EncodeToString(b)
+	var err error
+	// Acquire the SQLite write lock before counting to serialize concurrent logins.
+	if _, err = tx.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE expires_at<=?", time.Now().Unix()); err != nil {
+		return "", err
+	}
+	var limit int
+	if err = tx.QueryRowContext(ctx, "SELECT max_sessions FROM gocms_user WHERE id=? AND status='active' AND password_hash=?", id, encoded).Scan(&limit); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrUnauthorized
+		}
+		return "", err
+	}
+	// Only the supplied live session belonging to this account can be replaced.
+	if currentToken != "" {
+		if _, err = tx.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE user_id=? AND token_hash=?", id, TokenHash(currentToken)); err != nil {
+			return "", err
+		}
+	}
+	var count int
+	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM gocms_user_session WHERE user_id=?", id).Scan(&count); err != nil {
+		return "", err
+	}
+	if count >= limit {
+		return "", ErrSessionLimit
+	}
+	// Recheck the hash/status so concurrent disable or password change cannot create
+	// a session after revocation.
+	result, err := tx.ExecContext(ctx, "INSERT INTO gocms_user_session(token_hash,user_id,expires_at,ip,user_agent) SELECT ?,id,?,?,? FROM gocms_user WHERE id=? AND status='active' AND password_hash=?", TokenHash(token), time.Now().Add(30*24*time.Hour).Unix(), ip, agent, id, encoded)
+	if err != nil {
+		return "", err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return "", err
+	}
+	if n != 1 {
+		return "", ErrUnauthorized
+	}
+	if _, err = tx.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE expires_at<=?", time.Now().Unix()); err != nil {
+		return "", err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE gocms_user SET last_login_at=CURRENT_TIMESTAMP,last_login_ip=? WHERE id=?", ip, id); err != nil {
+		return "", err
+	}
+	if _, err = tx.ExecContext(ctx, "INSERT INTO gocms_user_login(user_id,identifier,success,ip) VALUES(?,?,1,?)", id, identifier, ip); err != nil {
+		return "", err
+	}
+	return token, nil
 }
 
 func (s Service) Authenticate(ctx context.Context, token string, siteIDOpt ...int64) (Profile, error) {

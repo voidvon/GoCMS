@@ -1,5 +1,5 @@
 import { GeographyPage } from "@/components/app/geography-page"
-import { SiteUsersPage } from "@/components/app/site-users-page"
+import { MembersPage, MemberLoginSettings } from "@/components/app/member-login-settings"
 import { PaymentsPage } from "@/components/app/payments-page"
 import { useEffect, useState, type ComponentType } from "react"
 import {
@@ -107,6 +107,7 @@ const mainNavItems: NavigationItem[] = [
 ]
 
 const platformNavItems: NavigationItem[] = [
+  { id: "member-login", label: "第三方登录", icon: KeyRound },
   { id: "geography", label: "地址数据", icon: Globe },
   { id: "sites", label: "多站点", icon: Globe },
   { id: "users", label: "用户管理", icon: Users },
@@ -116,7 +117,7 @@ const platformNavItems: NavigationItem[] = [
 ]
 
 function canView(user: AdminUser, view: AdminView, activeSiteId?: number) {
-  if (view === "geography" || view === "sites" || view === "users") return user.is_super
+  if (view === "member-login" || view === "geography" || view === "sites" || view === "users") return user.is_super
   if (user.is_super) return true
   if (activeSiteId && user.site_ids && user.site_ids.length > 0 && !user.site_ids.includes(activeSiteId)) {
     return false
@@ -357,6 +358,8 @@ function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarP
 
 function viewMeta(view: AdminView): { parent?: string; title: string; description: string } {
   switch (view) {
+    case "member-login":
+      return { parent: "平台管理", title: "第三方登录", description: "统一配置所有站点共享的第三方登录凭据、开关与加密密钥" }
     case "geography":
       return { parent: "平台管理", title: "地址数据", description: "维护所有站点共享的国家、行政区与城市目录" }
     case "payments":
@@ -398,6 +401,8 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
   const { activeSite } = useSite()
   if (!canView(user, view, activeSite?.id)) return <p className="text-sm text-muted-foreground">当前用户组没有此模块的管理权限。</p>
   switch (view) {
+    case "member-login":
+      return <MemberLoginSettings />
     case "geography":
       return <GeographyPage />
     case "payments":
@@ -409,7 +414,7 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
     case "traffic":
       return <TrafficPage user={user} />
     case "members":
-      return <div className="h-full overflow-auto pb-6"><SiteUsersPage /></div>
+      return <MembersPage />
     case "users":
       return <UsersPage currentUserID={user.id} />
     case "media":

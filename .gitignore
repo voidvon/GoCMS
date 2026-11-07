@@ -4,6 +4,8 @@
 /data/publish*.lock
 /data/theme*.json
 payment.key
+member-login.key
+.private-key-*
 .payment-key-*
 /bin/
 /.web-stage-*/

@@ -145,6 +145,9 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "地址数据仅允许超级管理员通过后台管理"})
 		return false
 	}
+	if module == "member-login" {
+		return s.authorizeMemberLogin(w, r, u, session)
+	}
 	if module == "payments" {
 		return s.authorizePaymentOperation(w, r, u, session)
 	}

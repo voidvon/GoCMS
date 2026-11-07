@@ -5,9 +5,10 @@ import { ArrowRight, Eye, EyeOff, LoaderCircle, UserRound } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { login, register } from "@/lib/api"
+import { getLoginProviders, login, register } from "@/lib/api"
 import { authURL, Link, navigate } from "@/lib/router"
-import { useShop } from "@/lib/shop-context"
+import { useResource, useShop } from "@/lib/shop-context"
+import { ExternalLoginButton } from "./external-login"
 import { showError, showSuccess } from "./feedback"
 
 export function AuthRequired({ next }: { next: string }) {
@@ -28,6 +29,7 @@ export function AuthPanel({ mode, next }: { mode: "login" | "register"; next: st
   const { refreshMember } = useShop()
   const [busy, setBusy] = useState(false)
   const registering = mode === "register"
+  const providers = useResource("login-providers", getLoginProviders)
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (busy) return
@@ -57,6 +59,7 @@ export function AuthPanel({ mode, next }: { mode: "login" | "register"; next: st
       <Link className="auth-route-link" href={authURL("register", next)} aria-current={registering ? "page" : undefined}>{t("common.register")}</Link>
     </nav>
     <div className="mb-7"><h1 className="text-2xl sm:text-3xl">{registering ? t("auth.registerTitle") : t("auth.loginTitle")}</h1><p className="muted mt-3">{registering ? t("auth.registerDescription") : t("auth.loginDescription")}</p></div>
+    {(providers.data?.google === true || providers.data?.facebook === true) && <div className="mb-6 space-y-5">{providers.data?.google === true && <ExternalLoginButton next={next} disabled={busy} />}{providers.data?.facebook === true && <ExternalLoginButton provider="facebook" next={next} disabled={busy} />}<p className="text-center text-xs text-muted-foreground">{t("google.or")}</p></div>}
     <form onSubmit={submit} className="space-y-5">
       <div className="field">
         <Label htmlFor="member-username">{registering ? t("auth.username") : t("auth.identifier")}</Label>

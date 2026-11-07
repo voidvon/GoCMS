@@ -30,7 +30,7 @@ export function getErrorMessage(reason: unknown, fallback = String(i18n.t("error
   return read(reason, 0) ?? fallback
 }
 const errorKeys: Record<string, MessageKey> = Object.fromEntries([
-  "invalid_input", "not_found", "conflict", "price_changed", "unavailable", "authentication_required", "invalid_credentials", "account_conflict", "session_limit_reached", "rate_limited", "origin_not_allowed", "forbidden", "internal_error", "unsupported_media_type", "method_not_allowed",
+  "facebook_failed", "facebook_cancelled", "facebook_unavailable", "facebook_conflict", "google_failed", "google_cancelled", "google_unavailable", "google_conflict", "invalid_input", "not_found", "conflict", "price_changed", "unavailable", "authentication_required", "invalid_credentials", "account_conflict", "session_limit_reached", "rate_limited", "origin_not_allowed", "forbidden", "internal_error", "unsupported_media_type", "method_not_allowed",
 ].map(code => [code, `errors.${code}`])) as Record<string, MessageKey>
 export function apiErrorKey(code: string, status: number): MessageKey {
   return errorKeys[code] || errorKeys[({ 400: "invalid_input", 401: "authentication_required", 403: "forbidden", 404: "not_found", 409: "conflict", 429: "rate_limited" } as Record<number, string>)[status]] || (status >= 500 ? "errors.unavailable" : "errors.request")

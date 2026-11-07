@@ -96,6 +96,14 @@ func (s *Server) adminSiteUsers(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal([]byte(rawSiteIDs), &sids)
 
 	if r.Method == http.MethodDelete {
+		if _, err := tx.ExecContext(r.Context(), "DELETE FROM gocms_member_identity WHERE site_id=? AND user_id=?", siteID, in.ID); err != nil {
+			accountError(w, err)
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), "DELETE FROM gocms_member_oauth_state WHERE site_id=? AND user_id=?", siteID, in.ID); err != nil {
+			accountError(w, err)
+			return
+		}
 		var otherSites []int64
 		for _, sid := range sids {
 			if sid != siteID {

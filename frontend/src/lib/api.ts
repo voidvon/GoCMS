@@ -1340,3 +1340,18 @@ export const getGeographyStatus = () => request<GeographyStatus>("/api/admin/geo
 export const downloadGeography = () => request("/api/admin/geography/download", { method: "POST", body: "{}" })
 export const uploadGeography = (body: FormData) => request("/api/admin/geography/import", { method: "POST", body })
 export const activateGeography = (id: number) => request("/api/admin/geography/activate", { method: "POST", body: JSON.stringify({ id }) })
+
+export type MemberLoginConfig = { enabled: boolean; auto_register: boolean; client_id: string; secret_set: boolean; revision: string }
+export type MemberLoginCallback = { site_id: number; site_name: string; origin: string; url: string }
+export type LegacyMemberLogin = { site_id: number; site_name: string; client_id: string; revision: string }
+export type MemberLoginStatus = { config: MemberLoginConfig; callbacks: MemberLoginCallback[]; legacy_configs: LegacyMemberLogin[]; key_configured: boolean; key_can_initialize: boolean; secret_readable: boolean }
+export const getMemberLogin = (provider = "google") => request<MemberLoginStatus>(`/api/admin/member-login?provider=${provider}`)
+export const saveMemberLogin = (config: MemberLoginConfig, secret: string, provider = "google") => request(`/api/admin/member-login?provider=${provider}`, { method: "PUT", body: JSON.stringify({ enabled: config.enabled, auto_register: config.auto_register, client_id: config.client_id, revision: config.revision, secret }) })
+export const initializeMemberLoginKey = (mode: "generate" | "import", key: string) => request("/api/admin/member-login/key", { method: "POST", body: JSON.stringify({ mode, key }) })
+export const testMemberLogin = (provider = "google") => request<{ url: string }>(`/api/admin/member-login/test?provider=${provider}`, { method: "POST", body: "{}" })
+export const migrateMemberLogin = (source: LegacyMemberLogin) => request("/api/admin/member-login/migrate", { method: "POST", body: JSON.stringify({ site_id: source.site_id, revision: source.revision }) })
+export async function exportMemberLoginKey() {
+  const response = await fetch("/api/admin/member-login/key/export", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" }, body: "{}" })
+  if (!response.ok) throw new Error(getErrorMessage(await response.json().catch(() => null), "密钥备份失败"))
+  return response.blob()
+}

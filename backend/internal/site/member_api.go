@@ -102,6 +102,8 @@ func (s *Server) memberAPI(w http.ResponseWriter, r *http.Request) {
 	service := member.Service{DB: s.database}
 	cookie, _ := r.Cookie("gocms_user")
 	switch {
+	case p == "/api/v1/me/identities/google" || p == "/api/v1/me/identities/facebook":
+		s.memberGoogleIdentity(w, r, u)
 	case p == "/api/v1/me" && r.Method == http.MethodGet:
 		data, err := service.Profile(r.Context(), u.ID)
 		memberResult(w, data, err)

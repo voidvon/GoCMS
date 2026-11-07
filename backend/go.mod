@@ -3,11 +3,14 @@ module gocms
 go 1.26.0
 
 require (
+	github.com/coreos/go-oidc/v3 v3.17.0
+	github.com/go-jose/go-jose/v4 v4.1.3
 	github.com/tdewolff/minify/v2 v2.24.22
 	github.com/wenlng/go-captcha-assets v1.0.7
 	github.com/wenlng/go-captcha/v2 v2.0.5
 	golang.org/x/crypto v0.56.0
 	golang.org/x/net v0.58.0
+	golang.org/x/oauth2 v0.34.0
 	golang.org/x/sys v0.49.0
 	modernc.org/sqlite v1.58.0
 )

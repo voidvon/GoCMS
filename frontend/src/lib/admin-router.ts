@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react"
 
-export type AdminView = "geography" | "sites" | "payments" | "members" | "overview" | "content" | "categories" | "models" | "languages" | "messages" | "publish" | "theme" | "api-keys" | "media" | "users" | "logs" | "traffic"
+export type AdminView = "member-login" | "geography" | "sites" | "payments" | "members" | "overview" | "content" | "categories" | "models" | "languages" | "messages" | "publish" | "theme" | "api-keys" | "media" | "users" | "logs" | "traffic"
 
 const adminPaths: Record<AdminView, string> = {
+  "member-login": "/admin/member-login",
   geography: "/admin/geography",
   payments: "/admin/payments",
   sites: "/admin/sites",

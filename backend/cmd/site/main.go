@@ -112,6 +112,9 @@ func main() {
 	if err := server.ConfigureStorefront(*storefront, *storefrontDev, bundledStorefront); err != nil {
 		log.Fatalf("invalid storefront configuration: %v", err)
 	}
+	if err := server.ConfigureMemberLoginKey(*data); err != nil {
+		log.Fatal(err)
+	}
 	httpServer := &http.Server{
 		Addr:    *address,
 		Handler: server.Handler(),

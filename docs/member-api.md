@@ -104,3 +104,7 @@ OpenAPI: member-api.openapi.json。
 - {"id":123,"max_sessions":2}：调整上限，不修改账号状态。
 - {"id":123,"revoke_sessions":true}：撤销全部会话，不禁用账号。
 上述操作仅限超级管理员登录会话，不允许前台账号或 API Key 操作。
+
+## Google 登录与绑定
+
+Google 授权、后台配置与开关、会员绑定规则见 [Google 会员登录](google-login.md)。会员会话沿用本页现有接口，Google 凭据不返回 storefront。

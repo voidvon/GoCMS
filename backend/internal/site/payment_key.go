@@ -171,7 +171,7 @@ func (s *Server) initializePaymentKey(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 400, map[string]string{"error": "密钥无法验证，请导入能够解密全部已有支付渠道的原密钥"})
 		return
 	}
-	if err := savePaymentKey(s.paymentKeyPath, key); err != nil {
+	if err := savePrivateKey(s.paymentKeyPath, key); err != nil {
 		writeJSON(w, 503, map[string]string{"error": "密钥文件保存失败，请检查数据目录权限或已有密钥文件；现有文件不会覆盖"})
 		return
 	}
@@ -181,30 +181,6 @@ func (s *Server) initializePaymentKey(w http.ResponseWriter, r *http.Request) {
 	}
 	s.paymentKeySource = "file"
 	writeJSON(w, 200, map[string]bool{"ok": true})
-}
-
-func savePaymentKey(path, key string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".payment-key-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	if _, err = f.WriteString(key + "\n"); err != nil {
-		f.Close()
-		return err
-	}
-	if err = f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	if err = f.Close(); err != nil {
-		return err
-	}
-	// Link publishes a complete private file atomically and never overwrites.
-	return os.Link(f.Name(), path)
 }
 
 // activePaymentKey is only called while holding paymentKeyMu. Check the source
@@ -268,7 +244,7 @@ func (s *Server) adoptPaymentKey(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 503, map[string]string{"error": "无法验证当前环境变量密钥"})
 		return
 	}
-	if err := savePaymentKey(s.paymentKeyPath, key); err != nil {
+	if err := savePrivateKey(s.paymentKeyPath, key); err != nil {
 		writeJSON(w, 503, map[string]string{"error": "接管失败，数据目录不可写或已有密钥文件；未覆盖原文件"})
 		return
 	}

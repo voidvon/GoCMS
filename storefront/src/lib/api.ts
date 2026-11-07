@@ -41,3 +41,12 @@ export const syncOrder = (id: string) => api<Order>(`/api/commerce/orders/${enco
 export const payOrder = (id: string, channel: number) => api<Attempt>(`/api/commerce/orders/${encodeURIComponent(id)}/pay`, { method: "POST", body: JSON.stringify({ account_id: channel }) })
 export const money = (amount: number, currency: string) => new Intl.NumberFormat(currentLanguage(), { style: "currency", currency }).format(amount / (currency === "JPY" ? 1 : 100))
 export const specification = (item: Variant) => item.specifications?.map(spec => `${spec.name}: ${spec.value}`).join(" / ") || String(i18n.t("common.standardSpec"))
+
+export const getLoginProviders = () => api<{ google: boolean; facebook:boolean }>("/api/auth/providers")
+export const startGoogleLogin = (next: string, bind = false, password = "") => api<{ url: string }>("/api/auth/google/start", { method: "POST", body: JSON.stringify({ next, bind, password }) })
+export const getGoogleIdentity = () => api<{ data: { bound: boolean; has_password: boolean } }>("/api/v1/me/identities/google")
+export const unbindGoogle = (password: string) => api("/api/v1/me/identities/google", { method: "DELETE", body: JSON.stringify({ password }) })
+
+export const startProviderLogin = (provider: "google"|"facebook", next:string, bind=false,password="") => api<{url:string}>(`/api/auth/${provider}/start`,{method:"POST",body:JSON.stringify({next,bind,password})})
+export const getProviderIdentity = (provider:string) => api<{ data: { bound:boolean; has_password:boolean } }>(`/api/v1/me/identities/${provider}`)
+export const unbindProvider = (provider:string,password:string) => api(`/api/v1/me/identities/${provider}`,{method:"DELETE",body:JSON.stringify({password})})
