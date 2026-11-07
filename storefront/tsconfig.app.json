@@ -27,6 +27,12 @@
       ],
       "@/components/ui": [
         "../frontend/src/components/ui"
+      ],
+      "react": [
+        "../frontend/node_modules/@types/react"
+      ],
+      "react/*": [
+        "../frontend/node_modules/@types/react/*"
       ]
     },
     "noUnusedLocals": true,

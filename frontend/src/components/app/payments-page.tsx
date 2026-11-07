@@ -1,3 +1,6 @@
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Card } from "@/components/ui/card"
 import { useEffect, useState, type ReactNode } from "react"
 import { CreditCard, Plus, RefreshCw, Radio } from "lucide-react"
 import {
@@ -116,13 +119,14 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
   const rows = tab === "events" ? events.length : accounts.length
   const tabs = [...(can("payments.configure") ? [{ id: "accounts", label: "支付渠道", icon: CreditCard }] : []), { id: "events", label: "回调记录", icon: Radio }]
 
-  return <div className="flex h-full min-h-0 flex-col gap-4">
+  return <Tabs value={tab} onValueChange={value => { if (value === "accounts" || value === "events") { setTab(value); setPage(1) } }} className="flex h-full min-h-0 flex-col gap-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex flex-wrap gap-1" role="tablist" aria-label="支付模块">{tabs.map((t) => <Button key={t.id} role="tab" aria-selected={tab === t.id} variant={tab === t.id ? "secondary" : "ghost"} onClick={() => { setTab(t.id as Tab); setPage(1) }}><t.icon className="size-4" />{t.label}</Button>)}</div>
+      <TabsList aria-label="支付模块">{tabs.map(t => <TabsTrigger key={t.id} value={t.id}><t.icon className="size-4" />{t.label}</TabsTrigger>)}</TabsList>
       <div className="flex flex-wrap gap-2"><Button variant="outline" nativeButton={false} render={<a href="/shop/cart" target="_blank" rel="noopener noreferrer" />}>打开购物前台</Button>{can("theme") && <Button variant="outline" disabled={busy} onClick={() => run(() => installPaymentTemplate(), "购买模板已安装。请在分类中选择 payment_checkout.html 作为封面模板，设置发布路径并发布。")}>安装购买模板</Button>}<Button variant="outline" disabled={loading || busy} onClick={() => setVersion((v) => v + 1)}><RefreshCw className="size-4" />刷新</Button>{tab === "accounts" && <Button disabled={!configured} onClick={() => setAccountForm({ ...emptyAccount })}><Plus className="size-4" />添加 PingPong</Button>}</div>
     </div>
+    <TabsContent value={tab} className="flex min-h-0 flex-1 flex-col gap-4">
     <p className="text-sm text-muted-foreground">商品直接使用分类中的内容。请在<a href="/admin/categories" className="underline underline-offset-4">分类管理</a>开启在线销售，再到<a href="/admin/content" className="underline underline-offset-4">内容管理</a>配置规格和价格。</p>
-    {configured === false && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300/50 bg-amber-50/40 p-3 text-sm text-amber-800 dark:bg-amber-950/20 dark:text-amber-200"><p>{keyStatus?.key_requires_restore ? "已有支付渠道，请导入原加密密钥恢复支付功能。" : "支付凭据加密尚未配置，请由超级管理员初始化支付密钥。"}</p>{keyStatus?.key_can_initialize && <Button variant="outline" onClick={() => { setKeyMode(keyStatus.key_requires_restore ? "import" : "generate"); setImportKey(""); setKeyDialog(true) }}>配置支付密钥</Button>}</div>}
+    {configured === false && <Alert role="status" className="flex flex-wrap items-center justify-between gap-3"><AlertDescription>{keyStatus?.key_requires_restore ? "已有支付渠道，请导入原加密密钥恢复支付功能。" : "支付凭据加密尚未配置，请由超级管理员初始化支付密钥。"}</AlertDescription>{keyStatus?.key_can_initialize && <Button variant="outline" onClick={() => { setKeyMode(keyStatus.key_requires_restore ? "import" : "generate"); setImportKey(""); setKeyDialog(true) }}>配置支付密钥</Button>}</Alert>}
     {configured && user.is_super && <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">支付加密密钥已配置 · {keyStatus?.key_source === "environment" ? "来自环境变量，可接管到后台管理" : "保存在服务端独立文件"}</p><Button variant="outline" size="sm" disabled={busy} onClick={() => { setImportKey(""); setKeyDialog(true) }}>密钥管理与备份</Button></div>}
     <ScrollArea orientation="both" className="min-h-0 flex-1 rounded-lg border" contentClassName="min-w-full">
       <Table containerClassName="overflow-visible!">
@@ -140,6 +144,7 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
     </ScrollArea>
     <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground"><span>{tab === "accounts" ? "每个渠道固定币种和凭据；更换凭据时新增渠道，保留历史账户。" : `第 ${page} 页 · 每页最多 50 条`}</span>{tab !== "accounts" && <div className="flex gap-2"><Button variant="outline" size="sm" disabled={page === 1 || loading} onClick={() => setPage((p) => p - 1)}>上一页</Button><Button variant="outline" size="sm" disabled={rows < 50 || loading} onClick={() => setPage((p) => p + 1)}>下一页</Button></div>}</div>
 
+    </TabsContent>
     <Dialog open={keyDialog} onOpenChange={(open) => { if (!busy) { setKeyDialog(open); if (!open) setImportKey("") } }}>
       <DialogContent className="flex max-h-[90svh] flex-col sm:max-w-lg"><DialogHeader><DialogTitle>配置支付加密密钥</DialogTitle><DialogDescription>这是所有站点共用的凭据加密密钥，由超级管理员管理。保存后立即生效。</DialogDescription></DialogHeader>
         <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-4 px-1 py-2">
@@ -159,11 +164,11 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
     <Dialog open={accountForm !== null} onOpenChange={(open) => { if (!open && !busy) setAccountForm(null) }}>
       <DialogContent className="flex max-h-[90svh] flex-col sm:max-w-xl"><DialogHeader><DialogTitle>添加 PingPong 收款渠道</DialogTitle><DialogDescription>使用 Checkout v4 的商户参数。先在沙箱完成支付与退款测试，再添加生产渠道。</DialogDescription></DialogHeader>
         {accountForm && <><ScrollArea className="min-h-0 flex-1" contentClassName="space-y-4 px-1 py-2">
-          <div className="space-y-2 rounded-lg border p-3"><Field label="导入渠道配置文件（JSON）"><Input type="file" accept=".json,application/json" disabled={busy} onChange={(e) => {
+          <Card className="space-y-2 rounded-lg border p-3 gap-0"><Field label="导入渠道配置文件（JSON）"><Input type="file" accept=".json,application/json" disabled={busy} onChange={(e) => {
             const file = e.target.files?.[0]; e.target.value = ""
             if (file) void run(async () => { if (file.size > 16384) throw new Error("配置文件不能超过 16 KB"); setAccountForm(accountDraft(JSON.parse(await file.text()))) }, "配置已填入表单，请核对后保存。")
-          }} /></Field><Button variant="outline" size="sm" onClick={() => downloadFile(new Blob([JSON.stringify(sandboxExample, null, 2)], { type: "application/json" }), "pingpong-account-example.json")}>下载配置示例</Button><p className="text-xs text-muted-foreground">文件仅填入表单，核对后再保存。含 Salt 的配置文件需要妥善保管。</p></div>
-          {accountForm.environment === "sandbox" && <div className="space-y-3 rounded-lg border p-3">
+          }} /></Field><Button variant="outline" size="sm" onClick={() => downloadFile(new Blob([JSON.stringify(sandboxExample, null, 2)], { type: "application/json" }), "pingpong-account-example.json")}>下载配置示例</Button><p className="text-xs text-muted-foreground">文件仅填入表单，核对后再保存。含 Salt 的配置文件需要妥善保管。</p></Card>
+          {accountForm.environment === "sandbox" && <Card className="space-y-3 rounded-lg border p-3 gap-0">
             <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-medium">官方沙箱测试账号</p><Button variant="outline" size="sm" disabled={busy} onClick={() => {
               setAccountForm({ ...accountForm, client_id: sandboxExample.client_id, merchant_id: sandboxExample.merchant_id, secret: sandboxExample.secret, name: accountForm.name || sandboxExample.name, enabled: true })
               showSuccess("官方沙箱参数已填入，已选中启用渠道；请填写网站公开地址后保存。")
@@ -171,7 +176,7 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
             <p className="text-xs text-muted-foreground">使用 PingPong 官方公开测试参数，沙箱不会真实扣款。商品和渠道币种须一致，公开地址仍需填写本站可从公网访问的 HTTPS 地址；内网开发可通过临时 HTTPS 隧道转发 GoCMS 服务。</p>
             <p className="text-xs text-muted-foreground">测试卡号：<span dir="ltr" className="font-mono">5204740000001002</span>；有效期填写未来年月，CVV 填任意三位数字；如进入 3DS 验证页，验证码为 <span dir="ltr" className="font-mono">1234</span>。测试结果以沙箱返回为准。</p>
             <a className="text-xs underline underline-offset-4" href="https://acquirer-api-docs-v4-en.pingpongx.com/notes/zh/onlinePayment/sandbox/" target="_blank" rel="noopener noreferrer">查看官方沙箱说明</a>
-          </div>}
+          </Card>}
           <div className="grid gap-4 sm:grid-cols-2">
           <Field label="渠道名称"><Input aria-label="渠道名称" value={accountForm.name} onChange={(e) => setAccountForm({ ...accountForm, name: e.target.value })} placeholder="例如：国际信用卡" /></Field>
           <Field label="环境"><Options label="环境" value={accountForm.environment} options={environments} onChange={(environment) => setAccountForm({ ...accountForm, environment })} /></Field>
@@ -186,5 +191,5 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
       </DialogContent>
     </Dialog>
 
-  </div>
+  </Tabs>
 }

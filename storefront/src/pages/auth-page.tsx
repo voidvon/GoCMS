@@ -1,3 +1,4 @@
+import { Card } from "@/components/ui/card"
 import { storefrontName } from "@/lib/store-name"
 import { useTranslation } from "react-i18next"
 import { useEffect } from "react"
@@ -16,7 +17,7 @@ export function AuthPage({ mode, search }: { mode: "login" | "register"; search:
   }, [member, memberLoading, next])
   return <div className="page">
     <a href={shoppingURL} className="text-link mb-7"><ArrowLeft className="size-4 rtl:rotate-180" aria-hidden="true" />{t("common.continueSite")}</a>
-    {memberLoading || member ? <Loading /> : <div className="mx-auto grid max-w-5xl overflow-hidden rounded-3xl border bg-card shadow-[0_12px_48px_-24px_#173e3630] md:grid-cols-[.9fr_1.1fr]">
+    {memberLoading || member ? <Loading /> : <Card className="mx-auto grid max-w-5xl overflow-hidden rounded-3xl border bg-card shadow-[0_12px_48px_-24px_#173e3630] md:grid-cols-[.9fr_1.1fr] gap-0 py-0">
       <aside className="auth-aside hidden flex-col md:flex justify-between gap-10 p-7 text-white sm:p-10 lg:p-12">
         <div><div className="mb-9 flex items-center gap-3"><Package className="size-5 shrink-0 text-white/80" aria-hidden="true" /><bdi className="min-w-0 break-words text-sm font-medium text-white/80">{storefrontName(store.site_name)}</bdi></div><p className="text-xs font-medium tracking-widest text-emerald-100/70">{t("design.accountLabel")}</p><h2 className="mt-4 text-3xl font-medium leading-tight tracking-tight sm:text-4xl">{t("design.accountTitle")}</h2><p className="mt-5 text-sm leading-7 text-white/75">{t("design.accountDescription")}</p></div>
         <div className="space-y-5 border-t border-white/15 pt-7">
@@ -26,6 +27,6 @@ export function AuthPage({ mode, search }: { mode: "login" | "register"; search:
         </div>
       </aside>
       <AuthPanel key={`${mode}:${next}`} mode={mode} next={next} />
-    </div>}
+    </Card>}
   </div>
 }

@@ -1,3 +1,6 @@
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Badge } from "@/components/ui/badge"
+import { Card } from "@/components/ui/card"
 import { ChangePasswordPanel } from "./password-page"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -34,12 +37,18 @@ function ProviderSecurity({provider}:{provider:"google"|"facebook"}) {
     catch (error) { showError(error) } finally { setBusy(false) }
   }
   return <div>
-    {status.loading ? <Loading /> : status.error ? <Failure message={status.error} retry={status.reload} /> : status.data && <section className="panel mt-6 space-y-5">
+    {status.loading ? <Loading /> : status.error ? <Failure message={status.error} retry={status.reload} /> : status.data && <Card className="panel mt-6 space-y-5">
       <p className="muted">{t(`${provider}.sharedNotice`)}</p>
-      <div><h2>{t(`${provider}.identity`)}</h2><p className="muted mt-2">{t(status.data.bound ? `${provider}.bound` : `${provider}.notBound`)}</p></div>
+      <div><h2>{t(`${provider}.identity`)}</h2><Badge variant="secondary" className="mt-2">{t(status.data.bound ? `${provider}.bound` : `${provider}.notBound`)}</Badge></div>
       {status.data.has_password && <div className="field"><Label htmlFor={`${provider}-password`}>{t(`${provider}.password`)}</Label><Input id={`${provider}-password`} type="password" autoComplete="current-password" maxLength={1024} value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></div>}
       {!status.data.bound && <ExternalLoginButton provider={provider} next="/shop/account" bind password={password} disabled={status.data.has_password && !password} />}
-      {status.data.bound && (status.data.has_password ? confirm ? <div className="space-y-3"><p className="muted">{t(`${provider}.confirmUnbind`)}</p><div className="flex flex-wrap gap-3"><Button disabled={busy || !password} onClick={() => void unbind()}>{t(`${provider}.unbind`)}</Button><Button variant="outline" disabled={busy} onClick={() => setConfirm(false)}>{t(`${provider}.cancel`)}</Button></div></div> : <Button variant="outline" disabled={busy || !password} onClick={() => setConfirm(true)}>{t(`${provider}.unbind`)}</Button> : <p className="muted">{t(`${provider}.keepAccess`)}</p>)}
-    </section>}
+      {status.data.bound && (status.data.has_password ? <>
+        <Button type="button" variant="outline" disabled={busy || !password} onClick={() => setConfirm(true)}>{t(`${provider}.unbind`)}</Button>
+        <Dialog open={confirm} onOpenChange={open => { if (!busy) setConfirm(open) }}><DialogContent>
+          <DialogHeader><DialogTitle>{t(`${provider}.unbind`)}</DialogTitle><DialogDescription>{t(`${provider}.confirmUnbind`)}</DialogDescription></DialogHeader>
+          <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={() => setConfirm(false)}>{t(`${provider}.cancel`)}</Button><Button type="button" variant="destructive" disabled={busy || !password} onClick={() => void unbind()}>{t(`${provider}.unbind`)}</Button></DialogFooter>
+        </DialogContent></Dialog>
+      </> : <p className="muted">{t(`${provider}.keepAccess`)}</p>)}
+    </Card>}
   </div>
 }

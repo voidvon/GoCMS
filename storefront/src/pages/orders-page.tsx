@@ -1,3 +1,5 @@
+import { Badge } from "@/components/ui/badge"
+import { Card } from "@/components/ui/card"
 import { formatDate, formatNumber, type MessageKey } from "@/i18n"
 import { localError } from "@/lib/errors"
 import { useTranslation } from "react-i18next"
@@ -24,7 +26,7 @@ function OrderList({ page }: { page: number }) {
   const items = resource.data?.items ?? []
   if (!items.length) return <Empty href={shoppingURL} title={t("orders.emptyTitle")} message={t("orders.emptyMessage")} />
   return <>
-    <div className="space-y-5">{items.map(order => <article className="min-w-0 rounded-2xl border bg-card transition-shadow hover:shadow-sm" key={order.id}>
+    <div className="space-y-5">{items.map(order => <Card className="min-w-0 rounded-2xl border bg-card transition-shadow hover:shadow-sm gap-0" key={order.id}>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4 sm:px-6">
         <div className="min-w-0"><p className="mb-1 text-xs text-muted-foreground">{t("design.orderNumber")}</p><Link href={`/shop/orders/${order.id}`} className="break-all font-mono text-xs font-medium hover:text-primary"><bdi>{order.id}</bdi></Link></div>
         <PaymentBadge status={order.status} />
@@ -35,7 +37,7 @@ function OrderList({ page }: { page: number }) {
         <div className="flex w-full items-center justify-between gap-4 border-t pt-4 sm:w-auto sm:flex-col sm:items-end sm:border-0 sm:pt-0"><strong className="text-lg font-semibold tabular-nums"><bdi>{money(order.amount, order.currency)}</bdi></strong><Button className="action-button" variant="outline" nativeButton={false} render={<Link href={`/shop/orders/${order.id}`} />}>{t("orders.view")}<ArrowRight className="size-4 rtl:rotate-180" aria-hidden="true" /></Button></div>
       </div>
       {order.status === "paid" && <div className="flex flex-wrap items-center gap-3 rounded-b-2xl border-t bg-muted/40 px-5 py-3 sm:px-6"><span className="text-xs text-muted-foreground">{t("design.fulfillmentStatus")}</span><FulfillmentBadge status={order.fulfillment_status} /></div>}
-    </article>)}</div>
+    </Card>)}</div>
     <div className="mt-8 flex justify-end gap-3"><Button className="action-button" variant="outline" disabled={page === 1} nativeButton={false} render={<Link href={`/shop/orders?page=${page - 1}`} />}>{t("common.previous")}</Button><Button className="action-button" variant="outline" disabled={items.length < 50} nativeButton={false} render={<Link href={`/shop/orders?page=${page + 1}`} />}>{t("common.next")}</Button></div>
   </>
 }
@@ -92,24 +94,24 @@ function OrderDetail({ id, returned }: { id: string; returned: boolean }) {
           <li className="flex items-start gap-2.5"><span className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full", paid && order.fulfillment_status === "completed" ? "bg-secondary text-primary" : "bg-muted text-muted-foreground")}><PackageCheck className="size-3.5" aria-hidden="true" /></span><div><p className="text-xs font-medium">{t("design.fulfillmentStatus")}</p><p className="mt-1 text-xs leading-5 text-muted-foreground">{paid ? t(fulfillment[order.fulfillment_status] || "common.unknownStatus") : t("orders.unpaid")}</p></div></li>
         </ol>}
       </section>
-      <section className="panel">
+      <Card className="panel">
         <SectionHeading icon={<ReceiptText className="size-4" />}>{t("design.orderItems")}</SectionHeading>
         <div className="divide-y">{order.items.map((item, index) => <article className="flex flex-wrap gap-4 py-5 first:pt-0 last:pb-0 sm:flex-nowrap" key={index}>
           <ProductImage src={item.image_url} />
           <div className="min-w-0 flex-1"><h2 className="text-base leading-6"><bdi>{item.name}</bdi></h2><p className="muted mt-2 break-words">{specification(item)}</p><p className="mt-2 text-xs text-muted-foreground">{t("cart.items", { count: item.quantity })}</p></div>
           <strong className="ms-auto text-base font-semibold tabular-nums"><bdi>{money(item.amount * item.quantity, order.currency)}</bdi></strong>
         </article>)}</div>
-      </section>
-      {!!order.shipments?.length && <section className="panel space-y-5"><SectionHeading icon={<PackageCheck className="size-4"/>}>{t("shipping.packages")}</SectionHeading>{order.shipments.map(p => <article key={p.id} className="space-y-3 rounded-xl border p-4">
+      </Card>
+      {!!order.shipments?.length && <Card className="panel space-y-5"><SectionHeading icon={<PackageCheck className="size-4"/>}>{t("shipping.packages")}</SectionHeading>{order.shipments.map(p => <Card key={p.id} className="space-y-3 rounded-xl border p-4 gap-0">
         <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-medium">{t(p.method === "courier" ? "shipping.courier" : p.method === "pickup" ? "shipping.pickup" : "shipping.noShipping")}</h3><time className="text-xs text-muted-foreground" dateTime={p.shipped_at}>{formatDate(p.shipped_at)}</time></div>
         {p.carrier && <p className="text-sm"><bdi>{p.carrier}</bdi></p>}
         {p.tracking_number && <div className="flex flex-wrap items-center gap-3"><span className="break-all font-mono text-sm"><bdi>{p.tracking_number}</bdi></span><Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(p.tracking_number).then(() => showSuccess(t("shipping.copied"))).catch(() => showError(localError("errors.copyTracking")))}>{t("shipping.copy")}</Button></div>}
         {p.tracking_url && <a className="text-link text-sm" href={p.tracking_url} target="_blank" rel="noopener noreferrer">{t("shipping.track")}</a>}
         <ul className="space-y-2">{p.items.map(i => <li key={i.line_number} className="text-sm"><bdi>{t("shipping.item", {name: order.items.find(x => x.line_number === i.line_number)?.name || "", quantity: formatNumber(i.quantity)})}</bdi></li>)}</ul>
         {p.note && <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground"><bdi>{p.note}</bdi></p>}
-      </article>)}</section>}
+      </Card>)}</Card>}
     </div>
-    <aside className="panel summary-panel space-y-6">
+    <Card className="panel summary-panel space-y-6">
       <h2 className="text-lg">{t("orders.info")}</h2>
       <div><p className="mb-2 text-xs text-muted-foreground">{t("design.orderNumber")}</p><p className="break-all font-mono text-xs leading-6"><bdi>{order.id}</bdi></p></div>
       <p className="text-xs leading-6 text-muted-foreground">{t("orders.created", { date: formatDate(order.created_at) })}</p>
@@ -123,7 +125,7 @@ function OrderDetail({ id, returned }: { id: string; returned: boolean }) {
         <Button className="action-button h-auto w-full whitespace-normal py-3" variant="outline" disabled={busy} onClick={() => void sync()}><RefreshCw className={cn("size-4", busy && "animate-spin")} aria-hidden="true" />{t("orders.sync")}</Button>
       </div>}
       <Link href="/shop/orders" className="text-link flex justify-center border-t pt-5"><ArrowLeft className="size-4 rtl:rotate-180" aria-hidden="true" />{t("orders.all")}</Link>
-    </aside>
+    </Card>
   </div>
 }
 export function OrdersPage({ id, search }: { id?: string; search: string }) {
@@ -139,10 +141,10 @@ export function OrdersPage({ id, search }: { id?: string; search: string }) {
 function PaymentBadge({ status }: { status: string }) {
   const { t } = useTranslation()
   const Icon = status === "paid" ? CircleCheck : status === "unpaid" ? Clock3 : Undo2
-  return <span className={cn("status-badge", status === "paid" ? "status-positive" : status === "unpaid" ? "status-waiting" : "status-neutral")}><Icon className="size-3.5 shrink-0" aria-hidden="true" />{t(states[status] || "common.unknownStatus")}</span>
+  return <Badge variant={status === "paid" ? "default" : "secondary"}><Icon className="size-3.5 shrink-0" aria-hidden="true" />{t(states[status] || "common.unknownStatus")}</Badge>
 }
 function FulfillmentBadge({ status }: { status: string }) {
   const { t } = useTranslation()
   const Icon = status === "completed" ? PackageCheck : status === "failed" ? CircleAlert : Clock3
-  return <span className={cn("status-badge", status === "completed" ? "status-positive" : status === "failed" ? "status-danger" : "status-neutral")}><Icon className="size-3.5 shrink-0" aria-hidden="true" />{t(fulfillment[status] || "common.unknownStatus")}</span>
+  return <Badge variant={status === "completed" || status === "shipped" ? "default" : status === "failed" ? "destructive" : "secondary"}><Icon className="size-3.5 shrink-0" aria-hidden="true" />{t(fulfillment[status] || "common.unknownStatus")}</Badge>
 }

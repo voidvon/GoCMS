@@ -70,8 +70,6 @@
   .quantity-control input { appearance: textfield; }
   .quantity-control input::-webkit-inner-spin-button, .quantity-control input::-webkit-outer-spin-button { appearance: none; margin: 0; }
   .auth-aside { background-color: #163f36; background-image: radial-gradient(ellipse at 100% 0%, #2e6858 0%, transparent 65%); }
-  .auth-route-link { @apply flex min-h-11 flex-1 items-center justify-center rounded-lg px-3 py-2 text-center text-sm font-medium text-muted-foreground; }
-  .auth-route-link[aria-current="page"] { @apply bg-card text-foreground shadow-sm; }
 }
 :root:lang(ar) { --font-body: "Segoe UI", Tahoma, Arial, sans-serif; }
 :root:lang(th) { --font-body: "Leelawadee UI", Tahoma, system-ui, sans-serif; }

@@ -1,3 +1,5 @@
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Card } from "@/components/ui/card"
 import { localError } from "@/lib/errors"
 import { useTranslation } from "react-i18next"
 import { useState, type ComponentProps, type FormEvent } from "react"
@@ -13,7 +15,7 @@ import { showError, showSuccess } from "./feedback"
 
 export function AuthRequired({ next }: { next: string }) {
   const { t } = useTranslation()
-  return <section className="panel mx-auto flex max-w-lg flex-col items-center gap-5 py-10 text-center">
+  return <Card className="panel mx-auto flex max-w-lg flex-col items-center gap-5 py-10 text-center">
     <span className="flex size-14 items-center justify-center rounded-2xl bg-secondary text-primary"><UserRound className="size-6" aria-hidden="true" /></span>
     <h2>{t("auth.requiredTitle")}</h2>
     <p className="muted">{t("auth.requiredMessage")}</p>
@@ -21,7 +23,7 @@ export function AuthRequired({ next }: { next: string }) {
       <Button className="action-button" nativeButton={false} render={<Link href={authURL("login", next)} />}>{t("common.login")}</Button>
       <Button className="action-button" variant="outline" nativeButton={false} render={<Link href={authURL("register", next)} />}>{t("common.register")}</Button>
     </div>
-  </section>
+  </Card>
 }
 
 export function AuthPanel({ mode, next }: { mode: "login" | "register"; next: string }) {
@@ -54,10 +56,12 @@ export function AuthPanel({ mode, next }: { mode: "login" | "register"; next: st
     } finally { setBusy(false) }
   }
   return <section className="min-w-0 p-6 sm:p-10 lg:p-12">
-    <nav className="mb-8 flex gap-1 rounded-xl bg-muted p-1" aria-label={t("design.accountLabel")}>
-      <Link className="auth-route-link" href={authURL("login", next)} aria-current={!registering ? "page" : undefined}>{t("common.login")}</Link>
-      <Link className="auth-route-link" href={authURL("register", next)} aria-current={registering ? "page" : undefined}>{t("common.register")}</Link>
-    </nav>
+    <Tabs value={mode} onValueChange={value => { if (value === "login" || value === "register") navigate(authURL(value, next)) }}>
+      <TabsList className="mb-6 w-full" aria-label={t("design.accountLabel")}>
+        <TabsTrigger value="login" disabled={busy}>{t("common.login")}</TabsTrigger>
+        <TabsTrigger value="register" disabled={busy}>{t("common.register")}</TabsTrigger>
+      </TabsList>
+      <TabsContent value={mode}>
     <div className="mb-7"><h1 className="text-2xl sm:text-3xl">{registering ? t("auth.registerTitle") : t("auth.loginTitle")}</h1><p className="muted mt-3">{registering ? t("auth.registerDescription") : t("auth.loginDescription")}</p></div>
     {(providers.data?.google === true || providers.data?.facebook === true) && <div className="mb-6 space-y-5">{providers.data?.google === true && <ExternalLoginButton next={next} disabled={busy} />}{providers.data?.facebook === true && <ExternalLoginButton provider="facebook" next={next} disabled={busy} />}<p className="text-center text-xs text-muted-foreground">{t("google.or")}</p></div>}
     <form onSubmit={submit} className="space-y-5">
@@ -73,6 +77,8 @@ export function AuthPanel({ mode, next }: { mode: "login" | "register"; next: st
     </form>
     {!registering && <Link href="/shop/forgot-password" className="text-link mt-5">{t("password.forgot")}</Link>}
     <Button variant="link" nativeButton={false} disabled={busy} className="mt-5 h-auto min-h-10 max-w-full whitespace-normal px-0 text-start" render={<Link href={authURL(registering ? "login" : "register", next)} />}>{registering ? t("auth.toLogin") : t("auth.toRegister")}</Button>
+      </TabsContent>
+    </Tabs>
   </section>
 }
 

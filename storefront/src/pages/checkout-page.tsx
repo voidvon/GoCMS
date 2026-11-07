@@ -1,3 +1,6 @@
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Badge } from "@/components/ui/badge"
+import { Card } from "@/components/ui/card"
 import { currentLanguage } from "@/i18n"
 import { ArrowLeft, ArrowRight, CreditCard, Info, LoaderCircle, Mail, RotateCcw } from "lucide-react"
 import { CheckoutSteps, PageHeading, ProductImage, SectionHeading } from "@/components/app/commerce-ui"
@@ -72,31 +75,31 @@ function CheckoutForm({ currency }: { currency: string | null }) {
     catch { showError(localError("errors.checkoutStorage")); return }
     void place(saved)
   }
-  if (pending) return <div className="panel mx-auto max-w-xl space-y-5"><span className="section-icon"><RotateCcw className="size-4" aria-hidden="true" /></span><h2>{t("checkout.resumeTitle")}</h2><p className="muted">{t("checkout.resumeMessage")}</p><Button className="action-button h-auto whitespace-normal py-3" disabled={busy} onClick={() => void place(pending)}>{busy && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}{busy ? t("checkout.resuming") : t("checkout.resume")}</Button><Link className="block text-sm underline underline-offset-4" href="/shop/orders">{t("common.orders")}</Link></div>
+  if (pending) return <Card className="panel mx-auto max-w-xl space-y-5"><span className="section-icon"><RotateCcw className="size-4" aria-hidden="true" /></span><h2>{t("checkout.resumeTitle")}</h2><p className="muted">{t("checkout.resumeMessage")}</p><Button className="action-button h-auto whitespace-normal py-3" disabled={busy} onClick={() => void place(pending)}>{busy && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}{busy ? t("checkout.resuming") : t("checkout.resume")}</Button><Link className="block text-sm underline underline-offset-4" href="/shop/orders">{t("common.orders")}</Link></Card>
   if (variants.loading || channelResource.loading) return <Loading />
   if (variants.error || channelResource.error) return <Failure message={variants.error || channelResource.error} retry={() => { variants.reload(); channelResource.reload() }} />
   if (!cart.length || !lines.length) return <Empty href={shoppingURL} title={t("checkout.emptyTitle")} message={t("checkout.emptyMessage")} />
-  if (missing) return <div className="panel space-y-4"><h2>{t("checkout.unavailableTitle")}</h2><p className="muted">{t("checkout.unavailableMessage")}</p><Button nativeButton={false} render={<Link href="/shop/cart" />}>{t("common.backCart")}</Button></div>
+  if (missing) return <Card className="panel space-y-4"><h2>{t("checkout.unavailableTitle")}</h2><p className="muted">{t("checkout.unavailableMessage")}</p><Button nativeButton={false} render={<Link href="/shop/cart" />}>{t("common.backCart")}</Button></Card>
   return <form onSubmit={submit} className="checkout-grid" aria-busy={busy}>
     <div className="min-w-0 space-y-6">
-      <section className="panel form-panel">
+      <Card className="panel form-panel">
         <SectionHeading icon={<Mail className="size-4" />}>{t("checkout.contact")}</SectionHeading>
         <div className="grid gap-5 sm:grid-cols-2">
           <div className="field"><Label htmlFor="customer-name">{t("checkout.name")}</Label><Input id="customer-name" name="customer_name" defaultValue={member?.display_name || member?.username} required maxLength={100} autoComplete="name" disabled={busy} /></div>
           <div className="field"><Label htmlFor="customer-email">{t("checkout.email")}</Label><Input id="customer-email" name="email" dir="ltr" type="email" defaultValue={member?.email} required maxLength={128} autoComplete="email" disabled={busy} /></div>
         </div>
-      </section>
-      {physical && <><section className="panel form-panel"><div className="field"><Label htmlFor="shipping-phone">{t("shipping.phone")}</Label><Input id="shipping-phone" name="phone" type="tel" dir="ltr" autoComplete="tel" maxLength={32} required disabled={busy}/></div></section><ShippingAddress disabled={busy} /></>}
-      <section className="panel form-panel">
+      </Card>
+      {physical && <><Card className="panel form-panel"><div className="field"><Label htmlFor="shipping-phone">{t("shipping.phone")}</Label><Input id="shipping-phone" name="phone" type="tel" dir="ltr" autoComplete="tel" maxLength={32} required disabled={busy}/></div></Card><ShippingAddress disabled={busy} /></>}
+      <Card className="panel form-panel">
         <SectionHeading icon={<CreditCard className="size-4" />}>{t("checkout.paymentMethod")}</SectionHeading>
         {channels.length ? <div className="space-y-5">
           <div className="field"><Label htmlFor="checkout-channel">{t("checkout.channel")}</Label><Select disabled={busy} value={channelID} onValueChange={value => { if (value) setChannel(value) }}><SelectTrigger id="checkout-channel" className="w-full" aria-label={t("checkout.channel")}><SelectValue>{channels.find(item => String(item.id) === channelID)?.name}</SelectValue></SelectTrigger><SelectContent>{channels.map(item => <SelectItem key={item.id} value={String(item.id)}>{item.name}{item.sandbox ? ` (${t("common.sandbox")})` : ""}</SelectItem>)}</SelectContent></Select></div>
-          {channels.find(item => String(item.id) === channelID)?.sandbox && <span className="status-badge status-waiting">{t("common.sandbox")}</span>}
+          {channels.find(item => String(item.id) === channelID)?.sandbox && <Badge variant="secondary">{t("common.sandbox")}</Badge>}
           <p className="muted rounded-xl bg-muted p-4">{t("checkout.redirectNote")}</p>
-        </div> : <p className="rounded-xl bg-amber-50 p-4 text-sm leading-7 text-amber-900" role="status">{t("checkout.noChannels")}</p>}
-      </section>
+        </div> : <Alert variant="default" role="status" className="text-start"><AlertDescription>{t("checkout.noChannels")}</AlertDescription></Alert>}
+      </Card>
     </div>
-    <aside className="panel summary-panel space-y-6">
+    <Card className="panel summary-panel space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg">{t("checkout.review")}</h2><Link href="/shop/cart" className="text-link text-xs">{t("checkout.editCart")}</Link></div>
       <div className="divide-y">{lines.map(line => <div className="flex gap-3 py-4 first:pt-0" key={line.id}>
         <ProductImage src={line.image_url} className="size-14 rounded-lg p-1.5 sm:size-14 sm:p-1.5" />
@@ -105,7 +108,7 @@ function CheckoutForm({ currency }: { currency: string | null }) {
       <div className="space-y-2 border-t pt-5"><span className="muted">{t("checkout.subtotal")}</span><strong className="block text-3xl font-semibold tracking-tight tabular-nums"><bdi>{money(total, selectedCurrency)}</bdi></strong></div>
       <Button className="action-button h-auto w-full justify-between whitespace-normal py-3 text-start" type="submit" disabled={busy || !channels.length}>{busy ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : <CreditCard className="size-4" aria-hidden="true" />}<span className="flex-1">{busy ? t("checkout.submitting") : t("checkout.submit")}</span><ArrowRight className="size-4 rtl:rotate-180" aria-hidden="true" /></Button>
       <div className="flex items-start gap-2 text-xs leading-6 text-muted-foreground"><Info className="mt-1 size-3.5 shrink-0" aria-hidden="true" /><p>{t("checkout.redirectNote")}</p></div>
-    </aside>
+    </Card>
   </form>
 }
 export function CheckoutPage({ search }: { search: string }) {
