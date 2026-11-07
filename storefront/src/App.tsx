@@ -30,7 +30,7 @@ function Shell() {
   useEffect(() => {
     const oauthError = url.searchParams.get("oauth_error")
     if (oauthError) {
-      const codes = ["facebook_failed", "facebook_cancelled", "facebook_unavailable", "facebook_conflict", "google_failed", "google_cancelled", "google_unavailable", "google_conflict", "session_limit_reached"]
+      const codes = ["microsoft_failed", "microsoft_cancelled", "microsoft_unavailable", "microsoft_conflict", "facebook_failed", "facebook_cancelled", "facebook_unavailable", "facebook_conflict", "google_failed", "google_cancelled", "google_unavailable", "google_conflict", "session_limit_reached"]
       showError(localError(apiErrorKey(codes.includes(oauthError) ? oauthError : "google_failed", 400)))
       url.searchParams.delete("oauth_error")
       window.history.replaceState(null, "", url.pathname + url.search)

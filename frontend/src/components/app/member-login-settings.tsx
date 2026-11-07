@@ -15,12 +15,16 @@ export function MembersPage() {
   return <ScrollArea className="h-full" contentClassName="pb-6"><SiteUsersPage /></ScrollArea>
 }
 
+const providers = ["google", "facebook", "microsoft"] as const
+type Provider = typeof providers[number]
+const providerNames: Record<Provider, string> = { google: "Google", facebook: "Facebook", microsoft: "Microsoft" }
+
 export function MemberLoginSettings() {
- const [provider,setProvider]=useState(new URLSearchParams(window.location.search).get("provider") === "facebook" ? "facebook" : "google")
- return <Tabs value={provider} onValueChange={value=>setProvider(String(value))} className="h-full min-h-0"><TabsList><TabsTrigger value="google">Google</TabsTrigger><TabsTrigger value="facebook">Facebook</TabsTrigger></TabsList>{(["google","facebook"] as const).map(id=><TabsContent key={id} value={id} keepMounted className="min-h-0 flex-1"><ProviderSettings provider={id} /></TabsContent>)}</Tabs>
+ const [provider,setProvider]=useState(() => { const selected = new URLSearchParams(window.location.search).get("provider"); return providers.find(id => id === selected) || "google" })
+ return <Tabs value={provider} onValueChange={value=>{ const selected = providers.find(id => id === value); if (selected) setProvider(selected) }} className="h-full min-h-0"><TabsList><TabsTrigger value="google">Google</TabsTrigger><TabsTrigger value="facebook">Facebook</TabsTrigger><TabsTrigger value="microsoft">Microsoft</TabsTrigger></TabsList>{providers.map(id=><TabsContent key={id} value={id} keepMounted className="min-h-0 flex-1"><ProviderSettings provider={id} /></TabsContent>)}</Tabs>
 }
-function ProviderSettings({provider}:{provider:"google"|"facebook"}) {
- const name=provider==="google" ? "Google" : "Facebook"
+function ProviderSettings({provider}:{provider:Provider}) {
+ const name=providerNames[provider]
 
   useEffect(() => {
     const url = new URL(window.location.href)
@@ -81,9 +85,10 @@ function ProviderSettings({provider}:{provider:"google"|"facebook"}) {
         }, `${name} 登录配置已保存`)
       }}>
         <div className="flex items-center justify-between gap-4"><Label htmlFor={`${provider}-enabled`}>启用 {name} 登录</Label><Switch id={`${provider}-enabled`} checked={config.enabled} disabled={busy} onCheckedChange={enabled => update({ enabled })} /></div>
-        <div className="space-y-2"><Label htmlFor={`${provider}-client`}>{provider === "facebook" ? "App ID" : "Client ID"}</Label><Input id={`${provider}-client`} name="client_id" dir="ltr" autoComplete="off" value={config.client_id} maxLength={512} disabled={busy} onChange={event => update({ client_id: event.target.value })} placeholder={provider === "google" ? "…apps.googleusercontent.com" : "Facebook App ID"} />{provider === "google" && <p className="text-xs text-muted-foreground">填写 Web 应用的完整 OAuth 客户端 ID，以 .apps.googleusercontent.com 结尾。</p>}</div>
+        <div className="space-y-2"><Label htmlFor={`${provider}-client`}>{provider === "facebook" ? "App ID" : "Client ID"}</Label><Input id={`${provider}-client`} name="client_id" dir="ltr" autoComplete="off" value={config.client_id} maxLength={512} disabled={busy} onChange={event => update({ client_id: event.target.value })} placeholder={provider === "google" ? "…apps.googleusercontent.com" : provider === "facebook" ? "Facebook App ID" : "Microsoft 应用程序（客户端）ID"} />{provider === "google" && <p className="text-xs text-muted-foreground">填写 Web 应用的完整 OAuth 客户端 ID，以 .apps.googleusercontent.com 结尾。</p>}</div>
         <div className="space-y-2"><Label htmlFor={`${provider}-secret`}>{provider === "facebook" ? "App Secret" : "Client Secret"}</Label><Input id={`${provider}-secret`} name="secret" type="password" dir="ltr" autoComplete="new-password" value={secret} maxLength={4096} disabled={busy || !data.key_configured} onChange={event => { setSecret(event.target.value); setDirty(true) }} placeholder={config.secret_set ? "已配置，留空保留现有密钥" : `填写 ${name} 客户端密钥`} /><p className="text-xs text-muted-foreground">密钥加密保存，不会回传到浏览器或主题。{config.secret_set && !data.secret_readable ? "现有密钥无法读取，请恢复加密密钥。" : ""}</p></div>
         <div className="flex items-center justify-between gap-4"><div><Label htmlFor={`${provider}-register`}>允许首次登录自动注册</Label><p className="mt-1 text-xs text-muted-foreground">关闭后仅允许已绑定的会员登录。相同 {name} 身份在不同站点使用同一会员账号，会员组仍按站点分配。</p></div><Switch id={`${provider}-register`} checked={config.auto_register} disabled={busy} onCheckedChange={auto_register => update({ auto_register })} /></div>
+        {provider === "microsoft" && <p className="text-xs text-muted-foreground">支持个人 Microsoft 账号和工作／学校账号。使用租户与应用范围内的身份标识，不使用邮箱匹配或合并会员。Client Secret 请填写密钥“值”，不是密钥 ID；密钥到期前需在此更新。</p>}
         {provider === "facebook" && <p className="text-xs text-muted-foreground">Facebook 新账号以应用内用户 ID 建立身份，不使用 Facebook 返回的邮箱匹配或合并会员。已有会员请登录后在账号安全中绑定。</p>}
         <p className="text-xs text-muted-foreground">关闭会在全部站点拒绝新的授权和正在进行的登录，已有会员会话继续有效。更新配置会使进行中的授权失效。</p>
         <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy}>{busy ? "处理中…" : "保存配置"}</Button><Button type="button" variant="outline" disabled={busy || dirty || !data.key_configured || !config.secret_set || !canTest} onClick={() => void run(async () => { const result = await testMemberLogin(provider); window.location.assign(result.url) }, `正在前往 ${name} 授权测试`)}>测试当前域名</Button></div>
@@ -102,6 +107,6 @@ function ProviderSettings({provider}:{provider:"google"|"facebook"}) {
         <Button variant="outline" disabled={busy || !data.key_can_initialize || !importKey} onClick={() => void run(async () => { await initializeMemberLoginKey("import", importKey); setImportKey(""); window.dispatchEvent(new Event("member-login-key-updated")) }, "登录加密密钥已恢复")}>导入并验证密钥</Button>
       </>}
     </Card>
-    <section className="space-y-2 text-sm text-muted-foreground"><h3 className="font-medium text-foreground">{name} 控制台准备</h3><p>创建应用并配置网页登录、隐私政策及站点域名；Facebook 还需按控制台要求配置数据删除方式、访问权限及上线状态。仅请求登录所需的基本身份权限。测试成功不代表 {name} 已批准生产发布。</p><a className="underline" href={provider === "google" ? "https://console.cloud.google.com/auth/overview" : "https://developers.facebook.com/apps/"} target="_blank" rel="noopener noreferrer">打开 {name} 开发者控制台</a></section>
+    <section className="space-y-2 text-sm text-muted-foreground"><h3 className="font-medium text-foreground">{name} 控制台准备</h3><p>创建应用并配置网页登录、隐私政策及站点域名；Facebook 还需按控制台要求配置数据删除方式、访问权限及上线状态。仅请求登录所需的基本身份权限。测试成功不代表 {name} 已批准生产发布。</p>{provider === "microsoft" && <p>在 Microsoft Entra 应用注册中选择“任何组织目录中的账号和个人 Microsoft 账号”，添加 Web 平台及下列回调地址。程序使用授权码与 PKCE，仅请求 openid、profile，不需要 User.Read 或离线访问；组织账号仍可能受其管理员的同意策略限制。</p>}<a className="underline" href={provider === "google" ? "https://console.cloud.google.com/auth/overview" : provider === "facebook" ? "https://developers.facebook.com/apps/" : "https://entra.microsoft.com/"} target="_blank" rel="noopener noreferrer">打开 {name} 开发者控制台</a></section>
   </ScrollArea>
 }

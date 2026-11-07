@@ -121,7 +121,7 @@ func TestLinkedProviderPasswordRecovery(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = database.Exec(`UPDATE gocms_user SET password_hash='' WHERE id=?;INSERT INTO gocms_platform_oauth_config(provider,enabled,auto_register,client_id,revision) VALUES('google',1,1,'test.apps.googleusercontent.com','g1'),('facebook',1,1,'123456','f1');INSERT INTO gocms_platform_identity(user_id,provider,issuer,subject) VALUES(?,'google','https://accounts.google.com','linked-sub'),(?,'facebook','https://www.facebook.com/123456','linked-sub')`, p.ID, p.ID, p.ID); e != nil {
+	if _, e = database.Exec(`UPDATE gocms_user SET password_hash='' WHERE id=?;INSERT INTO gocms_platform_oauth_config(provider,enabled,auto_register,client_id,revision) VALUES('google',1,1,'test.apps.googleusercontent.com','g1'),('facebook',1,1,'123456','f1'),('microsoft',1,1,'ms-client','m1');INSERT INTO gocms_platform_identity(user_id,provider,issuer,subject) VALUES(?,'google','https://accounts.google.com','linked-sub'),(?,'facebook','https://www.facebook.com/123456','linked-sub'),(?,'microsoft','https://login.microsoftonline.com/ms-client','linked-sub')`, p.ID, p.ID, p.ID, p.ID); e != nil {
 		t.Fatal(e)
 	}
 	if _, e = svc.IssueExternalPasswordReset(ctx, 1, "google", "g1", "unbound"); e == nil {
@@ -132,11 +132,14 @@ func TestLinkedProviderPasswordRecovery(t *testing.T) {
 	if count != 1 {
 		t.Fatal("recovery registered a member")
 	}
-	for _, provider := range []string{"google", "facebook"} {
+	for _, provider := range []string{"google", "facebook", "microsoft"} {
 		t.Run(provider, func(t *testing.T) {
 			rev := "g1"
 			if provider == "facebook" {
 				rev = "f1"
+			}
+			if provider == "microsoft" {
+				rev = "m1"
 			}
 			issue := func() string {
 				t.Helper()

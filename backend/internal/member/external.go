@@ -20,7 +20,7 @@ func (s Service) ExternalLogin(ctx context.Context, site int64, revision, subjec
 	return s.ExternalProviderLogin(ctx, site, "google", revision, subject, email, name, verified, bindUser, bindingSession, ip, agent, current)
 }
 func (s Service) ExternalProviderLogin(ctx context.Context, site int64, provider, revision, subject, email, name string, verified bool, bindUser int64, bindingSession, ip, agent, current string) (Profile, string, error) {
-	if provider != "google" && provider != "facebook" {
+	if !memberoauth.Supported(provider) {
 		return Profile{}, "", ErrInvalid
 	}
 	issuer := memberoauth.Config{Provider: provider}.Issuer()
@@ -41,7 +41,7 @@ func (s Service) ExternalProviderLogin(ctx context.Context, site int64, provider
 	if err = tx.QueryRowContext(ctx, `SELECT auto_register,client_id FROM gocms_platform_oauth_config c JOIN gocms_site s ON s.id=? WHERE c.provider=? AND c.enabled=1 AND c.revision=? AND s.status='active'`, site, provider, revision).Scan(&auto, &clientID); err != nil {
 		return Profile{}, "", ErrUnauthorized
 	}
-	if provider == "facebook" {
+	if provider == "facebook" || provider == "microsoft" {
 		issuer += "/" + clientID
 	}
 	id, err := resolveProviderIdentity(ctx, tx, provider, issuer, subject)
@@ -74,9 +74,9 @@ func (s Service) ExternalProviderLogin(ctx context.Context, site int64, provider
 		if !auto {
 			return Profile{}, "", ErrUnauthorized
 		}
-		if provider == "facebook" {
-			// Use the verified app-scoped subject for identity. Facebook does not
-			// attest email ownership, so leave contact email empty for new accounts.
+		if provider == "facebook" || provider == "microsoft" {
+			// Use the verified app-scoped subject for identity. These providers
+			// do not supply an email ownership guarantee suitable for account linking.
 			email = ""
 		} else {
 			email = strings.ToLower(strings.TrimSpace(email))

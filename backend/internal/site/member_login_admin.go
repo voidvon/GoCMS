@@ -78,7 +78,7 @@ func (s *Server) validateLoginKey(ctx context.Context, v *memberoauth.Vault) err
 	if s.database == nil {
 		return nil
 	}
-	rows, err := s.database.QueryContext(ctx, `SELECT site_id,secret_ciphertext FROM gocms_member_oauth_config WHERE secret_ciphertext<>'' UNION ALL SELECT CASE WHEN provider='facebook' THEN -1 ELSE secret_scope END,secret_ciphertext FROM gocms_platform_oauth_config WHERE secret_ciphertext<>'' UNION ALL SELECT -2,secret_ciphertext FROM gocms_platform_mail_config WHERE secret_ciphertext<>''`)
+	rows, err := s.database.QueryContext(ctx, `SELECT site_id,secret_ciphertext FROM gocms_member_oauth_config WHERE secret_ciphertext<>'' UNION ALL SELECT CASE WHEN provider='facebook' THEN -1 WHEN provider='microsoft' THEN -3 ELSE secret_scope END,secret_ciphertext FROM gocms_platform_oauth_config WHERE secret_ciphertext<>'' UNION ALL SELECT -2,secret_ciphertext FROM gocms_platform_mail_config WHERE secret_ciphertext<>''`)
 	if err != nil {
 		return err
 	}
@@ -107,7 +107,7 @@ func loginAdminError(w http.ResponseWriter, status int, message string) {
 }
 func (s *Server) adminMemberLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if provider := r.URL.Query().Get("provider"); provider != "" && provider != "google" && provider != "facebook" {
+	if provider := r.URL.Query().Get("provider"); provider != "" && !memberoauth.Supported(provider) {
 		loginAdminError(w, 400, "不支持的登录提供商")
 		return
 	}

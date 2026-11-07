@@ -59,7 +59,7 @@ func (s Service) IssuePasswordReset(ctx context.Context, site int64, email strin
 // External recovery accepts only an existing verified binding. It cannot register,
 // merge by email, join another site or create an authenticated member session.
 func (s Service) IssueExternalPasswordReset(ctx context.Context, site int64, provider, revision, subject string) (string, error) {
-	if (provider != "google" && provider != "facebook") || subject == "" || len(subject) > 255 {
+	if (!memberoauth.Supported(provider)) || subject == "" || len(subject) > 255 {
 		return "", ErrUnauthorized
 	}
 	tx, e := s.DB.BeginTx(ctx, nil)
@@ -76,7 +76,7 @@ func (s Service) IssueExternalPasswordReset(ctx context.Context, site int64, pro
 		return "", ErrUnauthorized
 	}
 	issuer := memberoauth.Config{Provider: provider}.Issuer()
-	if provider == "facebook" {
+	if provider == "facebook" || provider == "microsoft" {
 		issuer += "/" + clientID
 	}
 	id, e := resolveProviderIdentity(ctx, tx, provider, issuer, subject)
@@ -95,7 +95,7 @@ func (s Service) IssueExternalPasswordReset(ctx context.Context, site int64, pro
 	return token, tx.Commit()
 }
 
-const resetProofSQL = ` AND ((r.channel='email' AND EXISTS(SELECT 1 FROM gocms_platform_mail_config WHERE id=1 AND json_extract(config,'$.enabled')=1 AND revision=r.revision)) OR (r.channel IN ('google','facebook') AND EXISTS(SELECT 1 FROM gocms_platform_oauth_config c JOIN gocms_platform_identity i ON i.provider=c.provider WHERE c.provider=r.channel AND c.enabled=1 AND c.revision=r.revision AND i.user_id=r.user_id AND i.issuer=r.issuer AND i.subject=r.subject)))`
+const resetProofSQL = ` AND ((r.channel='email' AND EXISTS(SELECT 1 FROM gocms_platform_mail_config WHERE id=1 AND json_extract(config,'$.enabled')=1 AND revision=r.revision)) OR (r.channel IN ('google','facebook','microsoft') AND EXISTS(SELECT 1 FROM gocms_platform_oauth_config c JOIN gocms_platform_identity i ON i.provider=c.provider WHERE c.provider=r.channel AND c.enabled=1 AND c.revision=r.revision AND i.user_id=r.user_id AND i.issuer=r.issuer AND i.subject=r.subject)))`
 
 func (s Service) ResetPassword(ctx context.Context, site int64, token, next string) error {
 	if len(token) != 43 {

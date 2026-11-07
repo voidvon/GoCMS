@@ -1,3 +1,4 @@
+import { loginProviders } from "@/lib/api"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Card } from "@/components/ui/card"
 import { localError } from "@/lib/errors"
@@ -63,7 +64,7 @@ export function AuthPanel({ mode, next }: { mode: "login" | "register"; next: st
       </TabsList>
       <TabsContent value={mode}>
     <div className="mb-7"><h1 className="text-2xl sm:text-3xl">{registering ? t("auth.registerTitle") : t("auth.loginTitle")}</h1><p className="muted mt-3">{registering ? t("auth.registerDescription") : t("auth.loginDescription")}</p></div>
-    {(providers.data?.google === true || providers.data?.facebook === true) && <div className="mb-6 space-y-5">{providers.data?.google === true && <ExternalLoginButton next={next} disabled={busy} />}{providers.data?.facebook === true && <ExternalLoginButton provider="facebook" next={next} disabled={busy} />}<p className="text-center text-xs text-muted-foreground">{t("google.or")}</p></div>}
+    {(loginProviders.some(provider => providers.data?.[provider] === true)) && <div className="mb-6 space-y-5">{loginProviders.map(provider => providers.data?.[provider] === true && <ExternalLoginButton key={provider} provider={provider} next={next} disabled={busy} />)}<p className="text-center text-xs text-muted-foreground">{t("google.or")}</p></div>}
     <form onSubmit={submit} className="space-y-5">
       <div className="field">
         <Label htmlFor="member-username">{registering ? t("auth.username") : t("auth.identifier")}</Label>

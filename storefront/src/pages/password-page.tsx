@@ -1,3 +1,4 @@
+import { loginProviders } from "@/lib/api"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card } from "@/components/ui/card"
 import { useState, type FormEvent } from "react"
@@ -34,7 +35,7 @@ export function ForgotPasswordPage() {
       <Button type="submit" className="w-full" disabled={busy}>{t(busy ? "common.processing" : "password.send")}</Button>
     </form> : <p className="muted">{t("password.emailUnavailable")}</p>}
     {options.data?.data.support_email && <a className="text-link break-all" href={`mailto:${encodeURIComponent(options.data.data.support_email)}`}>{t("password.contact", { email: options.data.data.support_email })}</a>}
-    {providers.error ? <Failure message={providers.error} retry={providers.reload} /> : (providers.data?.google || providers.data?.facebook) && <div className="space-y-4 border-t pt-5"><p className="muted">{t("password.verifyDescription")}</p>{(["google", "facebook"] as const).map(provider => providers.data?.[provider] && <ExternalLoginButton key={provider} provider={provider} recover next="/shop/account" disabled={busy} />)}</div>}
+    {providers.error ? <Failure message={providers.error} retry={providers.reload} /> : (loginProviders.some(provider => providers.data?.[provider])) && <div className="space-y-4 border-t pt-5"><p className="muted">{t("password.verifyDescription")}</p>{loginProviders.map(provider => providers.data?.[provider] && <ExternalLoginButton key={provider} provider={provider} recover next="/shop/account" disabled={busy} />)}</div>}
     <Link href="/shop/login" className="text-link">{t("password.backLogin")}</Link>
   </Card></div>
 }

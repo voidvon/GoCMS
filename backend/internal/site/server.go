@@ -158,7 +158,7 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.publicCommerce(response, request)
 		return
 	}
-	if (strings.HasPrefix(request.URL.Path, "/api/auth/google/") || strings.HasPrefix(request.URL.Path, "/api/auth/facebook/")) || request.URL.Path == "/api/auth/providers" {
+	if (strings.HasPrefix(request.URL.Path, "/api/auth/google/") || strings.HasPrefix(request.URL.Path, "/api/auth/facebook/") || strings.HasPrefix(request.URL.Path, "/api/auth/microsoft/")) || request.URL.Path == "/api/auth/providers" {
 		s.googleAuth(response, request)
 		return
 	}

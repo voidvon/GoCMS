@@ -17,8 +17,10 @@ import (
 )
 
 func loginProvider(r *http.Request) string {
-	if strings.HasPrefix(r.URL.Path, "/api/auth/facebook/") || (strings.HasPrefix(r.URL.Path, "/api/admin/member-login") && r.URL.Query().Get("provider") == "facebook") {
-		return "facebook"
+	for _, provider := range []string{"facebook", "microsoft"} {
+		if strings.HasPrefix(r.URL.Path, "/api/auth/"+provider+"/") || (strings.HasPrefix(r.URL.Path, "/api/admin/member-login") && r.URL.Query().Get("provider") == provider) {
+			return provider
+		}
 	}
 	return "google"
 }
@@ -27,8 +29,8 @@ func (s *Server) providerSite(r *http.Request) (memberoauth.Config, error) {
 	if e != nil {
 		return c, e
 	}
-	if loginProvider(r) == "facebook" {
-		c, e = memberoauth.LoadProvider(r.Context(), s.database, c.SiteID, "facebook")
+	if loginProvider(r) != "google" {
+		c, e = memberoauth.LoadProvider(r.Context(), s.database, c.SiteID, loginProvider(r))
 		c.PublicURL = requestScheme(r) + "://" + strings.ToLower(requestHost(r))
 	}
 	return c, e
@@ -131,7 +133,7 @@ func (s *Server) googleAuth(w http.ResponseWriter, r *http.Request) {
 			s.oauthMu.RUnlock()
 			enabled = e == nil
 		}
-		writeJSON(w, 200, map[string]any{"google": enabled, "facebook": s.facebookAvailable(r)})
+		writeJSON(w, 200, map[string]any{"google": enabled, "facebook": s.facebookAvailable(r), "microsoft": s.microsoftAvailable(r)})
 		return
 	}
 	if r.URL.Path != "/api/auth/"+loginProvider(r)+"/start" {
@@ -233,6 +235,9 @@ func (s *Server) startGoogle(w http.ResponseWriter, r *http.Request, test bool) 
 	}
 	http.SetCookie(w, &http.Cookie{Name: "gocms_oauth_" + state[:16], Value: browser, Path: "/api/auth/" + loginProvider(r) + "/callback", HttpOnly: true, Secure: requestScheme(r) == "https", SameSite: http.SameSiteLaxMode, MaxAge: 600})
 	config := googleOAuth(c, "")
+	if c.ProviderName() == "microsoft" {
+		config = microsoftOAuth(c, "")
+	}
 	target := config.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("prompt", "select_account"))
 	if c.ProviderName() == "facebook" {
 		fb := facebookOAuth(c, "")
@@ -331,6 +336,8 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 	if c.ProviderName() == "facebook" {
 		claims, err = verifyFacebook(r.Context(), c, secret, code)
 		claims.Nonce = nonce
+	} else if c.ProviderName() == "microsoft" {
+		claims, err = verifyMicrosoft(r.Context(), c, secret, code, verifier)
 	} else {
 		claims, err = verify(r.Context(), c, secret, code, verifier)
 	}
@@ -414,16 +421,18 @@ func (s *Server) memberGoogleIdentity(w http.ResponseWriter, r *http.Request, u 
 }
 
 func loginIdentityProvider(r *http.Request) string {
-	if strings.HasSuffix(r.URL.Path, "/facebook") {
-		return "facebook"
+	for _, provider := range []string{"facebook", "microsoft"} {
+		if strings.HasSuffix(r.URL.Path, "/"+provider) {
+			return provider
+		}
 	}
 	return "google"
 }
 
 func adminLoginTestURL(r *http.Request, result string) string {
 	target := "/admin/member-login?oauth_test=" + result
-	if loginProvider(r) == "facebook" {
-		target += "&provider=facebook"
+	if loginProvider(r) != "google" {
+		target += "&provider=" + loginProvider(r)
 	}
 	return target
 }

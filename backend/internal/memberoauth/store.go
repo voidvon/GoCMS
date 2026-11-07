@@ -95,7 +95,14 @@ func (c Config) ProviderName() string {
 	}
 	return c.Provider
 }
+func Supported(provider string) bool {
+	return provider == "google" || provider == "facebook" || provider == "microsoft"
+}
+
 func (c Config) Issuer() string {
+	if c.ProviderName() == "microsoft" {
+		return "https://login.microsoftonline.com"
+	}
 	if c.ProviderName() == "facebook" {
 		return "https://www.facebook.com"
 	}
@@ -106,6 +113,9 @@ func SecretScope(c Config) int64 {
 	// and the original Google platform scope remain nonnegative.
 	if c.ProviderName() == "facebook" {
 		return -1
+	}
+	if c.ProviderName() == "microsoft" {
+		return -3
 	}
 	return c.SecretScope
 }
