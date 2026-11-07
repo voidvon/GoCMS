@@ -67,7 +67,7 @@ function ProviderSettings({provider}:{provider:"google"|"facebook"}) {
         <div className="flex items-center justify-between gap-4"><div><Label htmlFor={`${provider}-register`}>允许首次登录自动注册</Label><p className="mt-1 text-xs text-muted-foreground">关闭后仅允许已绑定的会员登录。相同 {name} 身份在不同站点使用同一会员账号，会员组仍按站点分配。</p></div><Switch id={`${provider}-register`} checked={config.auto_register} disabled={busy} onCheckedChange={auto_register => update({ auto_register })} /></div>
         {provider === "facebook" && <p className="text-xs text-muted-foreground">Facebook 新账号以应用内用户 ID 建立身份，不使用 Facebook 返回的邮箱匹配或合并会员。已有会员请登录后在账号安全中绑定。</p>}
         <p className="text-xs text-muted-foreground">关闭会在全部站点拒绝新的授权和正在进行的登录，已有会员会话继续有效。更新配置会使进行中的授权失效。</p>
-        <div className="flex flex-wrap gap-2"><Button disabled={busy}>{busy ? "处理中…" : "保存配置"}</Button><Button type="button" variant="outline" disabled={busy || dirty || !data.key_configured || !config.secret_set || !canTest} onClick={() => void run(async () => { const result = await testMemberLogin(provider); window.location.assign(result.url) }, `正在前往 ${name} 授权测试`)}>测试当前域名</Button></div>
+        <div className="flex flex-wrap gap-2"><Button type="submit" disabled={busy}>{busy ? "处理中…" : "保存配置"}</Button><Button type="button" variant="outline" disabled={busy || dirty || !data.key_configured || !config.secret_set || !canTest} onClick={() => void run(async () => { const result = await testMemberLogin(provider); window.location.assign(result.url) }, `正在前往 ${name} 授权测试`)}>测试当前域名</Button></div>
       {!canTest && <p className="text-xs text-muted-foreground">请通过下方已列出的站点公开地址打开后台，再测试 {name} 授权。</p>}
       </form>
     </section>
