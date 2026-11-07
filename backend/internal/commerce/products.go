@@ -18,11 +18,12 @@ type Specification struct {
 }
 
 type Variant struct {
-	ID             int64           `json:"id"`
-	SKU            string          `json:"sku"`
-	Specifications []Specification `json:"specifications"`
-	Amount         int64           `json:"amount"`
-	Enabled        bool            `json:"enabled"`
+	FixedPrices    map[string]int64 `json:"fixed_prices,omitempty"`
+	ID             int64            `json:"id"`
+	SKU            string           `json:"sku"`
+	Specifications []Specification  `json:"specifications"`
+	Amount         int64            `json:"amount"`
+	Enabled        bool             `json:"enabled"`
 }
 
 type Product struct {
@@ -32,7 +33,7 @@ type Product struct {
 	Variants []Variant `json:"variants"`
 }
 
-const publicOfferColumns = `f.id,c.title,p.kind,f.amount,p.currency,c.cover_image,c.id,f.enabled,f.sku,f.specifications_json`
+const publicOfferColumns = `f.id,c.title,p.kind,f.amount,p.currency,c.cover_image,c.id,f.enabled,f.sku,f.specifications_json,f.fixed_prices_json`
 const availableOfferFrom = ` FROM gocms_commerce_offer f
  JOIN gocms_commerce_product p ON p.content_id=f.content_id AND p.site_id=f.site_id
  JOIN gocms_content c ON c.id=p.content_id AND c.site_id=p.site_id
@@ -41,36 +42,42 @@ const availableOfferWhere = `f.site_id=? AND f.archived=0 AND f.enabled=1 AND p.
 
 func scanOffer(row scanner) (Offer, error) {
 	var o Offer
-	var specifications string
-	err := row.Scan(&o.ID, &o.Name, &o.Kind, &o.Amount, &o.Currency, &o.ImageURL, &o.ContentID, &o.Enabled, &o.SKU, &specifications)
+	var specifications, fixed string
+	err := row.Scan(&o.ID, &o.Name, &o.Kind, &o.Amount, &o.Currency, &o.ImageURL, &o.ContentID, &o.Enabled, &o.SKU, &specifications, &fixed)
 	if err != nil {
 		return o, err
 	}
-	err = json.Unmarshal([]byte(specifications), &o.Specifications)
+	if err = json.Unmarshal([]byte(specifications), &o.Specifications); err != nil {
+		return o, err
+	}
+	err = json.Unmarshal([]byte(fixed), &o.FixedPrices)
 	return o, err
 }
 
 // Product loads the content's trading configuration. Existing content-linked
 // offers can be edited here without replacing IDs used by historical orders.
 func (s Service) Product(ctx context.Context, site, content int64) (*Product, error) {
-	p := Product{Kind: "physical", Currency: "USD", Variants: []Variant{}}
+	p := Product{Kind: "physical", Variants: []Variant{}}
 	err := s.DB.QueryRowContext(ctx, `SELECT enabled,kind,currency FROM gocms_commerce_product WHERE site_id=? AND content_id=?`, site, content).Scan(&p.Enabled, &p.Kind, &p.Currency)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	configured := err == nil
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,sku,specifications_json,amount,enabled,kind,currency FROM gocms_commerce_offer WHERE site_id=? AND content_id=? AND archived=0 ORDER BY id`, site, content)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,sku,specifications_json,amount,enabled,kind,currency,fixed_prices_json FROM gocms_commerce_offer WHERE site_id=? AND content_id=? AND archived=0 ORDER BY id`, site, content)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var v Variant
-		var raw, kind, currency string
-		if err := rows.Scan(&v.ID, &v.SKU, &raw, &v.Amount, &v.Enabled, &kind, &currency); err != nil {
+		var raw, kind, currency, fixed string
+		if err := rows.Scan(&v.ID, &v.SKU, &raw, &v.Amount, &v.Enabled, &kind, &currency, &fixed); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(raw), &v.Specifications); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(fixed), &v.FixedPrices); err != nil {
 			return nil, err
 		}
 		if !configured && len(p.Variants) == 0 {
@@ -125,6 +132,14 @@ func (s Service) SaveProduct(ctx context.Context, tx *sql.Tx, site, content int6
 	enabled := false
 	for i := range p.Variants {
 		v := &p.Variants[i]
+		if len(v.FixedPrices) > len(SupportedCurrencies()) {
+			return ErrInvalid
+		}
+		for currency, amount := range v.FixedPrices {
+			if _, err := payment.FormatAmount(amount, currency); err != nil || amount <= 0 {
+				return fmt.Errorf("固定币种售价无效: %w", ErrInvalid)
+			}
+		}
 		if v.ID < 0 || (v.ID > 0 && ids[v.ID]) {
 			return ErrInvalid
 		}
@@ -193,12 +208,17 @@ func (s Service) SaveProduct(ctx context.Context, tx *sql.Tx, site, content int6
 	}
 	for _, v := range p.Variants {
 		raw, _ := json.Marshal(v.Specifications)
+		fixed := "{}"
+		if len(v.FixedPrices) > 0 {
+			encoded, _ := json.Marshal(v.FixedPrices)
+			fixed = string(encoded)
+		}
 		if v.ID == 0 {
-			if _, err := tx.ExecContext(ctx, `INSERT INTO gocms_commerce_offer(site_id,content_id,name,kind,amount,currency,image_url,enabled,sku,specifications_json,archived) VALUES(?,?,?,?,?,?,?,?,?,?,0)`, site, content, title, p.Kind, v.Amount, p.Currency, image, v.Enabled, v.SKU, string(raw)); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO gocms_commerce_offer(site_id,content_id,name,kind,amount,currency,image_url,enabled,sku,specifications_json,archived,fixed_prices_json) VALUES(?,?,?,?,?,?,?,?,?,?,0,?)`, site, content, title, p.Kind, v.Amount, p.Currency, image, v.Enabled, v.SKU, string(raw), fixed); err != nil {
 				return err
 			}
 		} else {
-			if _, err := tx.ExecContext(ctx, `UPDATE gocms_commerce_offer SET name=?,kind=?,amount=?,currency=?,image_url=?,enabled=?,sku=?,specifications_json=?,archived=0 WHERE id=? AND site_id=? AND content_id=?`, title, p.Kind, v.Amount, p.Currency, image, v.Enabled, v.SKU, string(raw), v.ID, site, content); err != nil {
+			if _, err := tx.ExecContext(ctx, `UPDATE gocms_commerce_offer SET name=?,kind=?,amount=?,currency=?,image_url=?,enabled=?,sku=?,specifications_json=?,fixed_prices_json=?,archived=0 WHERE id=? AND site_id=? AND content_id=?`, title, p.Kind, v.Amount, p.Currency, image, v.Enabled, v.SKU, string(raw), fixed, v.ID, site, content); err != nil {
 				return err
 			}
 		}

@@ -26,7 +26,7 @@ def allowed(path, method):
         return method == 'POST'
     if decoded == '/api/commerce/orders' or decoded.startswith('/api/commerce/orders/'):
         return method in {'GET', 'POST'}
-    if decoded in {'/api/commerce/storefront', '/api/commerce/channels', '/api/commerce/variants', '/api/geography/countries', '/api/geography/regions', '/api/geography/cities'}:
+    if decoded in {'/api/commerce/storefront', '/api/commerce/pricing', '/api/commerce/channels', '/api/commerce/variants', '/api/geography/countries', '/api/geography/regions', '/api/geography/cities'}:
         return method in {'GET', 'HEAD'}
     if method not in {'GET', 'HEAD'}:
         return False

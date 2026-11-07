@@ -271,5 +271,12 @@
   "errors.microsoft_cancelled": "تم إلغاء تفويض Microsoft.",
   "errors.microsoft_unavailable": "تسجيل الدخول باستخدام Microsoft غير متاح أو تغيرت إعداداته. حاول مجددًا.",
   "errors.microsoft_conflict": "هوية Microsoft هذه مرتبطة بحساب آخر. سجل الدخول إلى الحساب الأصلي لإدارة الربط.",
-  "microsoft.sharedNotice": "ربط Microsoft مشترك بين جميع مواقع المنصة. إلغاء الربط يسري على جميع المواقع."
+  "microsoft.sharedNotice": "ربط Microsoft مشترك بين جميع مواقع المنصة. إلغاء الربط يسري على جميع المواقع.",
+  "currency.label": "العملة",
+  "currency.auto": "تلقائي · {{currency}}",
+  "currency.approximate": "حوالي {{amount}}",
+  "currency.actual": "المبلغ المطلوب {{amount}}",
+  "currency.unavailable": "لا يتوفر سعر حالي بالعملة المختارة. يُطبق السعر بالعملة الأصلية.",
+  "currency.chargeNote": "سيتم تحصيل الدفع بعملة {{currency}}.",
+  "currency.storage": "تم تغيير العملة، لكن المتصفح لم يتمكن من حفظ التفضيل."
 }

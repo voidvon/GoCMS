@@ -31,16 +31,24 @@ type Service struct {
 }
 
 type Offer struct {
-	ID             int64           `json:"id"`
-	Name           string          `json:"name"`
-	Kind           string          `json:"kind"`
-	Amount         int64           `json:"amount"`
-	Currency       string          `json:"currency"`
-	ImageURL       string          `json:"image_url"`
-	ContentID      *int64          `json:"content_id"`
-	Enabled        bool            `json:"enabled"`
-	SKU            string          `json:"sku"`
-	Specifications []Specification `json:"specifications"`
+	FixedPrices        map[string]int64 `json:"-"`
+	SourceAmount       int64            `json:"source_amount,omitempty"`
+	SourceCurrency     string           `json:"source_currency,omitempty"`
+	PricingMethod      string           `json:"pricing_method,omitempty"`
+	PricingRevision    int64            `json:"pricing_revision,omitempty"`
+	DisplayAmount      int64            `json:"display_amount,omitempty"`
+	DisplayCurrency    string           `json:"display_currency,omitempty"`
+	PricingUnavailable bool             `json:"pricing_unavailable,omitempty"`
+	ID                 int64            `json:"id"`
+	Name               string           `json:"name"`
+	Kind               string           `json:"kind"`
+	Amount             int64            `json:"amount"`
+	Currency           string           `json:"currency"`
+	ImageURL           string           `json:"image_url"`
+	ContentID          *int64           `json:"content_id"`
+	Enabled            bool             `json:"enabled"`
+	SKU                string           `json:"sku"`
+	Specifications     []Specification  `json:"specifications"`
 }
 
 type Account struct {
@@ -143,7 +151,7 @@ func (s Service) SaveOffer(ctx context.Context, site int64, o Offer) (Offer, err
 // Offers returns purchasable content variants for the public catalog. Legacy
 // standalone offers remain readable by administrators for historical migration.
 func (s Service) Offers(ctx context.Context, site int64, public bool, page int, filters ...int64) ([]Offer, error) {
-	query := `SELECT f.id,f.name,f.kind,f.amount,f.currency,f.image_url,f.content_id,f.enabled,f.sku,f.specifications_json FROM gocms_commerce_offer f WHERE f.site_id=? AND f.archived=0`
+	query := `SELECT f.id,f.name,f.kind,f.amount,f.currency,f.image_url,f.content_id,f.enabled,f.sku,f.specifications_json,f.fixed_prices_json FROM gocms_commerce_offer f WHERE f.site_id=? AND f.archived=0`
 	args := []any{site}
 	if public {
 		query = `SELECT ` + publicOfferColumns + availableOfferFrom + ` WHERE ` + availableOfferWhere
@@ -295,17 +303,18 @@ type OrderLine struct {
 }
 
 type OrderInput struct {
-	Language       string          `json:"language,omitempty"`
-	Items          []CartItemInput `json:"items,omitempty"`
-	ExpectedAmount *int64          `json:"expected_amount,omitempty"`
-	Currency       string          `json:"currency,omitempty"`
-	OfferID        int64           `json:"offer_id,omitempty"`
-	VariantID      int64           `json:"variant_id,omitempty"`
-	ContentID      int64           `json:"content_id,omitempty"`
-	Quantity       int64           `json:"quantity"`
-	Email          string          `json:"email"`
-	CustomerName   string          `json:"customer_name"`
-	Address        Address         `json:"address"`
+	PricingRevision int64           `json:"pricing_revision,omitempty"`
+	Language        string          `json:"language,omitempty"`
+	Items           []CartItemInput `json:"items,omitempty"`
+	ExpectedAmount  *int64          `json:"expected_amount,omitempty"`
+	Currency        string          `json:"currency,omitempty"`
+	OfferID         int64           `json:"offer_id,omitempty"`
+	VariantID       int64           `json:"variant_id,omitempty"`
+	ContentID       int64           `json:"content_id,omitempty"`
+	Quantity        int64           `json:"quantity"`
+	Email           string          `json:"email"`
+	CustomerName    string          `json:"customer_name"`
+	Address         Address         `json:"address"`
 }
 
 type Order struct {
@@ -362,6 +371,15 @@ func (s Service) CreateOrder(ctx context.Context, site, buyer int64, key string,
 		return Order{}, err
 	}
 
+	pricing, err := pricingSettings(ctx, tx, site)
+	if err != nil {
+		return Order{}, err
+	}
+	if in.PricingRevision != 0 && in.PricingRevision != pricing.Revision {
+		return Order{}, ErrPriceChanged
+	}
+	pricingLines := []Offer{}
+
 	inputs := in.Items
 	if len(inputs) == 0 {
 		variantID := in.VariantID
@@ -405,6 +423,13 @@ func (s Service) CreateOrder(ctx context.Context, site, buyer int64, key string,
 		if o.Kind == "physical" && (!validText(in.Address.Street, 256) || !validText(in.Address.Postcode, 16) || !validText(in.Address.City, 50) || len(in.Address.Country) != 2 || len(in.Address.State) > 128) {
 			return Order{}, ErrInvalid
 		}
+		if in.Currency != "" && pricing.Enabled {
+			o, err = quoteOffer(ctx, tx, site, pricing, o, in.Currency)
+			if err != nil {
+				return Order{}, err
+			}
+		}
+		pricingLines = append(pricingLines, o)
 		if currency != "" && currency != o.Currency {
 			return Order{}, ErrInvalid
 		}
@@ -440,6 +465,19 @@ func (s Service) CreateOrder(ctx context.Context, site, buyer int64, key string,
 		if _, err := tx.ExecContext(ctx, `INSERT INTO gocms_commerce_order_item(order_id,line_number,offer_id,name,kind,unit_price,quantity,image_url,content_id,sku,specifications_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, index+1, line.ID, line.Name, line.Kind, line.Amount, line.Quantity, line.ImageURL, line.ContentID, line.SKU, string(specifications)); err != nil {
 			return Order{}, err
 		}
+	}
+	snapshot, err := json.Marshal(struct {
+		BaseCurrency   string         `json:"base_currency"`
+		Revision       int64          `json:"revision"`
+		RatesUpdatedAt string         `json:"rates_updated_at"`
+		Rates          []CurrencyRule `json:"rates"`
+		Lines          []Offer        `json:"lines"`
+	}{pricing.BaseCurrency, pricing.Revision, pricing.RatesUpdatedAt, pricing.Currencies, pricingLines})
+	if err != nil {
+		return Order{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE gocms_commerce_order SET pricing_json=? WHERE id=?`, string(snapshot), id); err != nil {
+		return Order{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Order{}, err

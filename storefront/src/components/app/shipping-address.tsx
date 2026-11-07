@@ -1,3 +1,5 @@
+import { rememberShoppingCountry } from "@/lib/currency"
+import { useShop } from "@/lib/shop-context"
 import { MapPin } from "lucide-react"
 import { SectionHeading } from "./commerce-ui"
 import { useMemo, useState } from "react"
@@ -11,6 +13,7 @@ import { getErrorMessage } from "@/lib/errors"
 
 export function ShippingAddress({ disabled }: { disabled: boolean }) {
   const { t, i18n } = useTranslation()
+  const { store: { site_id: siteID } } = useShop()
   const [country, setCountry] = useState("")
   const [region, setRegion] = useState<AddressOption | null>(null)
   const [city, setCity] = useState<AddressOption | null>(null)
@@ -33,6 +36,7 @@ export function ShippingAddress({ disabled }: { disabled: boolean }) {
   function resetCity() { setCity(null); setCityQuery(""); setManualCityText("") }
   function changeCountry(value: string) {
     setCountry(value.toUpperCase()); setRegion(null); resetCity()
+    rememberShoppingCountry(siteID, value.toUpperCase())
   }
   function chooseCity(value: AddressOption | null) {
     setCity(value)

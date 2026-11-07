@@ -10,6 +10,7 @@ import (
 // the content publishing pipeline or ordinary content deletion cascades.
 func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 	statements := []string{
+		`CREATE TABLE IF NOT EXISTS gocms_commerce_pricing (site_id INTEGER PRIMARY KEY REFERENCES gocms_site(id), settings_json TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS gocms_commerce_offer (
 		 id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL REFERENCES gocms_site(id),
 		 name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('physical','digital','service')),
@@ -82,6 +83,8 @@ func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 	for _, column := range []struct{ table, name, definition string }{
 		{"gocms_commerce_order", "language", "TEXT NOT NULL DEFAULT 'en'"},
 		{"gocms_commerce_order", "revision", "INTEGER NOT NULL DEFAULT 0"},
+		{"gocms_commerce_offer", "fixed_prices_json", "TEXT NOT NULL DEFAULT '{}'"},
+		{"gocms_commerce_order", "pricing_json", "TEXT NOT NULL DEFAULT '{}'"},
 		{"gocms_commerce_offer", "sku", "TEXT NOT NULL DEFAULT ''"},
 		{"gocms_commerce_offer", "specifications_json", "TEXT NOT NULL DEFAULT '[]'"},
 		{"gocms_commerce_offer", "archived", "INTEGER NOT NULL DEFAULT 0"},

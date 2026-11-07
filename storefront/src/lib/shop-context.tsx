@@ -1,3 +1,4 @@
+import { useCurrency } from "./currency"
 import i18n from "@/i18n"
 import { localError } from "./errors"
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
@@ -17,7 +18,7 @@ function decodeCart(raw: string | null): CartLine[] {
   } catch { return [] }
 }
 function savedCart(key: string) { try { return decodeCart(localStorage.getItem(key)) } catch { return [] } }
-type ShopContextValue = {
+type ShopContextValue = ReturnType<typeof useCurrency> & {
   store: Store; member: Member | null; memberLoading: boolean; refreshMember: () => Promise<boolean>
   shoppingURL: string; rememberShoppingURL: (path: string) => void
   cart: CartLine[]; add: (variant: number, quantity: number) => boolean; update: (variant: number, quantity: number) => void; remove: (variant: number) => void; consume: (lines: CartLine[]) => void
@@ -25,6 +26,7 @@ type ShopContextValue = {
 const ShopContext = createContext<ShopContextValue | null>(null)
 export function useShop() { const context = useContext(ShopContext); if (!context) throw new Error("ShopProvider is required"); return context }
 export function ShopProvider({ store, children }: { store: Store; children: ReactNode }) {
+  const currency = useCurrency(store.site_id)
   const key = `gocms-cart:${store.site_id}`
   const [cart, setCart] = useState<CartLine[]>(() => savedCart(key))
   const cartRef = useRef(cart)
@@ -74,22 +76,24 @@ export function ShopProvider({ store, children }: { store: Store; children: Reac
   function update(variant: number, quantity: number) { if (Number.isInteger(quantity) && quantity >= 1 && quantity <= 1000) saveCart(cartRef.current.map(line => line.variant_id === variant ? { ...line, quantity } : line)) }
   function remove(variant: number) { saveCart(cartRef.current.filter(line => line.variant_id !== variant)) }
   function consume(lines: CartLine[]) { saveCart(cartRef.current.map(line => ({ ...line, quantity: line.quantity - (lines.find(row => row.variant_id === line.variant_id)?.quantity ?? 0) })).filter(line => line.quantity > 0)) }
-  return <ShopContext.Provider value={{ store, member, memberLoading, refreshMember, shoppingURL, rememberShoppingURL, cart, add, update, remove, consume }}>{children}</ShopContext.Provider>
+  return <ShopContext.Provider value={{ ...currency, store, member, memberLoading, refreshMember, shoppingURL, rememberShoppingURL, cart, add, update, remove, consume }}>{children}</ShopContext.Provider>
 }
-export function useResource<T>(key: string, loader: () => Promise<T>) {
+export function useResource<T>(key: string, loader: () => Promise<T>, keepPreviousData = false) {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<Error | null>(null)
   const [loading, setLoading] = useState(true)
   const [version, setVersion] = useState(0)
+  const [resolvedKey, setResolvedKey] = useState("")
   useEffect(() => {
     let active = true
-    setLoading(true); setError(null); setData(null)
-    loader().then(result => { if (active) setData(result) }).catch(reason => { if (active) setError(reason instanceof Error ? reason : localError("errors.load")) }).finally(() => { if (active) setLoading(false) })
+    setLoading(true); setError(null); if (!keepPreviousData) setData(null)
+    loader().then(result => { if (active) setData(result) }).catch(reason => { if (active) setError(reason instanceof Error ? reason : localError("errors.load")) }).finally(() => { if (active) { setLoading(false); setResolvedKey(key) } })
     return () => { active = false }
   }, [key, version])
-  return { data, error, loading, reload: () => setVersion(value => value + 1) }
+  return { data, error, loading: loading || resolvedKey !== key, reload: () => setVersion(value => value + 1) }
 }
 export function useCartVariants() {
-  const { cart, store } = useShop()
-  return useResource(`${store.site_id}:cart:${cart.map(line => line.variant_id).sort((a, b) => a-b).join(",")}`, () => getVariants(cart))
+  const { cart, store, currency, pricingLoading, refreshPricing } = useShop()
+  const resource = useResource(`${store.site_id}:${currency}:${pricingLoading}:cart:${cart.map(line => line.variant_id).sort((a, b) => a-b).join(",")}`, () => getVariants(cart, currency), true)
+  return { ...resource, loading: resource.loading || pricingLoading, reload: () => { refreshPricing(); resource.reload() } }
 }

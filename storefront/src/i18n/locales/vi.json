@@ -267,5 +267,12 @@
   "errors.microsoft_cancelled": "Đã hủy cấp quyền Microsoft.",
   "errors.microsoft_unavailable": "Đăng nhập Microsoft không khả dụng hoặc cấu hình đã thay đổi. Vui lòng thử lại.",
   "errors.microsoft_conflict": "Danh tính Microsoft này đã liên kết với tài khoản khác. Đăng nhập tài khoản gốc để quản lý liên kết.",
-  "microsoft.sharedNotice": "Liên kết Microsoft này dùng chung cho mọi trang trên nền tảng. Hủy liên kết sẽ áp dụng cho tất cả các trang."
+  "microsoft.sharedNotice": "Liên kết Microsoft này dùng chung cho mọi trang trên nền tảng. Hủy liên kết sẽ áp dụng cho tất cả các trang.",
+  "currency.label": "Tiền tệ",
+  "currency.auto": "Tự động · {{currency}}",
+  "currency.approximate": "Khoảng {{amount}}",
+  "currency.actual": "Thanh toán {{amount}}",
+  "currency.unavailable": "Chưa có giá hiện hành bằng tiền tệ đã chọn. Áp dụng giá bằng tiền tệ gốc.",
+  "currency.chargeNote": "Đơn hàng sẽ được thanh toán bằng {{currency}}.",
+  "currency.storage": "Đã đổi tiền tệ nhưng trình duyệt không thể lưu tùy chọn."
 }

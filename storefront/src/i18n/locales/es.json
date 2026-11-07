@@ -268,5 +268,12 @@
   "errors.microsoft_cancelled": "Se canceló la autorización de Microsoft.",
   "errors.microsoft_unavailable": "El acceso con Microsoft no está disponible o cambió su configuración. Inténtalo de nuevo.",
   "errors.microsoft_conflict": "Esta identidad de Microsoft ya está vinculada a otra cuenta. Inicia sesión en la cuenta original para gestionar los vínculos.",
-  "microsoft.sharedNotice": "La vinculación con Microsoft se comparte entre todos los sitios de esta plataforma. Desvincularla afecta a todos los sitios."
+  "microsoft.sharedNotice": "La vinculación con Microsoft se comparte entre todos los sitios de esta plataforma. Desvincularla afecta a todos los sitios.",
+  "currency.label": "Moneda",
+  "currency.auto": "Auto · {{currency}}",
+  "currency.approximate": "Aprox. {{amount}}",
+  "currency.actual": "Pago: {{amount}}",
+  "currency.unavailable": "No hay una cotización vigente en la moneda elegida. Se aplica el precio original.",
+  "currency.chargeNote": "El pago se realizará en {{currency}}.",
+  "currency.storage": "La moneda ha cambiado, pero el navegador no ha podido guardar la preferencia."
 }

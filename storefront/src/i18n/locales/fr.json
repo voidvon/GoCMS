@@ -268,5 +268,12 @@
   "errors.microsoft_cancelled": "L’autorisation Microsoft a été annulée.",
   "errors.microsoft_unavailable": "La connexion Microsoft est indisponible ou sa configuration a changé. Réessayez.",
   "errors.microsoft_conflict": "Cette identité Microsoft est déjà associée à un autre compte. Connectez-vous au compte d’origine pour gérer les associations.",
-  "microsoft.sharedNotice": "Cette association Microsoft est partagée par tous les sites de la plateforme. La dissociation s’applique à tous les sites."
+  "microsoft.sharedNotice": "Cette association Microsoft est partagée par tous les sites de la plateforme. La dissociation s’applique à tous les sites.",
+  "currency.label": "Devise",
+  "currency.auto": "Auto · {{currency}}",
+  "currency.approximate": "Environ {{amount}}",
+  "currency.actual": "À payer : {{amount}}",
+  "currency.unavailable": "Aucun tarif actuel dans la devise choisie. Le prix dans la devise d’origine s’applique.",
+  "currency.chargeNote": "Le paiement sera effectué en {{currency}}.",
+  "currency.storage": "La devise a changé, mais le navigateur n’a pas pu enregistrer votre préférence."
 }

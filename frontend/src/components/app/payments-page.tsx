@@ -1,11 +1,12 @@
+import { CurrencySettings } from "./currency-settings"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { Card } from "@/components/ui/card"
 import { useEffect, useState, type ReactNode } from "react"
-import { CreditCard, Plus, RefreshCw, Radio } from "lucide-react"
+import { CreditCard, Coins, Plus, RefreshCw, Radio } from "lucide-react"
 import {
   createPaymentAccount,
-  getPaymentAccounts, getPaymentEvents, getPaymentStatus,
+  getPaymentAccounts, getPaymentEvents, getPaymentStatus, getCommerceCurrencyInfo,
   updatePaymentAccount, initializePaymentKey,
   adoptPaymentKey, exportPaymentKey, installPaymentTemplate,
   type AdminUser, type PaymentAccount,
@@ -27,15 +28,15 @@ import { TimeText } from "@/components/app/time-text"
 const currencies = ["USD", "EUR", "GBP", "HKD", "CNY", "JPY", "AUD", "CAD", "CHF", "SGD", "NZD"]
 const environments = { sandbox: "沙箱测试", "prod-fra": "生产 · 法兰克福", "prod-sg": "生产 · 新加坡", "prod-us": "生产 · 美国" }
 const states: Record<string, string> = { unpaid: "待付款", paid: "已付款", refunded: "已退款", creating: "结果待确认", pending: "待处理", succeeded: "成功", failed: "失败", closed: "已关闭", processing: "处理中", completed: "已完成" }
-const emptyAccount: PaymentAccountInput = { name: "", provider: "pingpong", environment: "sandbox", client_id: "", merchant_id: "", secret: "", currency: "USD", public_url: "", return_path: "/shop/orders", enabled: false }
+const emptyAccount: PaymentAccountInput = { name: "", provider: "pingpong", environment: "sandbox", client_id: "", merchant_id: "", secret: "", currency: "", public_url: "", return_path: "/shop/orders", enabled: false }
 // Public sandbox examples published by PingPong; never use these for production.
 // https://acquirer-api-docs-v4-en.pingpongx.com/notes/zh/onlinePayment/sandbox/
 const sandboxExample: PaymentAccountInput = {
-  ...emptyAccount, name: "PingPong 沙箱", client_id: "2018092714313010016",
+  ...emptyAccount, currency: "USD", name: "PingPong 沙箱", client_id: "2018092714313010016",
   merchant_id: "2018092714313010016291", secret: "F78BC96A55548B2319EE68E0", enabled: true,
 }
 
-type Tab = "accounts" | "events"
+type Tab = "accounts" | "events" | "pricing"
 
 function downloadFile(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob)
@@ -69,7 +70,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <div className="space-y-2"><Label>{label}</Label>{children}</div>
 }
 function Options({ value, onChange, options, label }: { value: string; onChange: (v: string) => void; options: Record<string, string>; label: string }) {
-  return <Select value={value} onValueChange={(v) => { if (v) onChange(v) }}><SelectTrigger className="w-full" aria-label={label}><SelectValue>{options[value] ?? value}</SelectValue></SelectTrigger><SelectContent>{Object.entries(options).map(([v, text]) => <SelectItem key={v} value={v}>{text}</SelectItem>)}</SelectContent></Select>
+  return <Select value={value} onValueChange={(v) => { if (v) onChange(v) }}><SelectTrigger className="w-full" aria-label={label}><SelectValue placeholder={label}>{options[value] ?? (value || undefined)}</SelectValue></SelectTrigger><SelectContent>{Object.entries(options).map(([v, text]) => <SelectItem key={v} value={v}>{text}</SelectItem>)}</SelectContent></Select>
 }
 
 export function PaymentsPage({ user }: { user: AdminUser }) {
@@ -117,14 +118,15 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
     finally { setBusy(false) }
   }
   const rows = tab === "events" ? events.length : accounts.length
-  const tabs = [...(can("payments.configure") ? [{ id: "accounts", label: "支付渠道", icon: CreditCard }] : []), { id: "events", label: "回调记录", icon: Radio }]
+  const tabs = [...(can("payments.configure") ? [{ id: "accounts", label: "支付渠道", icon: CreditCard }, { id: "pricing", label: "币种与汇率", icon: Coins }] : []), { id: "events", label: "回调记录", icon: Radio }]
 
-  return <Tabs value={tab} onValueChange={value => { if (value === "accounts" || value === "events") { setTab(value); setPage(1) } }} className="flex h-full min-h-0 flex-col gap-4">
+  return <Tabs value={tab} onValueChange={value => { if (value === "accounts" || value === "events" || value === "pricing") { setTab(value); setPage(1) } }} className="flex h-full min-h-0 flex-col gap-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
       <TabsList aria-label="支付模块">{tabs.map(t => <TabsTrigger key={t.id} value={t.id}><t.icon className="size-4" />{t.label}</TabsTrigger>)}</TabsList>
-      <div className="flex flex-wrap gap-2"><Button variant="outline" nativeButton={false} render={<a href="/shop/cart" target="_blank" rel="noopener noreferrer" />}>打开购物前台</Button>{can("theme") && <Button variant="outline" disabled={busy} onClick={() => run(() => installPaymentTemplate(), "购买模板已安装。请在分类中选择 payment_checkout.html 作为封面模板，设置发布路径并发布。")}>安装购买模板</Button>}<Button variant="outline" disabled={loading || busy} onClick={() => setVersion((v) => v + 1)}><RefreshCw className="size-4" />刷新</Button>{tab === "accounts" && <Button disabled={!configured} onClick={() => setAccountForm({ ...emptyAccount })}><Plus className="size-4" />添加 PingPong</Button>}</div>
+      <div className="flex flex-wrap gap-2"><Button variant="outline" nativeButton={false} render={<a href="/shop/cart" target="_blank" rel="noopener noreferrer" />}>打开购物前台</Button>{can("theme") && <Button variant="outline" disabled={busy} onClick={() => run(() => installPaymentTemplate(), "购买模板已安装。请在分类中选择 payment_checkout.html 作为封面模板，设置发布路径并发布。")}>安装购买模板</Button>}<Button variant="outline" disabled={loading || busy} onClick={() => setVersion((v) => v + 1)}><RefreshCw className="size-4" />刷新</Button>{tab === "accounts" && <Button disabled={!configured || busy} onClick={() => void run(async () => { const info = await getCommerceCurrencyInfo(); setAccountForm({ ...emptyAccount, currency: info.base_currency }) }, "")}><Plus className="size-4" />添加 PingPong</Button>}</div>
     </div>
     <TabsContent value={tab} className="flex min-h-0 flex-1 flex-col gap-4">
+    {tab === "pricing" ? <CurrencySettings key={`${activeSiteId}:${version}`} /> : <>
     <p className="text-sm text-muted-foreground">商品直接使用分类中的内容。请在<a href="/admin/categories" className="underline underline-offset-4">分类管理</a>开启在线销售，再到<a href="/admin/content" className="underline underline-offset-4">内容管理</a>配置规格和价格。</p>
     {configured === false && <Alert role="status" className="flex flex-wrap items-center justify-between gap-3"><AlertDescription>{keyStatus?.key_requires_restore ? "已有支付渠道，请导入原加密密钥恢复支付功能。" : "支付凭据加密尚未配置，请由超级管理员初始化支付密钥。"}</AlertDescription>{keyStatus?.key_can_initialize && <Button variant="outline" onClick={() => { setKeyMode(keyStatus.key_requires_restore ? "import" : "generate"); setImportKey(""); setKeyDialog(true) }}>配置支付密钥</Button>}</Alert>}
     {configured && user.is_super && <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">支付加密密钥已配置 · {keyStatus?.key_source === "environment" ? "来自环境变量，可接管到后台管理" : "保存在服务端独立文件"}</p><Button variant="outline" size="sm" disabled={busy} onClick={() => { setImportKey(""); setKeyDialog(true) }}>密钥管理与备份</Button></div>}
@@ -144,6 +146,7 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
     </ScrollArea>
     <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground"><span>{tab === "accounts" ? "每个渠道固定币种和凭据；更换凭据时新增渠道，保留历史账户。" : `第 ${page} 页 · 每页最多 50 条`}</span>{tab !== "accounts" && <div className="flex gap-2"><Button variant="outline" size="sm" disabled={page === 1 || loading} onClick={() => setPage((p) => p - 1)}>上一页</Button><Button variant="outline" size="sm" disabled={rows < 50 || loading} onClick={() => setPage((p) => p + 1)}>下一页</Button></div>}</div>
 
+    </>}
     </TabsContent>
     <Dialog open={keyDialog} onOpenChange={(open) => { if (!busy) { setKeyDialog(open); if (!open) setImportKey("") } }}>
       <DialogContent className="flex max-h-[90svh] flex-col sm:max-w-lg"><DialogHeader><DialogTitle>配置支付加密密钥</DialogTitle><DialogDescription>这是所有站点共用的凭据加密密钥，由超级管理员管理。保存后立即生效。</DialogDescription></DialogHeader>

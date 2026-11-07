@@ -268,5 +268,12 @@
   "errors.microsoft_cancelled": "A autorização do Microsoft foi cancelada.",
   "errors.microsoft_unavailable": "O login com Microsoft está indisponível ou a configuração mudou. Tente novamente.",
   "errors.microsoft_conflict": "Esta identidade Microsoft já está vinculada a outra conta. Entre na conta original para gerenciar os vínculos.",
-  "microsoft.sharedNotice": "Este vínculo com o Microsoft é compartilhado por todos os sites da plataforma. Desvincular afeta todos os sites."
+  "microsoft.sharedNotice": "Este vínculo com o Microsoft é compartilhado por todos os sites da plataforma. Desvincular afeta todos os sites.",
+  "currency.label": "Moeda",
+  "currency.auto": "Auto · {{currency}}",
+  "currency.approximate": "Aprox. {{amount}}",
+  "currency.actual": "A pagar: {{amount}}",
+  "currency.unavailable": "Não há um preço atual na moeda selecionada. Aplica-se o preço original.",
+  "currency.chargeNote": "O pagamento será efetuado em {{currency}}.",
+  "currency.storage": "A moeda foi alterada, mas o navegador não conseguiu guardar a preferência."
 }

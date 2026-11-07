@@ -267,5 +267,12 @@
   "errors.microsoft_cancelled": "Microsoft authorization was cancelled.",
   "errors.microsoft_unavailable": "Microsoft login is unavailable or its configuration changed. Please try again.",
   "errors.microsoft_conflict": "This Microsoft identity is already linked to another account. Sign in to the original account to manage links.",
-  "microsoft.sharedNotice": "This Microsoft link is shared across all sites on this platform. Unlinking applies to every site."
+  "microsoft.sharedNotice": "This Microsoft link is shared across all sites on this platform. Unlinking applies to every site.",
+  "currency.label": "Currency",
+  "currency.auto": "Auto · {{currency}}",
+  "currency.approximate": "Approx. {{amount}}",
+  "currency.actual": "Pay {{amount}}",
+  "currency.unavailable": "No current quote is available in the selected currency. Original pricing applies.",
+  "currency.chargeNote": "Payment will be charged in {{currency}}.",
+  "currency.storage": "The currency changed, but your browser could not save the preference."
 }

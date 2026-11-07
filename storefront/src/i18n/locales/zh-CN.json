@@ -267,5 +267,12 @@
   "errors.microsoft_cancelled": "已取消 Microsoft 授权。",
   "errors.microsoft_unavailable": "Microsoft 登录暂不可用或配置已更新，请重试。",
   "errors.microsoft_conflict": "此 Microsoft 身份已绑定其他账号，请登录原账号管理绑定。",
-  "microsoft.sharedNotice": "此 Microsoft 绑定供平台下的全部站点使用，解除绑定也会对全部站点生效。"
+  "microsoft.sharedNotice": "此 Microsoft 绑定供平台下的全部站点使用，解除绑定也会对全部站点生效。",
+  "currency.label": "币种",
+  "currency.auto": "自动 · {{currency}}",
+  "currency.approximate": "约 {{amount}}",
+  "currency.actual": "实际支付 {{amount}}",
+  "currency.unavailable": "所选币种暂无有效报价，使用商品原币种价格。",
+  "currency.chargeNote": "本订单实际以 {{currency}} 付款。",
+  "currency.storage": "币种已更改，但浏览器无法保存偏好。"
 }

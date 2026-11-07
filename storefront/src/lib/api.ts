@@ -1,14 +1,14 @@
 import { apiErrorKey, LocalizedError } from "./errors"
 import i18n, { currentLanguage } from "@/i18n"
 export type Specification = { name: string; value: string }
-export type Variant = { id: number; content_id: number; name: string; image_url: string; kind: "physical" | "digital" | "service"; currency: string; amount: number; sku: string; specifications: Specification[] }
+export type Variant = { source_amount?: number; source_currency?: string; display_amount?: number; display_currency?: string; pricing_revision?: number; pricing_unavailable?: boolean; id: number; content_id: number; name: string; image_url: string; kind: "physical" | "digital" | "service"; currency: string; amount: number; sku: string; specifications: Specification[] }
 export type OrderLine = Variant & { quantity: number; line_number: number; shipped_quantity: number }
 export type Channel = { id: number; name: string; currency: string; provider: string; sandbox: boolean }
 export type Store = { site_id: number; site_name: string; path: string; default_language?: string }
 export type Member = { id: number; username: string; email: string; display_name: string; has_password: boolean }
 export type CartLine = { variant_id: number; quantity: number }
 export type Address = { phone: string; street: string; city: string; state: string; postcode: string; country: string }
-export type OrderInput = { language: string; items: CartLine[]; email: string; customer_name: string; address: Address; expected_amount: number; currency: string }
+export type OrderInput = { pricing_revision?: number; language: string; items: CartLine[]; email: string; customer_name: string; address: Address; expected_amount: number; currency: string }
 export type Attempt = { id: string; account_id: number; status: string; payment_url?: string }
 export type Shipment = { id: string; method: string; carrier: string; tracking_number: string; tracking_url: string; shipped_at: string; note: string; items: {line_number: number; quantity: number}[] }
 export type Order = { shipments: Shipment[]; id: string; buyer_id: number; items: OrderLine[]; amount: number; quantity: number; currency: string; status: string; fulfillment_status: string; customer_name: string; email: string; address: Address; created_at: string; attempts?: Attempt[]; refunds?: { id: string; status: string }[] }
@@ -28,9 +28,11 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!response.ok) throw new APIError(response.status, payload?.code ?? payload?.error?.code ?? "")
   return payload as T
 }
+export type PricingInfo = { enabled: boolean; base_currency: string; currencies: { code: string; exponent: number }[]; recommended_currency: string; revision: number }
+export const getPricing = (country = "") => api<PricingInfo>(`/api/commerce/pricing${country ? `?country=${encodeURIComponent(country)}` : ""}`)
 export const getStore = () => api<Store>("/api/commerce/storefront")
 export const getChannels = () => api<{ channels: Channel[] }>("/api/commerce/channels")
-export const getVariants = (lines: CartLine[]) => lines.length ? api<{ items: Variant[] }>(`/api/commerce/variants?ids=${lines.map(line => line.variant_id).join(",")}`) : Promise.resolve({ items: [] as Variant[] })
+export const getVariants = (lines: CartLine[], currency = "") => lines.length ? api<{ items: Variant[] }>(`/api/commerce/variants?ids=${lines.map(line => line.variant_id).join(",")}${currency ? `&currency=${encodeURIComponent(currency)}` : ""}`) : Promise.resolve({ items: [] as Variant[] })
 export const getMember = () => api<{ data: Member }>("/api/v1/me")
 export const login = (username: string, password: string) => api("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ username, password }) })
 export const register = (username: string, password: string, email = "") => api("/api/v1/auth/register", { method: "POST", body: JSON.stringify({ username, password, email }) })

@@ -267,5 +267,12 @@
   "errors.microsoft_cancelled": "ยกเลิกการอนุญาต Microsoft แล้ว",
   "errors.microsoft_unavailable": "การเข้าสู่ระบบด้วย Microsoft ไม่พร้อมใช้งานหรือมีการเปลี่ยนการตั้งค่า โปรดลองอีกครั้ง",
   "errors.microsoft_conflict": "บัญชี Microsoft นี้เชื่อมกับบัญชีอื่นแล้ว โปรดเข้าสู่บัญชีเดิมเพื่อจัดการการเชื่อมต่อ",
-  "microsoft.sharedNotice": "การเชื่อมโยง Microsoft นี้ใช้ร่วมกันในทุกเว็บไซต์ของแพลตฟอร์ม การยกเลิกการเชื่อมโยงมีผลกับทุกเว็บไซต์"
+  "microsoft.sharedNotice": "การเชื่อมโยง Microsoft นี้ใช้ร่วมกันในทุกเว็บไซต์ของแพลตฟอร์ม การยกเลิกการเชื่อมโยงมีผลกับทุกเว็บไซต์",
+  "currency.label": "สกุลเงิน",
+  "currency.auto": "อัตโนมัติ · {{currency}}",
+  "currency.approximate": "ประมาณ {{amount}}",
+  "currency.actual": "ชำระ {{amount}}",
+  "currency.unavailable": "ไม่มีราคาปัจจุบันในสกุลเงินที่เลือก จึงใช้ราคาในสกุลเงินเดิม",
+  "currency.chargeNote": "จะเรียกเก็บเงินในสกุล {{currency}}",
+  "currency.storage": "เปลี่ยนสกุลเงินแล้ว แต่เบราว์เซอร์ไม่สามารถบันทึกการตั้งค่าได้"
 }

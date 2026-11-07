@@ -267,5 +267,12 @@
   "errors.microsoft_cancelled": "Otorisasi Microsoft dibatalkan.",
   "errors.microsoft_unavailable": "Login Microsoft tidak tersedia atau konfigurasinya berubah. Silakan coba lagi.",
   "errors.microsoft_conflict": "Identitas Microsoft ini sudah terhubung ke akun lain. Masuk ke akun asal untuk mengelola tautan.",
-  "microsoft.sharedNotice": "Tautan Microsoft ini digunakan bersama oleh semua situs di platform ini. Pelepasan tautan berlaku untuk semua situs."
+  "microsoft.sharedNotice": "Tautan Microsoft ini digunakan bersama oleh semua situs di platform ini. Pelepasan tautan berlaku untuk semua situs.",
+  "currency.label": "Mata uang",
+  "currency.auto": "Otomatis · {{currency}}",
+  "currency.approximate": "Sekitar {{amount}}",
+  "currency.actual": "Bayar {{amount}}",
+  "currency.unavailable": "Harga terkini dalam mata uang pilihan tidak tersedia. Harga asli berlaku.",
+  "currency.chargeNote": "Pembayaran akan ditagih dalam {{currency}}.",
+  "currency.storage": "Mata uang berubah, tetapi browser tidak dapat menyimpan preferensi."
 }

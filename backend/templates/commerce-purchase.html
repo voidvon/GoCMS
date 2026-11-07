@@ -29,9 +29,11 @@
     <fieldset disabled>
       <div class="commerce-purchase__fields">
         <label class="commerce-purchase__variant"><span>规格</span><select name="variant_id" required aria-label="商品规格"></select></label>
+        <label data-currency-field hidden><span>币种</span><select data-currency aria-label="展示币种"></select></label>
         <label><span>数量</span><input name="quantity" type="number" min="1" max="1000" step="1" value="1" required aria-label="购买数量"></label>
       </div>
       <p class="commerce-purchase__price" data-price aria-live="polite"></p>
+      <p class="commerce-purchase__status" data-charge hidden></p>
       <p class="commerce-purchase__sku" data-sku hidden></p>
       <div class="commerce-purchase__actions">
         <button type="submit">加入购物车</button>
@@ -59,6 +61,11 @@
   const select = form.elements.namedItem("variant_id")
   const quantity = form.elements.namedItem("quantity")
   const price = panel.querySelector("[data-price]")
+  const charge = panel.querySelector("[data-charge]")
+  const currencySelect = panel.querySelector("[data-currency]")
+  const currencyField = panel.querySelector("[data-currency-field]")
+  let siteID = 0, manualChoice, queued = false
+  const readPreference = key => { try { return localStorage.getItem(key) || "" } catch { return "" } }
   const sku = panel.querySelector("[data-sku]")
   const status = panel.querySelector("[data-status]")
   const retry = panel.querySelector("[data-retry]")
@@ -77,16 +84,35 @@
   function showPrice() {
     const variant = variants.find(item => String(item.id) === select.value)
     if (!variant) { fields.disabled = true; return }
-    price.textContent = new Intl.NumberFormat(document.documentElement.lang || "zh-CN", { style: "currency", currency: variant.currency }).format(variant.amount / (variant.currency === "JPY" ? 1 : 100)) + " " + variant.currency
+    const format = (amount, currency) => new Intl.NumberFormat(document.documentElement.lang || "zh-CN", { style: "currency", currency }).format(amount / (currency === "JPY" ? 1 : 100)) + " " + currency
+    price.textContent = variant.display_currency ? "约 " + format(variant.display_amount, variant.display_currency) : format(variant.amount, variant.currency)
+    charge.hidden = !variant.display_currency && !variant.pricing_unavailable
+    charge.textContent = variant.display_currency ? "实际支付 " + format(variant.amount, variant.currency) : variant.pricing_unavailable ? "当前币种暂无有效报价，使用商品原币种结算。" : ""
     sku.textContent = variant.sku ? "规格编号：" + variant.sku : ""
     sku.hidden = !variant.sku
   }
   async function load() {
-    if (loading) return
+    if (loading) { queued = true; return }
     loading = true; submitting = false; fields.disabled = true; retry.hidden = true
     status.textContent = "正在读取最新规格和价格…"
     try {
-      const response = await fetch("/api/commerce/catalog?content_id=" + encodeURIComponent(contentID), { credentials: "same-origin", cache: "no-store" })
+      const pricingResponse = await fetch("/api/commerce/pricing", { credentials: "same-origin", cache: "no-store" })
+      if (!pricingResponse.ok) throw new Error("币种信息加载失败，请重试")
+      let pricing = await pricingResponse.json()
+      siteID = Number(pricing.site_id)
+      if (!Number.isSafeInteger(siteID) || siteID <= 0) throw new Error("站点信息无效")
+      const country = readPreference("gocms-market-country:" + siteID)
+      if (/^[A-Z]{2}$/.test(country)) {
+        const regional = await fetch("/api/commerce/pricing?country=" + encodeURIComponent(country), { credentials: "same-origin", cache: "no-store" })
+        if (regional.ok) pricing = await regional.json()
+      }
+      const manual = manualChoice !== undefined ? manualChoice : readPreference("gocms-currency:" + siteID)
+      const choices = Array.isArray(pricing.currencies) ? pricing.currencies : []
+      const selectedCurrency = choices.some(item => item.code === manual) ? manual : pricing.recommended_currency || ""
+      currencySelect.replaceChildren(new Option("自动 · " + (pricing.recommended_currency || ""), "auto"), ...choices.map(item => new Option(item.code, item.code)))
+      currencySelect.value = choices.some(item => item.code === manual) ? manual : "auto"
+      currencyField.hidden = !pricing.enabled
+      const response = await fetch("/api/commerce/catalog?content_id=" + encodeURIComponent(contentID) + (selectedCurrency ? "&currency=" + encodeURIComponent(selectedCurrency) : ""), { credentials: "same-origin", cache: "no-store" })
       const result = await response.json().catch(() => null)
       if (!response.ok) throw new Error(errorText(result) || "规格加载失败，请重试")
       if (!result || !Array.isArray(result.offers)) throw new Error("规格数据暂不可用，请重试")
@@ -102,11 +128,17 @@
       status.textContent = "价格为所选规格的单价。可先加入购物车，结算时再登录。"
       fields.disabled = false; panel.hidden = false
     } catch (error) {
-      price.textContent = ""; sku.hidden = true
+      price.textContent = ""; charge.hidden = true; sku.hidden = true
       status.textContent = errorText(error) || "规格加载失败，请重试"
       retry.hidden = false; panel.hidden = false
-    } finally { loading = false }
+    } finally { loading = false; if (queued) { queued = false; void load() } }
   }
+  currencySelect.addEventListener("change", () => {
+    manualChoice = currencySelect.value === "auto" ? "" : currencySelect.value
+    try { if (manualChoice) localStorage.setItem("gocms-currency:" + siteID, manualChoice); else localStorage.removeItem("gocms-currency:" + siteID) } catch {}
+    void load()
+  })
+  window.addEventListener("storage", event => { if (event.key === null || event.key === "gocms-currency:" + siteID || event.key === "gocms-market-country:" + siteID) { manualChoice = undefined; void load() } })
   select.addEventListener("change", showPrice)
   retry.addEventListener("click", load)
   form.addEventListener("submit", event => {
@@ -115,7 +147,7 @@
     submitting = true
     status.textContent = "正在前往购物车…"
   })
-  window.addEventListener("pageshow", event => { if (event.persisted) void load() })
+  window.addEventListener("pageshow", event => { if (event.persisted) { manualChoice = undefined; void load() } })
   void load()
 })()
 </script>

@@ -157,6 +157,8 @@
   el("purchase-form").addEventListener("submit", (event) => { event.preventDefault(); action(async () => {
     const f = Object.fromEntries(new FormData(event.target))
     const input = { content_id: Number(f.content_id), variant_id: Number(f.variant_id), quantity: Number(f.quantity), email: f.email, customer_name: f.customer_name, address: { street: f.street, city: f.city, state: f.state, postcode: f.postcode, country: f.country.toUpperCase() } }
+    const chosen = catalog.offers.find(item => Number(item.id) === Number(input.variant_id))
+    if (chosen) { input.currency = chosen.currency; input.expected_amount = chosen.amount * Number(input.quantity); input.pricing_revision = chosen.pricing_revision }
     const body = JSON.stringify(input), keyName = storageKey() + ":request"
     let saved = JSON.parse(sessionStorage.getItem(keyName) || "null")
     if (saved && saved.body !== body) throw new Error("上次下单结果待确认，请恢复原购买信息后重试，或联系商家核查")

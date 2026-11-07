@@ -269,5 +269,12 @@
   "errors.microsoft_cancelled": "Авторизация Microsoft отменена.",
   "errors.microsoft_unavailable": "Вход через Microsoft недоступен или настройки изменились. Повторите попытку.",
   "errors.microsoft_conflict": "Эта учётная запись Microsoft уже привязана к другому аккаунту. Войдите в исходный аккаунт для управления привязками.",
-  "microsoft.sharedNotice": "Привязка Microsoft общая для всех сайтов платформы. Отвязка применяется ко всем сайтам."
+  "microsoft.sharedNotice": "Привязка Microsoft общая для всех сайтов платформы. Отвязка применяется ко всем сайтам.",
+  "currency.label": "Валюта",
+  "currency.auto": "Авто · {{currency}}",
+  "currency.approximate": "Примерно {{amount}}",
+  "currency.actual": "К оплате: {{amount}}",
+  "currency.unavailable": "Нет актуальной цены в выбранной валюте. Применяется исходная цена.",
+  "currency.chargeNote": "Оплата будет произведена в {{currency}}.",
+  "currency.storage": "Валюта изменена, но браузеру не удалось сохранить настройку."
 }

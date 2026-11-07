@@ -107,6 +107,19 @@ func (s *Server) adminPayments(w http.ResponseWriter, r *http.Request) {
 		page = 100000
 	}
 	ctx := r.Context()
+	if len(p) == 1 && p[0] == "pricing-options" && r.Method == http.MethodGet {
+		pricing, err := s.commerce.Pricing(ctx, site)
+		if err != nil {
+			commerceError(w, err)
+			return
+		}
+		writeJSON(w, 200, map[string]any{"base_currency": pricing.BaseCurrency})
+		return
+	}
+	if len(p) == 1 && p[0] == "pricing" {
+		s.adminPricing(w, r, site)
+		return
+	}
 	if len(p) == 1 && p[0] == "status" && r.Method == http.MethodGet {
 		s.paymentStatus(w, r)
 		return
@@ -281,6 +294,10 @@ func (s *Server) publicCommerce(w http.ResponseWriter, r *http.Request) {
 		page = 100000
 	}
 
+	if len(p) == 1 && p[0] == "pricing" && r.Method == http.MethodGet {
+		s.publicPricing(w, r, site)
+		return
+	}
 	if len(p) == 1 && p[0] == "storefront" && r.Method == http.MethodGet {
 		current, err := db.GetSiteByID(r.Context(), s.database, site)
 		if err != nil {
@@ -318,6 +335,9 @@ func (s *Server) publicCommerce(w http.ResponseWriter, r *http.Request) {
 			ids = append(ids, parseIntOrZero(id))
 		}
 		items, err := s.commerce.Variants(r.Context(), site, ids)
+		if err == nil {
+			items, err = s.commerce.QuoteOffers(r.Context(), site, items, r.URL.Query().Get("currency"))
+		}
 		if err != nil {
 			commerceError(w, err)
 			return
@@ -336,6 +356,11 @@ func (s *Server) publicCommerce(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(p) == 1 && p[0] == "catalog" && r.Method == http.MethodGet {
 		offers, err := s.commerce.Offers(r.Context(), site, true, page, parseIntOrZero(r.URL.Query().Get("content_id")), parseIntOrZero(r.URL.Query().Get("category_id")))
+		if err != nil {
+			commerceError(w, err)
+			return
+		}
+		offers, err = s.commerce.QuoteOffers(r.Context(), site, offers, r.URL.Query().Get("currency"))
 		if err != nil {
 			commerceError(w, err)
 			return
@@ -477,7 +502,7 @@ func (s *Server) authorizePaymentOperation(w http.ResponseWriter, r *http.Reques
 	if path == "checkout-template" {
 		key = "theme"
 	}
-	if strings.HasPrefix(path, "accounts") {
+	if strings.HasPrefix(path, "accounts") || path == "pricing" {
 		key = "payments.configure"
 	}
 	if strings.HasSuffix(path, "/refund") {

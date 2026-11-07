@@ -12,13 +12,20 @@ export type AdminUser = {
   permissions: string[]
 }
 
+export type CurrencyInfo = { code: string; exponent: number }
+export type CurrencyRule = { currency: string; rate: string; enabled: boolean; countries: string[] }
+export type PricingSettings = { enabled: boolean; base_currency: string; currencies: CurrencyRule[]; max_age_hours: number; rates_updated_at: string; revision: number; country_header: string; trusted_proxies: string[]; refresh_rates?: boolean }
+export const getCommercePricing = () => request<{ settings: PricingSettings; supported: CurrencyInfo[] }>("/api/admin/payments/pricing")
+export const saveCommercePricing = (input: PricingSettings) => request<PricingSettings>("/api/admin/payments/pricing", { method: "PUT", body: JSON.stringify(input) })
+export const getCommerceCurrencyInfo = () => request<{ base_currency: string }>("/api/admin/payments/pricing-options")
+
 export type PaymentAccount = {
   id: number; public_id: string; name: string; provider: string; environment: string
   client_id: string; merchant_id: string; currency: string; public_url: string; return_path: string; enabled: boolean
 }
 export type PaymentAccountInput = Omit<PaymentAccount, "id" | "public_id"> & { secret: string }
 export type CommerceSpecification = { name: string; value: string }
-export type CommerceVariant = { id: number; sku: string; specifications: CommerceSpecification[]; amount: number; enabled: boolean }
+export type CommerceVariant = { fixed_prices?: Record<string, number>; id: number; sku: string; specifications: CommerceSpecification[]; amount: number; enabled: boolean }
 export type CommerceProduct = { enabled: boolean; kind: "physical" | "digital" | "service"; currency: string; variants: CommerceVariant[] }
 export type CommerceOffer = {
   sku?: string; specifications?: CommerceSpecification[]

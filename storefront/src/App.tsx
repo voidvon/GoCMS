@@ -1,6 +1,7 @@
 import { ForgotPasswordPage, ResetPasswordPage } from "@/pages/password-page"
 import { storefrontName } from "@/lib/store-name"
 import { configureSiteLanguage, formatNumber } from "@/i18n"
+import { CurrencySwitcher } from "@/components/app/currency-switcher"
 import { LanguageSwitcher } from "@/components/app/language-switcher"
 import { useTranslation } from "react-i18next"
 import { useEffect, useState } from "react"
@@ -70,7 +71,7 @@ function Shell() {
         </a>
         <a href="/" className="text-link ms-auto hidden text-xs sm:inline-flex sm:text-sm"><ArrowLeft className="size-3.5 rtl:rotate-180" aria-hidden="true" />{t("common.backSite")}</a>
         <div className="hidden h-6 w-px bg-border md:block" aria-hidden="true" />
-        <div className="ms-auto flex items-center gap-2 sm:ms-0"><LanguageSwitcher />{member && <Button variant="ghost" size="icon" className="size-10" disabled={busy} title={t("common.logout", { username: member.username })} aria-label={t("common.logout", { username: member.username })} onClick={() => void leave()}><LogOut className="size-4" /></Button>}</div>
+        <div className="ms-auto flex items-center gap-2 sm:ms-0 flex-wrap justify-end"><CurrencySwitcher /><LanguageSwitcher />{member && <Button variant="ghost" size="icon" className="size-10" disabled={busy} title={t("common.logout", { username: member.username })} aria-label={t("common.logout", { username: member.username })} onClick={() => void leave()}><LogOut className="size-4" /></Button>}</div>
       </div>
       <div className="border-t border-border/60"><nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-1 px-4 py-2 sm:px-8" aria-label={t("common.navigation")}>
         <Link href="/shop/cart" className="nav-link" aria-current={path === "/shop/cart" || path === "/shop/checkout" || path === "/shop/cart/add" ? "page" : undefined}><ShoppingBag className="size-4" aria-hidden="true" />{t("common.cart")}{count > 0 && <bdi className="flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] leading-5 text-primary-foreground">{formatNumber(count)}</bdi>}</Link>

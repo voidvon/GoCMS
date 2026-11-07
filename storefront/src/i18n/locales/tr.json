@@ -267,5 +267,12 @@
   "errors.microsoft_cancelled": "Microsoft yetkilendirmesi iptal edildi.",
   "errors.microsoft_unavailable": "Microsoft ile giriş kullanılamıyor veya yapılandırma değişti. Tekrar deneyin.",
   "errors.microsoft_conflict": "Bu Microsoft kimliği başka bir hesaba bağlı. Bağlantıları yönetmek için asıl hesaba giriş yapın.",
-  "microsoft.sharedNotice": "Bu Microsoft bağlantısı platformdaki tüm sitelerde paylaşılır. Bağlantıyı kaldırmak tüm siteler için geçerlidir."
+  "microsoft.sharedNotice": "Bu Microsoft bağlantısı platformdaki tüm sitelerde paylaşılır. Bağlantıyı kaldırmak tüm siteler için geçerlidir.",
+  "currency.label": "Para birimi",
+  "currency.auto": "Otomatik · {{currency}}",
+  "currency.approximate": "Yaklaşık {{amount}}",
+  "currency.actual": "Ödenecek tutar: {{amount}}",
+  "currency.unavailable": "Seçilen para biriminde güncel fiyat yok. Orijinal fiyat geçerlidir.",
+  "currency.chargeNote": "Ödeme {{currency}} cinsinden alınacaktır.",
+  "currency.storage": "Para birimi değiştirildi ancak tarayıcınız tercihi kaydedemedi."
 }
