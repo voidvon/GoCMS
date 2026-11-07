@@ -50,7 +50,13 @@ function ProviderSettings({provider}:{provider:"google"|"facebook"}) {
   },[provider])
   async function run(action: () => Promise<unknown>, message: string) {
     setBusy(true)
-    try { await action(); showSuccess(message); setVersion(value => value + 1) } catch (error) { showError(error) } finally { setBusy(false) }
+    try {
+      await action()
+      const result = await getMemberLogin(provider)
+      setData(result)
+      setDirty(false)
+      showSuccess(message)
+    } catch (error) { showError(error) } finally { setBusy(false) }
   }
   if (loading) return <p className="text-sm text-muted-foreground">正在读取登录配置…</p>
   if (!data) return <Button variant="outline" onClick={() => { setLoading(true); setVersion(value => value + 1) }}>重新加载</Button>
@@ -61,10 +67,22 @@ function ProviderSettings({provider}:{provider:"google"|"facebook"}) {
     {data.legacy_configs.length > 0 && <Card className="space-y-3 rounded-xl border p-5 gap-0"><h2 className="font-semibold">选择沿用的旧配置</h2><p className="text-sm text-muted-foreground">检测到多套站点凭据，尚未自动选择。选择一套作为全平台统一凭据，或在下方填写新凭据。旧配置保留备查。</p>{data.legacy_configs.map(source => <Card key={source.site_id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3 flex-row"><div className="min-w-0"><p className="text-sm">{source.site_name}</p><p className="break-all text-xs text-muted-foreground">{source.client_id}</p></div><Button type="button" variant="outline" disabled={busy || dirty} onClick={() => void run(() => migrateMemberLogin(source), "已沿用所选凭据，全部站点共享此配置")}>沿用这套配置</Button></Card>)}</Card>}
     <Card className="space-y-4 rounded-xl border p-5 gap-0">
       <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">{name} 登录</h2><p className="mt-1 text-sm text-muted-foreground">所有站点共享一套凭据、开关和会员身份绑定，保存后立即生效。</p></div><Badge variant={config.enabled ? "default" : "secondary"}>{dirty ? "有未保存修改" : config.enabled ? "已开启" : "已关闭"}</Badge></div>
-      <form className="space-y-5" onSubmit={event => { event.preventDefault(); void run(async () => { await saveMemberLogin(config, secret,provider); setSecret("") }, `${name} 登录配置已保存`) }}>
+      <form className="space-y-5" onSubmit={event => {
+        event.preventDefault()
+        // Read actual input values so browser autofill is included even when it
+        // did not dispatch React's change event.
+        const fields = new FormData(event.currentTarget)
+        const clientID = String(fields.get("client_id") ?? "").trim()
+        const clientSecret = String(fields.get("secret") ?? "")
+        update({ client_id: clientID })
+        void run(async () => {
+          await saveMemberLogin({ ...config, client_id: clientID }, clientSecret, provider)
+          setSecret("")
+        }, `${name} 登录配置已保存`)
+      }}>
         <div className="flex items-center justify-between gap-4"><Label htmlFor={`${provider}-enabled`}>启用 {name} 登录</Label><Switch id={`${provider}-enabled`} checked={config.enabled} disabled={busy} onCheckedChange={enabled => update({ enabled })} /></div>
-        <div className="space-y-2"><Label htmlFor={`${provider}-client`}>{provider === "facebook" ? "App ID" : "Client ID"}</Label><Input id={`${provider}-client`} dir="ltr" autoComplete="off" value={config.client_id} maxLength={512} disabled={busy} onChange={event => update({ client_id: event.target.value })} placeholder={provider === "google" ? "…apps.googleusercontent.com" : "Facebook App ID"} /></div>
-        <div className="space-y-2"><Label htmlFor={`${provider}-secret`}>{provider === "facebook" ? "App Secret" : "Client Secret"}</Label><Input id={`${provider}-secret`} type="password" dir="ltr" autoComplete="new-password" value={secret} maxLength={4096} disabled={busy || !data.key_configured} onChange={event => { setSecret(event.target.value); setDirty(true) }} placeholder={config.secret_set ? "已配置，留空保留现有密钥" : `填写 ${name} 客户端密钥`} /><p className="text-xs text-muted-foreground">密钥加密保存，不会回传到浏览器或主题。{config.secret_set && !data.secret_readable ? "现有密钥无法读取，请恢复加密密钥。" : ""}</p></div>
+        <div className="space-y-2"><Label htmlFor={`${provider}-client`}>{provider === "facebook" ? "App ID" : "Client ID"}</Label><Input id={`${provider}-client`} name="client_id" dir="ltr" autoComplete="off" value={config.client_id} maxLength={512} disabled={busy} onChange={event => update({ client_id: event.target.value })} placeholder={provider === "google" ? "…apps.googleusercontent.com" : "Facebook App ID"} />{provider === "google" && <p className="text-xs text-muted-foreground">填写 Web 应用的完整 OAuth 客户端 ID，以 .apps.googleusercontent.com 结尾。</p>}</div>
+        <div className="space-y-2"><Label htmlFor={`${provider}-secret`}>{provider === "facebook" ? "App Secret" : "Client Secret"}</Label><Input id={`${provider}-secret`} name="secret" type="password" dir="ltr" autoComplete="new-password" value={secret} maxLength={4096} disabled={busy || !data.key_configured} onChange={event => { setSecret(event.target.value); setDirty(true) }} placeholder={config.secret_set ? "已配置，留空保留现有密钥" : `填写 ${name} 客户端密钥`} /><p className="text-xs text-muted-foreground">密钥加密保存，不会回传到浏览器或主题。{config.secret_set && !data.secret_readable ? "现有密钥无法读取，请恢复加密密钥。" : ""}</p></div>
         <div className="flex items-center justify-between gap-4"><div><Label htmlFor={`${provider}-register`}>允许首次登录自动注册</Label><p className="mt-1 text-xs text-muted-foreground">关闭后仅允许已绑定的会员登录。相同 {name} 身份在不同站点使用同一会员账号，会员组仍按站点分配。</p></div><Switch id={`${provider}-register`} checked={config.auto_register} disabled={busy} onCheckedChange={auto_register => update({ auto_register })} /></div>
         {provider === "facebook" && <p className="text-xs text-muted-foreground">Facebook 新账号以应用内用户 ID 建立身份，不使用 Facebook 返回的邮箱匹配或合并会员。已有会员请登录后在账号安全中绑定。</p>}
         <p className="text-xs text-muted-foreground">关闭会在全部站点拒绝新的授权和正在进行的登录，已有会员会话继续有效。更新配置会使进行中的授权失效。</p>

@@ -140,8 +140,16 @@ func Validate(c Config) error {
 			}
 		}
 	}
-	if c.Enabled && (c.ClientID == "" || (c.ProviderName() == "google" && !strings.HasSuffix(c.ClientID, ".apps.googleusercontent.com")) || c.Encrypted == "") {
-		return errors.New("开启前请填写客户端 ID 和密钥")
+	if c.Enabled {
+		if c.ClientID == "" {
+			return errors.New("开启前请填写客户端 ID；已保存的客户端密钥无需重复填写")
+		}
+		if c.ProviderName() == "google" && !strings.HasSuffix(c.ClientID, ".apps.googleusercontent.com") {
+			return errors.New("Google Client ID 格式不正确，请填写以 .apps.googleusercontent.com 结尾的完整 Web 应用客户端 ID")
+		}
+		if c.Encrypted == "" {
+			return errors.New("开启前请填写客户端密钥（Client Secret）")
+		}
 	}
 	return nil
 }
