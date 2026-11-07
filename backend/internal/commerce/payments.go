@@ -34,12 +34,12 @@ type Refund struct {
 	Error     string `json:"error"`
 }
 
-const orderSelect = `SELECT o.id,o.buyer_id,o.amount,o.currency,o.status,o.fulfillment_status,o.paid_attempt,o.email,o.customer_name,o.address_json,o.created_at,i.offer_id,i.name,i.kind,i.unit_price,i.quantity,i.image_url,i.content_id,i.sku,i.specifications_json FROM gocms_commerce_order o JOIN gocms_commerce_order_item i ON i.order_id=o.id AND i.line_number=1`
+const orderSelect = `SELECT o.id,o.buyer_id,o.amount,o.currency,o.status,o.fulfillment_status,o.paid_attempt,o.email,o.customer_name,o.address_json,o.created_at,o.revision,i.offer_id,i.name,i.kind,i.unit_price,i.quantity,i.image_url,i.content_id,i.sku,i.specifications_json FROM gocms_commerce_order o JOIN gocms_commerce_order_item i ON i.order_id=o.id AND i.line_number=1`
 
 func scanOrder(row scanner) (Order, error) {
 	var o Order
 	var address, specifications string
-	err := row.Scan(&o.ID, &o.BuyerID, &o.Amount, &o.Currency, &o.Status, &o.FulfillmentStatus, &o.PaidAttempt, &o.Email, &o.CustomerName, &address, &o.CreatedAt, &o.Item.ID, &o.Item.Name, &o.Item.Kind, &o.Item.Amount, &o.Quantity, &o.Item.ImageURL, &o.Item.ContentID, &o.Item.SKU, &specifications)
+	err := row.Scan(&o.ID, &o.BuyerID, &o.Amount, &o.Currency, &o.Status, &o.FulfillmentStatus, &o.PaidAttempt, &o.Email, &o.CustomerName, &address, &o.CreatedAt, &o.Revision, &o.Item.ID, &o.Item.Name, &o.Item.Kind, &o.Item.Amount, &o.Quantity, &o.Item.ImageURL, &o.Item.ContentID, &o.Item.SKU, &specifications)
 	if errors.Is(err, sql.ErrNoRows) {
 		return o, ErrNotFound
 	}
@@ -55,11 +55,35 @@ func scanOrder(row scanner) (Order, error) {
 }
 
 func (s Service) Orders(ctx context.Context, site, buyer int64, page int) ([]Order, error) {
+	return s.orders(ctx, site, buyer, page, "", "")
+}
+func (s Service) FilterOrders(ctx context.Context, site int64, page int, status, q string) ([]Order, error) {
+	return s.orders(ctx, site, 0, page, status, q)
+}
+func (s Service) orders(ctx context.Context, site, buyer int64, page int, status, q string) ([]Order, error) {
 	filter := ""
 	args := []any{site}
 	if buyer > 0 {
 		filter = " AND o.buyer_id=?"
 		args = append(args, buyer)
+	}
+	if len(q) > 128 {
+		return nil, ErrInvalid
+	}
+	if q != "" {
+		filter += ` AND (instr(o.id,?)>0 OR instr(o.customer_name,?)>0 OR instr(o.address_json,?)>0 OR EXISTS(SELECT 1 FROM gocms_commerce_shipment sh WHERE sh.order_id=o.id AND instr(sh.tracking_number,?)>0))`
+		args = append(args, q, q, q, q)
+	}
+	switch status {
+	case "":
+	case "unpaid", "refunded":
+		filter += ` AND o.status=?`
+		args = append(args, status)
+	case "pending", "partial", "shipped", "completed":
+		filter += ` AND o.status='paid' AND o.fulfillment_status=?`
+		args = append(args, status)
+	default:
+		return nil, ErrInvalid
 	}
 	args = append(args, (page-1)*50)
 	rows, err := s.DB.QueryContext(ctx, orderSelect+` WHERE o.site_id=?`+filter+` ORDER BY o.created_at DESC,o.id DESC LIMIT 50 OFFSET ?`, args...)
@@ -128,7 +152,12 @@ func (s Service) Order(ctx context.Context, site int64, id string) (Order, error
 		}
 		o.Refunds = append(o.Refunds, r)
 	}
-	return o, rows.Err()
+	if err := rows.Err(); err != nil {
+		return o, err
+	}
+	rows.Close()
+	o.Shipments, err = s.Shipments(ctx, site, id)
+	return o, err
 }
 
 func (s Service) Pay(ctx context.Context, site int64, id string, accountID int64, ip string) (Attempt, error) {
@@ -202,7 +231,7 @@ func (s Service) Pay(ctx context.Context, site int64, id string, accountID int64
 		}
 		checkoutItems = append(checkoutItems, payment.CheckoutItem{Name: line.Name, Kind: line.Kind, Quantity: line.Quantity, UnitPrice: line.Amount, ImageURL: imageURL})
 	}
-	r, err := p.Create(ctx, credentials, payment.Checkout{Reference: attempt.ID, Amount: o.Amount, Currency: o.Currency, Items: checkoutItems, Name: o.Item.Name, Kind: o.Item.Kind, Quantity: o.Quantity, UnitPrice: o.Item.Amount, ImageURL: checkoutItems[0].ImageURL, Email: o.Email, CustomerName: o.CustomerName, Address: payment.Address(o.Address), IP: ip, NotifyURL: a.PublicURL + "/api/payments/webhooks/" + a.PublicID, ReturnURL: a.PublicURL + a.ReturnPath + "?payment_order=" + o.ID})
+	r, err := p.Create(ctx, credentials, payment.Checkout{Reference: attempt.ID, Amount: o.Amount, Currency: o.Currency, Items: checkoutItems, Name: o.Item.Name, Kind: o.Item.Kind, Quantity: o.Quantity, UnitPrice: o.Item.Amount, ImageURL: checkoutItems[0].ImageURL, Email: o.Email, CustomerName: o.CustomerName, Address: payment.Address{Street: o.Address.Street, Postcode: o.Address.Postcode, City: o.Address.City, State: o.Address.State, Country: o.Address.Country}, IP: ip, NotifyURL: a.PublicURL + "/api/payments/webhooks/" + a.PublicID, ReturnURL: a.PublicURL + a.ReturnPath + "?payment_order=" + o.ID})
 	if err == nil {
 		if r.Reference != attempt.ID {
 			err = ErrInvalid
@@ -470,7 +499,7 @@ func (s Service) Fulfill(ctx context.Context, site int64, id, status string) err
 		return err
 	}
 	defer tx.Rollback()
-	r, err := tx.ExecContext(ctx, `UPDATE gocms_commerce_order SET fulfillment_status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND site_id=? AND status='paid'`, status, id, site)
+	r, err := tx.ExecContext(ctx, `UPDATE gocms_commerce_order SET fulfillment_status=?,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=? AND site_id=? AND status='paid' AND fulfillment_status<>'completed' AND NOT EXISTS(SELECT 1 FROM gocms_payment_refund r JOIN gocms_payment_attempt a ON a.id=r.attempt_id WHERE a.order_id=gocms_commerce_order.id AND r.status IN ('creating','pending','failed')) AND NOT EXISTS(SELECT 1 FROM gocms_commerce_shipment WHERE order_id=gocms_commerce_order.id) AND NOT EXISTS(SELECT 1 FROM gocms_commerce_order_item WHERE order_id=gocms_commerce_order.id AND kind='physical')`, status, id, site)
 	if err != nil {
 		return err
 	}
@@ -575,7 +604,7 @@ func (s Service) populateOrderLines(ctx context.Context, orders []Order) error {
 		orders[i].Items = []OrderLine{}
 		orders[i].Quantity = 0
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT order_id,offer_id,name,kind,unit_price,quantity,image_url,content_id,sku,specifications_json FROM gocms_commerce_order_item WHERE order_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY order_id,line_number`, args...)
+	rows, err := s.DB.QueryContext(ctx, `SELECT order_id,offer_id,name,kind,unit_price,quantity,image_url,content_id,sku,specifications_json,line_number,(SELECT COALESCE(SUM(si.quantity),0) FROM gocms_commerce_shipment_item si WHERE si.order_id=gocms_commerce_order_item.order_id AND si.line_number=gocms_commerce_order_item.line_number) FROM gocms_commerce_order_item WHERE order_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY order_id,line_number`, args...)
 	if err != nil {
 		return err
 	}
@@ -583,7 +612,7 @@ func (s Service) populateOrderLines(ctx context.Context, orders []Order) error {
 	for rows.Next() {
 		var id, raw string
 		var line OrderLine
-		if err := rows.Scan(&id, &line.ID, &line.Name, &line.Kind, &line.Amount, &line.Quantity, &line.ImageURL, &line.ContentID, &line.SKU, &raw); err != nil {
+		if err := rows.Scan(&id, &line.ID, &line.Name, &line.Kind, &line.Amount, &line.Quantity, &line.ImageURL, &line.ContentID, &line.SKU, &raw, &line.LineNumber, &line.ShippedQuantity); err != nil {
 			return err
 		}
 		if err := json.Unmarshal([]byte(raw), &line.Specifications); err != nil {

@@ -1,3 +1,4 @@
+import { ChangePasswordPanel } from "./password-page"
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
@@ -19,7 +20,7 @@ function AccountSecurity() {
  const {t}=useTranslation()
  const {member}=useShop()
  const providers=useResource("login-providers",getLoginProviders)
- return <div className="page max-w-2xl"><h1>{t("google.account")}</h1><p className="muted mt-3"><bdi>{member?.display_name || member?.username}</bdi></p>{providers.loading ? <Loading/> : providers.error ? <Failure message={providers.error} retry={providers.reload}/> : (["google","facebook"] as const).map(provider=>providers.data?.[provider]===true && <ProviderSecurity key={provider} provider={provider}/>)}</div>
+ return <div className="page max-w-2xl"><h1>{t("google.account")}</h1><p className="muted mt-3"><bdi>{member?.display_name || member?.username}</bdi></p><ChangePasswordPanel />{providers.loading ? <Loading/> : providers.error ? <Failure message={providers.error} retry={providers.reload}/> : (["google","facebook"] as const).map(provider=>providers.data?.[provider]===true && <ProviderSecurity key={provider} provider={provider}/>)}</div>
 }
 function ProviderSecurity({provider}:{provider:"google"|"facebook"}) {
   const { t } = useTranslation()

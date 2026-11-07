@@ -23,6 +23,7 @@ var adminPermissions = []struct {
 	{"content.delete", "删除内容"}, {"content.review", "审核并公开内容"},
 	{"media", "附件管理"}, {"messages", "信息反馈"},
 	{"members", "会员管理"},
+	{"orders", "订单管理"}, {"orders.ship", "创建发货单"}, {"orders.shipping.edit", "更正物流信息"}, {"orders.recipient.edit", "修改收货信息"}, {"orders.complete", "确认订单完成"}, {"orders.refund", "订单退款"},
 	{"payments", "支付与交易管理"},
 	{"payments.configure", "配置支付账户"},
 	{"payments.refund", "发起支付退款"},
@@ -145,8 +146,11 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "地址数据仅允许超级管理员通过后台管理"})
 		return false
 	}
-	if module == "member-login" {
+	if module == "member-login" || module == "mail" {
 		return s.authorizeMemberLogin(w, r, u, session)
+	}
+	if module == "orders" {
+		return s.authorizeOrders(w, r, u, session)
 	}
 	if module == "payments" {
 		return s.authorizePaymentOperation(w, r, u, session)

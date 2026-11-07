@@ -2,15 +2,16 @@ import { apiErrorKey, LocalizedError } from "./errors"
 import i18n, { currentLanguage } from "@/i18n"
 export type Specification = { name: string; value: string }
 export type Variant = { id: number; content_id: number; name: string; image_url: string; kind: "physical" | "digital" | "service"; currency: string; amount: number; sku: string; specifications: Specification[] }
-export type OrderLine = Variant & { quantity: number }
+export type OrderLine = Variant & { quantity: number; line_number: number; shipped_quantity: number }
 export type Channel = { id: number; name: string; currency: string; provider: string; sandbox: boolean }
 export type Store = { site_id: number; site_name: string; path: string; default_language?: string }
-export type Member = { id: number; username: string; email: string; display_name: string }
+export type Member = { id: number; username: string; email: string; display_name: string; has_password: boolean }
 export type CartLine = { variant_id: number; quantity: number }
-export type Address = { street: string; city: string; state: string; postcode: string; country: string }
-export type OrderInput = { items: CartLine[]; email: string; customer_name: string; address: Address; expected_amount: number; currency: string }
+export type Address = { phone: string; street: string; city: string; state: string; postcode: string; country: string }
+export type OrderInput = { language: string; items: CartLine[]; email: string; customer_name: string; address: Address; expected_amount: number; currency: string }
 export type Attempt = { id: string; account_id: number; status: string; payment_url?: string }
-export type Order = { id: string; buyer_id: number; items: OrderLine[]; amount: number; quantity: number; currency: string; status: string; fulfillment_status: string; customer_name: string; email: string; address: Address; created_at: string; attempts?: Attempt[]; refunds?: { id: string; status: string }[] }
+export type Shipment = { id: string; method: string; carrier: string; tracking_number: string; tracking_url: string; shipped_at: string; note: string; items: {line_number: number; quantity: number}[] }
+export type Order = { shipments: Shipment[]; id: string; buyer_id: number; items: OrderLine[]; amount: number; quantity: number; currency: string; status: string; fulfillment_status: string; customer_name: string; email: string; address: Address; created_at: string; attempts?: Attempt[]; refunds?: { id: string; status: string }[] }
 export class APIError extends LocalizedError {
   status: number
   code: string
@@ -47,6 +48,11 @@ export const startGoogleLogin = (next: string, bind = false, password = "") => a
 export const getGoogleIdentity = () => api<{ data: { bound: boolean; has_password: boolean } }>("/api/v1/me/identities/google")
 export const unbindGoogle = (password: string) => api("/api/v1/me/identities/google", { method: "DELETE", body: JSON.stringify({ password }) })
 
-export const startProviderLogin = (provider: "google"|"facebook", next:string, bind=false,password="") => api<{url:string}>(`/api/auth/${provider}/start`,{method:"POST",body:JSON.stringify({next,bind,password})})
+export const startProviderLogin = (provider: "google"|"facebook", next:string, bind=false,password="",recover=false) => api<{url:string}>(`/api/auth/${provider}/start`,{method:"POST",body:JSON.stringify({next,bind,password,recover})})
 export const getProviderIdentity = (provider:string) => api<{ data: { bound:boolean; has_password:boolean } }>(`/api/v1/me/identities/${provider}`)
 export const unbindProvider = (provider:string,password:string) => api(`/api/v1/me/identities/${provider}`,{method:"DELETE",body:JSON.stringify({password})})
+
+export const getPasswordOptions = () => api<{data:{email_enabled:boolean;support_email:string}}>("/api/v1/auth/password-options")
+export const forgotPassword = (email:string,language:string) => api("/api/v1/auth/forgot-password",{method:"POST",body:JSON.stringify({email,language})})
+export const resetPassword = (token:string,password:string) => api("/api/v1/auth/reset-password",{method:"POST",body:JSON.stringify({token,password})})
+export const changePassword = (old_password:string,new_password:string) => api("/api/v1/me/password",{method:"PUT",body:JSON.stringify({old_password,new_password})})

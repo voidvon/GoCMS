@@ -23,6 +23,8 @@
 - Meta App ID 更换会改变身份命名空间，应先评估已有绑定及账号迁移；不要把更换应用视为普通 Secret 轮换。
 - 跨域凭据共享不代表跨域 Cookie SSO。新域名仍需点击登录，之后使用同一会员。
 
+已绑定 Facebook 也可用于找回或首次设置本地密码，无需开启邮件。前台找回页发起 `recover:true`，服务端验证已有绑定后签发限时重置凭证。说明见 [member-password.md](member-password.md)。
+
 ## 接口与验证
 
 配置读取、保存与授权测试使用 `/api/admin/member-login`、`/api/admin/member-login/test` 并附带 `?provider=facebook`；密钥生成、导入及备份接口和 Google 共用。公开接口：

@@ -20,6 +20,7 @@ var ErrNotFound = errors.New("not found")
 
 type Service struct{ DB *sql.DB }
 type Profile struct {
+	HasPassword bool   `json:"has_password"`
 	ID          int64  `json:"id"`
 	Username    string `json:"username"`
 	Email       string `json:"email"`
@@ -45,8 +46,8 @@ func ParseTime(value string) (time.Time, error) {
 }
 func (s Service) Profile(ctx context.Context, id int64) (Profile, error) {
 	var p Profile
-	query := "SELECT id,username,email,display_name,avatar_url FROM gocms_user WHERE id=? AND status='active'"
-	err := s.DB.QueryRowContext(ctx, query, id).Scan(&p.ID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL)
+	query := "SELECT id,username,email,display_name,avatar_url,password_hash<>'' FROM gocms_user WHERE id=? AND status='active'"
+	err := s.DB.QueryRowContext(ctx, query, id).Scan(&p.ID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL, &p.HasPassword)
 	return p, err
 }
 func (s Service) UpdateProfile(ctx context.Context, id int64, name, avatar *string) error {

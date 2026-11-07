@@ -18,6 +18,8 @@ import (
 	"gocms/internal/commerce"
 	"gocms/internal/db"
 	"gocms/internal/geography"
+	"gocms/internal/member"
+	"gocms/internal/membermail"
 	"gocms/internal/memberoauth"
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
@@ -26,6 +28,8 @@ import (
 )
 
 type Server struct {
+	resetJobs      chan struct{}
+	mailSend       func(context.Context, membermail.Config, string, string, string, string) error
 	oauthMu        sync.RWMutex
 	oauthVault     *memberoauth.Vault
 	oauthKeyPath   string
@@ -83,6 +87,12 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		if err := db.EnsureSiteUsers(context.Background(), database); err != nil {
 			return nil, err
 		}
+		if err := member.EnsurePasswordRecovery(context.Background(), database); err != nil {
+			return nil, err
+		}
+		if err := membermail.Ensure(context.Background(), database); err != nil {
+			return nil, err
+		}
 		if err := memberoauth.Ensure(context.Background(), database); err != nil {
 			return nil, err
 		}
@@ -113,6 +123,7 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		return nil, fmt.Errorf("create captcha service: %w", err)
 	}
 	server := &Server{
+		resetJobs:      make(chan struct{}, 4),
 		database:       database,
 		siteRoot:       siteRoot,
 		fileServe:      http.FileServer(http.Dir(siteRoot)),
@@ -197,8 +208,16 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminGeography(response, request)
 		return
 	}
+	if lowerAdminPath == "/api/admin/orders" || strings.HasPrefix(lowerAdminPath, "/api/admin/orders/") {
+		s.adminOrders(response, request)
+		return
+	}
 	if lowerAdminPath == "/api/admin/payments" || strings.HasPrefix(lowerAdminPath, "/api/admin/payments/") {
 		s.adminPayments(response, request)
+		return
+	}
+	if lowerAdminPath == "/api/admin/mail" || lowerAdminPath == "/api/admin/mail/test" {
+		s.adminMail(response, request)
 		return
 	}
 	if strings.HasPrefix(lowerAdminPath, "/api/admin/member-login") {
@@ -511,6 +530,11 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 		if err != nil || matched == nil {
 			http.NotFound(response, request)
 			return
+		}
+		// Host resolution carries the standalone language's configured output
+		// directory. Reloading only by site ID would discard that directory.
+		if hostSite, hostErr := db.GetSiteByHost(request.Context(), s.database, requestHost(request)); hostErr == nil && hostSite != nil && hostSite.ID == siteID {
+			matched = hostSite
 		}
 		if matched != nil {
 			if matched.Status != "active" {

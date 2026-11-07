@@ -31,12 +31,13 @@ export type PaymentAttempt = {
 export type PaymentRefund = {
   id: string; attempt_id: string; amount: number; currency: string; status: string; refund_id: string; error: string
 }
-export type CommerceOrderLine = CommerceOffer & { quantity: number }
+export type CommerceOrderLine = CommerceOffer & { quantity: number; line_number: number; shipped_quantity: number }
 export type CommerceOrder = {
+ revision: number; shipments: Shipment[]; events?: OrderEvent[]
   items: CommerceOrderLine[]
   id: string; buyer_id: number; amount: number; currency: string; status: string; fulfillment_status: string
   email: string; customer_name: string; created_at: string; paid_attempt: string; item: CommerceOffer; quantity: number
-  address: { street: string; postcode: string; city: string; state: string; country: string }
+  address: { phone: string; street: string; postcode: string; city: string; state: string; country: string }
   attempts?: PaymentAttempt[]; refunds?: PaymentRefund[]
 }
 export type PaymentEvent = { id: string; reference: string; kind: string; status: string; created_at: string }
@@ -1355,3 +1356,18 @@ export async function exportMemberLoginKey() {
   if (!response.ok) throw new Error(getErrorMessage(await response.json().catch(() => null), "密钥备份失败"))
   return response.blob()
 }
+
+export type MailConfig = { enabled: boolean; support_email: string; host: string; port: number; tls: "tls" | "starttls"; username: string; from_address: string; from_name: string; password_set: boolean; revision: string }
+export type MailSettingsStatus = { config: MailConfig; key_configured: boolean; key_can_initialize: boolean; secret_readable: boolean }
+export const getMailSettings = () => request<MailSettingsStatus>("/api/admin/mail")
+export const saveMailSettings = (config: MailConfig, password: string) => request("/api/admin/mail", { method: "PUT", body: JSON.stringify({ ...config, password }) })
+export const testMailSettings = (email: string) => request("/api/admin/mail/test", { method: "POST", body: JSON.stringify({ email }) })
+
+export type Shipment = { notice_status?: string; id: string; method: string; carrier: string; tracking_number: string; tracking_url: string; shipped_at: string; note: string; internal_note: string; items: {line_number: number; quantity: number}[] }
+export type ShipmentInput = Omit<Shipment, "id" | "notice_status"> & { revision: number; idempotency_key: string; reason: string }
+export type OrderEvent = {id: number; actor: string; action: string; detail: string; created_at: string}
+export const listManagedOrders = (page: number, status: string, q: string) => request<{items: CommerceOrder[]}>(`/api/admin/orders?page=${page}&status=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}`)
+export const getManagedOrder = (id: string) => request<CommerceOrder>(`/api/admin/orders/${encodeURIComponent(id)}`)
+export const manageOrder = (id: string, action: string, body: unknown, method = "POST") => request<CommerceOrder>(`/api/admin/orders/${encodeURIComponent(id)}/${action}`, {method, body: JSON.stringify(body)})
+
+export const getOrderCarriers = () => request<{items: string[]}>("/api/admin/orders/carriers")

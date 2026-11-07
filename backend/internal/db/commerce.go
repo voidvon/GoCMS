@@ -80,6 +80,8 @@ func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	for _, column := range []struct{ table, name, definition string }{
+		{"gocms_commerce_order", "language", "TEXT NOT NULL DEFAULT 'en'"},
+		{"gocms_commerce_order", "revision", "INTEGER NOT NULL DEFAULT 0"},
 		{"gocms_commerce_offer", "sku", "TEXT NOT NULL DEFAULT ''"},
 		{"gocms_commerce_offer", "specifications_json", "TEXT NOT NULL DEFAULT '[]'"},
 		{"gocms_commerce_offer", "archived", "INTEGER NOT NULL DEFAULT 0"},
@@ -94,7 +96,10 @@ func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 	if _, err := database.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_commerce_variant_sku ON gocms_commerce_offer(site_id,content_id,sku COLLATE NOCASE) WHERE content_id IS NOT NULL AND sku<>'' AND archived=0`); err != nil {
 		return err
 	}
-	return ensureCommerceOrderLines(ctx, database)
+	if err := ensureCommerceOrderLines(ctx, database); err != nil {
+		return err
+	}
+	return ensureShipments(ctx, database)
 }
 
 // Upgrade the original one-row-per-order snapshot without changing historical

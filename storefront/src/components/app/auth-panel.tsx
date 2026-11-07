@@ -71,11 +71,12 @@ export function AuthPanel({ mode, next }: { mode: "login" | "register"; next: st
       {registering && <div className="field"><Label htmlFor="member-confirm-password">{t("auth.confirmPassword")}</Label><PasswordInput id="member-confirm-password" name="confirm_password" autoComplete="new-password" required minLength={8} maxLength={1024} disabled={busy} /></div>}
       <Button type="submit" className="action-button w-full" disabled={busy}>{busy && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}{busy ? t("common.processing") : registering ? t("auth.registerSubmit") : t("common.login")}{!busy && <ArrowRight className="size-4 rtl:rotate-180" aria-hidden="true" />}</Button>
     </form>
+    {!registering && <Link href="/shop/forgot-password" className="text-link mt-5">{t("password.forgot")}</Link>}
     <Button variant="link" nativeButton={false} disabled={busy} className="mt-5 h-auto min-h-10 max-w-full whitespace-normal px-0 text-start" render={<Link href={authURL(registering ? "login" : "register", next)} />}>{registering ? t("auth.toLogin") : t("auth.toRegister")}</Button>
   </section>
 }
 
-function PasswordInput(props: ComponentProps<typeof Input>) {
+export function PasswordInput(props: ComponentProps<typeof Input>) {
   const { t } = useTranslation()
   const [visible, setVisible] = useState(false)
   return <div className="relative">

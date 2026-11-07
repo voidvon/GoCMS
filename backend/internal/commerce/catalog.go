@@ -273,6 +273,7 @@ func (s Service) provider(a Account) (payment.Provider, payment.Account, error) 
 }
 
 type Address struct {
+	Phone    string `json:"phone,omitempty"`
 	Street   string `json:"street"`
 	Postcode string `json:"postcode"`
 	City     string `json:"city"`
@@ -287,11 +288,14 @@ type CartItemInput struct {
 }
 
 type OrderLine struct {
+	LineNumber      int64 `json:"line_number"`
+	ShippedQuantity int64 `json:"shipped_quantity"`
 	Offer
 	Quantity int64 `json:"quantity"`
 }
 
 type OrderInput struct {
+	Language       string          `json:"language,omitempty"`
 	Items          []CartItemInput `json:"items,omitempty"`
 	ExpectedAmount *int64          `json:"expected_amount,omitempty"`
 	Currency       string          `json:"currency,omitempty"`
@@ -305,6 +309,8 @@ type OrderInput struct {
 }
 
 type Order struct {
+	Revision          int64       `json:"revision"`
+	Shipments         []Shipment  `json:"shipments"`
 	Items             []OrderLine `json:"items"`
 	ID                string      `json:"id"`
 	BuyerID           int64       `json:"buyer_id"`
@@ -324,6 +330,9 @@ type Order struct {
 }
 
 func (s Service) CreateOrder(ctx context.Context, site, buyer int64, key string, in OrderInput) (Order, error) {
+	if len(in.Language) > 16 || (in.Address.Phone != "" && !validText(in.Address.Phone, 32)) {
+		return Order{}, ErrInvalid
+	}
 	if !validText(key, 128) || len(key) < 16 || buyer <= 0 || !validText(in.CustomerName, 100) || len(in.Email) > 128 {
 		return Order{}, ErrInvalid
 	}
@@ -421,7 +430,7 @@ func (s Service) CreateOrder(ctx context.Context, site, buyer int64, key string,
 		return Order{}, err
 	}
 	address, _ := json.Marshal(in.Address)
-	_, err = tx.ExecContext(ctx, `INSERT INTO gocms_commerce_order(id,site_id,buyer_id,idempotency_key,request_hash,amount,currency,email,customer_name,address_json) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, site, buyer, key, hash, amount, currency, in.Email, in.CustomerName, string(address))
+	_, err = tx.ExecContext(ctx, `INSERT INTO gocms_commerce_order(id,site_id,buyer_id,idempotency_key,request_hash,amount,currency,email,customer_name,address_json,language) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, site, buyer, key, hash, amount, currency, in.Email, in.CustomerName, string(address), in.Language)
 	if err != nil {
 		return Order{}, err
 	}

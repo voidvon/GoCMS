@@ -1,4 +1,4 @@
-import { formatDate, type MessageKey } from "@/i18n"
+import { formatDate, formatNumber, type MessageKey } from "@/i18n"
 import { localError } from "@/lib/errors"
 import { useTranslation } from "react-i18next"
 import { useEffect, useState } from "react"
@@ -12,9 +12,9 @@ import { Link } from "@/lib/router"
 import { PageHeading, ProductImage, SectionHeading } from "@/components/app/commerce-ui"
 import { cn } from "@/lib/utils"
 import { AuthRequired } from "@/components/app/auth-panel"
-import { Empty, Failure, Loading, showError } from "@/components/app/feedback"
+import { Empty, Failure, Loading, showError, showSuccess } from "@/components/app/feedback"
 const states: Record<string, MessageKey> = { unpaid: "orders.unpaid", paid: "orders.paid", refunded: "orders.refunded" }
-const fulfillment: Record<string, MessageKey> = { pending: "orders.fulfillmentPending", processing: "orders.fulfillmentProcessing", completed: "orders.fulfillmentCompleted", failed: "orders.fulfillmentFailed" }
+const fulfillment: Record<string, MessageKey> = { partial: "shipping.partial", shipped: "shipping.shipped", pending: "orders.fulfillmentPending", processing: "orders.fulfillmentProcessing", completed: "orders.fulfillmentCompleted", failed: "orders.fulfillmentFailed" }
 function OrderList({ page }: { page: number }) {
   const { t } = useTranslation()
   const { shoppingURL } = useShop()
@@ -100,6 +100,14 @@ function OrderDetail({ id, returned }: { id: string; returned: boolean }) {
           <strong className="ms-auto text-base font-semibold tabular-nums"><bdi>{money(item.amount * item.quantity, order.currency)}</bdi></strong>
         </article>)}</div>
       </section>
+      {!!order.shipments?.length && <section className="panel space-y-5"><SectionHeading icon={<PackageCheck className="size-4"/>}>{t("shipping.packages")}</SectionHeading>{order.shipments.map(p => <article key={p.id} className="space-y-3 rounded-xl border p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-medium">{t(p.method === "courier" ? "shipping.courier" : p.method === "pickup" ? "shipping.pickup" : "shipping.noShipping")}</h3><time className="text-xs text-muted-foreground" dateTime={p.shipped_at}>{formatDate(p.shipped_at)}</time></div>
+        {p.carrier && <p className="text-sm"><bdi>{p.carrier}</bdi></p>}
+        {p.tracking_number && <div className="flex flex-wrap items-center gap-3"><span className="break-all font-mono text-sm"><bdi>{p.tracking_number}</bdi></span><Button size="sm" variant="outline" onClick={() => void navigator.clipboard.writeText(p.tracking_number).then(() => showSuccess(t("shipping.copied"))).catch(() => showError(localError("errors.copyTracking")))}>{t("shipping.copy")}</Button></div>}
+        {p.tracking_url && <a className="text-link text-sm" href={p.tracking_url} target="_blank" rel="noopener noreferrer">{t("shipping.track")}</a>}
+        <ul className="space-y-2">{p.items.map(i => <li key={i.line_number} className="text-sm"><bdi>{t("shipping.item", {name: order.items.find(x => x.line_number === i.line_number)?.name || "", quantity: formatNumber(i.quantity)})}</bdi></li>)}</ul>
+        {p.note && <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground"><bdi>{p.note}</bdi></p>}
+      </article>)}</section>}
     </div>
     <aside className="panel summary-panel space-y-6">
       <h2 className="text-lg">{t("orders.info")}</h2>
@@ -107,6 +115,7 @@ function OrderDetail({ id, returned }: { id: string; returned: boolean }) {
       <p className="text-xs leading-6 text-muted-foreground">{t("orders.created", { date: formatDate(order.created_at) })}</p>
       <div className="space-y-2 border-y py-5"><p className="muted">{t("orders.amount")}</p><strong className="block text-3xl font-semibold tracking-tight tabular-nums"><bdi>{money(order.amount, order.currency)}</bdi></strong></div>
       <div className="space-y-2"><h3 className="text-xs font-medium text-muted-foreground">{t("checkout.contact")}</h3><p className="break-words text-sm font-medium"><bdi>{order.customer_name}</bdi></p><p className="muted break-all"><bdi>{order.email}</bdi></p></div>
+      {order.address.phone && <p className="muted" dir="ltr">{order.address.phone}</p>}
       {order.address.street && <div className="space-y-2"><h3 className="text-xs font-medium text-muted-foreground">{t("checkout.shipping")}</h3><p className="muted break-words">{[order.address.country, order.address.state, order.address.city, order.address.street, order.address.postcode].filter(Boolean).join(" ")}</p></div>}
       {order.status === "unpaid" && <div className="space-y-4 border-t pt-5">
         <div className="field"><Label htmlFor="order-channel">{t("checkout.channel")}</Label>{active ? <p className="muted">{t("orders.existingChannel")}</p> : channels.length ? <Select disabled={busy} value={channel || String(channels[0].id)} onValueChange={value => { if (value) setChannel(value) }}><SelectTrigger id="order-channel" className="w-full" aria-label={t("orders.channel")}><SelectValue>{channels.find(item => String(item.id) === (channel || String(channels[0].id)))?.name}</SelectValue></SelectTrigger><SelectContent>{channels.map(item => <SelectItem key={item.id} value={String(item.id)}>{item.name}{item.sandbox ? ` (${t("common.sandbox")})` : ""}</SelectItem>)}</SelectContent></Select> : <p className="muted">{t("orders.noChannels")}</p>}</div>

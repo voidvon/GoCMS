@@ -93,7 +93,7 @@ func safeOAuthNext(value string) string {
 		return "/shop/cart"
 	}
 	p := strings.ToLower(u.Path)
-	for _, prefix := range []string{"/api", "/admin", "/shop/login", "/shop/register", "/shop/cart/add"} {
+	for _, prefix := range []string{"/api", "/admin", "/shop/login", "/shop/register", "/shop/forgot-password", "/shop/reset-password", "/shop/cart/add"} {
 		if p == prefix || strings.HasPrefix(p, prefix+"/") {
 			return "/shop/cart"
 		}
@@ -149,11 +149,16 @@ func (s *Server) startGoogle(w http.ResponseWriter, r *http.Request, test bool) 
 		return
 	}
 	var in struct {
+		Recover  bool   `json:"recover"`
 		Next     string `json:"next"`
 		Bind     bool   `json:"bind"`
 		Password string `json:"password"`
 	}
 	if memberDecode(r, &in) != nil {
+		memberResult(w, nil, member.ErrInvalid)
+		return
+	}
+	if in.Recover && (in.Bind || test) {
 		memberResult(w, nil, member.ErrInvalid)
 		return
 	}
@@ -220,7 +225,7 @@ func (s *Server) startGoogle(w http.ResponseWriter, r *http.Request, test bool) 
 	verifier := oauth2.GenerateVerifier()
 	_, err = s.database.ExecContext(r.Context(), `DELETE FROM gocms_member_oauth_state WHERE expires_at<=?`, time.Now().Unix())
 	if err == nil {
-		_, err = s.database.ExecContext(r.Context(), `INSERT INTO gocms_member_oauth_state(state_hash,browser_hash,site_id,revision,nonce,verifier,next_path,user_id,session_hash,expires_at,origin,provider) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, memberoauth.Hash(state), memberoauth.Hash(browser), c.SiteID, c.Revision, nonce, verifier, safeOAuthNext(in.Next), user, session, time.Now().Add(10*time.Minute).Unix(), c.PublicURL, c.ProviderName())
+		_, err = s.database.ExecContext(r.Context(), `INSERT INTO gocms_member_oauth_state(state_hash,browser_hash,site_id,revision,nonce,verifier,next_path,user_id,session_hash,expires_at,origin,provider,recovery) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, memberoauth.Hash(state), memberoauth.Hash(browser), c.SiteID, c.Revision, nonce, verifier, safeOAuthNext(in.Next), user, session, time.Now().Add(10*time.Minute).Unix(), c.PublicURL, c.ProviderName(), in.Recover)
 	}
 	if err != nil {
 		memberResult(w, nil, err)
@@ -264,10 +269,11 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{Name: cookie.Name, Value: "", Path: "/api/auth/" + loginProvider(r) + "/callback", HttpOnly: true, Secure: requestScheme(r) == "https", SameSite: http.SameSiteLaxMode, MaxAge: -1})
+	var recovery bool
 	var site, user int64
 	var revision, nonce, verifier, next, session, origin string
 	// DELETE RETURNING atomically consumes the transaction and rejects replays.
-	err := s.database.QueryRowContext(r.Context(), `DELETE FROM gocms_member_oauth_state WHERE state_hash=? AND browser_hash=? AND expires_at>? AND provider=? RETURNING site_id,revision,nonce,verifier,next_path,user_id,session_hash,origin`, memberoauth.Hash(state), memberoauth.Hash(cookie.Value), time.Now().Unix(), loginProvider(r)).Scan(&site, &revision, &nonce, &verifier, &next, &user, &session, &origin)
+	err := s.database.QueryRowContext(r.Context(), `DELETE FROM gocms_member_oauth_state WHERE state_hash=? AND browser_hash=? AND expires_at>? AND provider=? RETURNING site_id,revision,nonce,verifier,next_path,user_id,session_hash,origin,recovery`, memberoauth.Hash(state), memberoauth.Hash(cookie.Value), time.Now().Unix(), loginProvider(r)).Scan(&site, &revision, &nonce, &verifier, &next, &user, &session, &origin, &recovery)
 	if err != nil {
 		fail("google_failed")
 		return
@@ -277,6 +283,8 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 		code = strings.Replace(code, "google_", loginProvider(r)+"_", 1)
 		if test {
 			http.Redirect(w, r, adminLoginTestURL(r, "failed"), http.StatusSeeOther)
+		} else if recovery {
+			http.Redirect(w, r, "/shop/forgot-password?oauth_error="+url.QueryEscape(code), http.StatusSeeOther)
 		} else {
 			http.Redirect(w, r, "/shop/login?next="+url.QueryEscape(safeOAuthNext(next))+"&oauth_error="+url.QueryEscape(code), http.StatusSeeOther)
 		}
@@ -339,6 +347,16 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, adminLoginTestURL(r, "success"), http.StatusSeeOther)
 		return
 	}
+	if recovery {
+		token, e := (member.Service{DB: s.database}).IssueExternalPasswordReset(r.Context(), site, c.ProviderName(), revision, claims.Subject)
+		if e != nil {
+			http.Redirect(w, r, "/shop/forgot-password?recovery_error=1", http.StatusSeeOther)
+			return
+		}
+		http.Redirect(w, r, "/shop/reset-password#token="+url.QueryEscape(token), http.StatusSeeOther)
+		return
+	}
+
 	current := ""
 	if ck, e := r.Cookie("gocms_user"); e == nil {
 		current = ck.Value

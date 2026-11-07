@@ -44,6 +44,9 @@ func (s *Server) StartPaymentMaintenance(ctx context.Context) {
 			if err := s.commerce.Reconcile(job); err != nil && ctx.Err() == nil {
 				log.Printf("payment reconciliation: %v", err)
 			}
+			noticeJob, noticeCancel := context.WithTimeout(ctx, 45*time.Second)
+			s.shipmentNotices(noticeJob)
+			noticeCancel()
 		}
 		run()
 		ticker := time.NewTicker(time.Minute)

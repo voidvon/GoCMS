@@ -50,6 +50,15 @@ func Ensure(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 	}
+	var hasRecovery int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('gocms_member_oauth_state') WHERE name='recovery'`).Scan(&hasRecovery); err != nil {
+		return err
+	}
+	if hasRecovery == 0 {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE gocms_member_oauth_state ADD COLUMN recovery INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
 	// Adopt only an unambiguous legacy configuration. Preserve its encryption scope
 	// so migration does not require decrypting or exposing the existing secret.
 	_, err := db.ExecContext(ctx, `INSERT INTO gocms_platform_oauth_config(provider,enabled,auto_register,client_id,secret_ciphertext,secret_scope,revision)

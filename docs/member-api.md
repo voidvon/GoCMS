@@ -108,3 +108,5 @@ OpenAPI: member-api.openapi.json。
 ## Google 登录与绑定
 
 Google 授权、后台配置与开关、会员绑定规则见 [Google 会员登录](google-login.md)。会员会话沿用本页现有接口，Google 凭据不返回 storefront。
+
+密码修改、邮件找回及绑定第三方账号验证流程见 [member-password.md](member-password.md)。`GET /api/v1/me` 另返回 `has_password`。

@@ -1,3 +1,4 @@
+import { ForgotPasswordPage, ResetPasswordPage } from "@/pages/password-page"
 import { storefrontName } from "@/lib/store-name"
 import { configureSiteLanguage, formatNumber } from "@/i18n"
 import { LanguageSwitcher } from "@/components/app/language-switcher"
@@ -25,7 +26,7 @@ function Shell() {
   const { store, member, memberLoading, cart, refreshMember } = useShop()
   const [busy, setBusy] = useState(false)
   const path = url.pathname
-  const title = path === "/shop/account" ? t("google.account") : path === "/shop/login" ? t("auth.loginTitle") : path === "/shop/register" ? t("auth.registerTitle") : path === "/shop/checkout" ? t("checkout.title") : path === "/shop/cart/add" ? t("add.title") : path.startsWith("/shop/orders/") ? t("orders.detail") : path === "/shop/orders" ? t("common.orders") : t("common.cart")
+  const title = path === "/shop/forgot-password" ? t("password.forgot") : path === "/shop/reset-password" ? t("password.resetTitle") : path === "/shop/account" ? t("google.account") : path === "/shop/login" ? t("auth.loginTitle") : path === "/shop/register" ? t("auth.registerTitle") : path === "/shop/checkout" ? t("checkout.title") : path === "/shop/cart/add" ? t("add.title") : path.startsWith("/shop/orders/") ? t("orders.detail") : path === "/shop/orders" ? t("common.orders") : t("common.cart")
   useEffect(() => {
     const oauthError = url.searchParams.get("oauth_error")
     if (oauthError) {
@@ -50,7 +51,9 @@ function Shell() {
   const handoffParams = new URLSearchParams(url.search)
   handoffParams.delete("lang")
   let page
-  if (path === "/shop/account") page = <AccountPage />
+  if (path === "/shop/forgot-password") page = <ForgotPasswordPage />
+  else if (path === "/shop/reset-password") page = <ResetPasswordPage />
+  else if (path === "/shop/account") page = <AccountPage />
   else if (path === "/shop/cart/add") page = <AddToCartPage key={handoffParams.toString()} search={url.search} />
   else if (path === "/shop/cart" || path === "/shop/" || path === "/shop") page = <CartPage />
   else if (path === "/shop/login" || path === "/shop/register") page = <AuthPage mode={path === "/shop/login" ? "login" : "register"} search={url.search} />

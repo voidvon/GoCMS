@@ -35,7 +35,7 @@ func TestMemberV1Lifecycle(t *testing.T) {
 	call("PATCH", "/api/v1/me", `{"status":"active","groups":["vip"]}`, cookie, 400)
 	call("PATCH", "/api/v1/me", `{"display_name":"Alice","avatar_url":"https://example.org/avatar.png"}`, cookie, 200)
 	me := call("GET", "/api/v1/me", "", cookie, 200)
-	if !strings.Contains(me.Body.String(), "Alice") || strings.Contains(me.Body.String(), "password") {
+	if !strings.Contains(me.Body.String(), "Alice") || !strings.Contains(me.Body.String(), `"has_password":true`) || strings.Contains(me.Body.String(), "password_hash") || strings.Contains(me.Body.String(), "initial-password") || strings.Contains(me.Body.String(), "$argon2") {
 		t.Fatal(me.Body.String())
 	}
 	sessions := call("GET", "/api/v1/me/sessions", "", cookie, 200)

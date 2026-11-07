@@ -1,11 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { CreditCard, Plus, RefreshCw, ReceiptText, Radio } from "lucide-react"
+import { CreditCard, Plus, RefreshCw, Radio } from "lucide-react"
 import {
-  createPaymentAccount, fulfillCommerceOrder, getCommerceOrder,
-  getCommerceOrders, getPaymentAccounts, getPaymentEvents, getPaymentStatus,
-  refundPayment, syncPayment, syncPaymentRefund, updatePaymentAccount, initializePaymentKey,
+  createPaymentAccount,
+  getPaymentAccounts, getPaymentEvents, getPaymentStatus,
+  updatePaymentAccount, initializePaymentKey,
   adoptPaymentKey, exportPaymentKey, installPaymentTemplate,
-  type AdminUser, type CommerceOrder, type PaymentAccount,
+  type AdminUser, type PaymentAccount,
   type PaymentAccountInput, type PaymentEvent, type PaymentStatus,
 } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
@@ -18,7 +18,6 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { ConfirmDialog } from "@/components/app/app-ui"
 import { showError, showSuccess } from "@/components/app/admin-notifications"
 import { TimeText } from "@/components/app/time-text"
 
@@ -33,7 +32,7 @@ const sandboxExample: PaymentAccountInput = {
   merchant_id: "2018092714313010016291", secret: "F78BC96A55548B2319EE68E0", enabled: true,
 }
 
-type Tab = "orders" | "accounts" | "events"
+type Tab = "accounts" | "events"
 
 function downloadFile(blob: Blob, name: string) {
   const url = URL.createObjectURL(blob)
@@ -60,9 +59,6 @@ function accountDraft(value: unknown): PaymentAccountInput {
   return result
 }
 
-function money(amount: number, currency: string) {
-  return new Intl.NumberFormat("zh-CN", { style: "currency", currency }).format(amount / (currency === "JPY" ? 1 : 100))
-}
 function State({ value }: { value: string }) {
   return <Badge variant={value === "paid" || value === "succeeded" || value === "completed" ? "default" : "secondary"}>{states[value] ?? value}</Badge>
 }
@@ -77,7 +73,7 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
   const { activeSiteId } = useSite()
   const permissions = user.site_permissions?.[activeSiteId] ?? user.permissions
   const can = (key: string) => user.is_super || permissions.includes(key) || permissions.includes("*")
-  const [tab, setTab] = useState<Tab>("orders")
+  const [tab, setTab] = useState<Tab>(can("payments.configure") ? "accounts" : "events")
   const [page, setPage] = useState(1)
   const [version, setVersion] = useState(0)
   const [loadedKey, setLoadedKey] = useState("")
@@ -88,11 +84,8 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
   const [importKey, setImportKey] = useState("")
   const configured = keyStatus?.key_configured
   const [accounts, setAccounts] = useState<PaymentAccount[]>([])
-  const [orders, setOrders] = useState<CommerceOrder[]>([])
   const [events, setEvents] = useState<PaymentEvent[]>([])
   const [accountForm, setAccountForm] = useState<PaymentAccountInput | null>(null)
-  const [detail, setDetail] = useState<CommerceOrder | null>(null)
-  const [refundID, setRefundID] = useState<string | null>(null)
   const loading = loadedKey !== `${tab}:${page}:${version}`
 
   useEffect(() => {
@@ -104,7 +97,6 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
   useEffect(() => {
     let cancelled = false
     const load = async () => {
-      if (tab === "orders") { const r = await getCommerceOrders(page); if (!cancelled) setOrders(r.items) }
       if (tab === "accounts") { const r = await getPaymentAccounts(); if (!cancelled) setAccounts(r.items) }
       if (tab === "events") { const r = await getPaymentEvents(page); if (!cancelled) setEvents(r.items) }
     }
@@ -112,21 +104,17 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
     return () => { cancelled = true }
   }, [tab, page, version])
 
-  async function run(action: () => Promise<unknown>, success: string, refreshDetail = false) {
+  async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true)
     try {
       await action()
-      if (refreshDetail && detail) setDetail(await getCommerceOrder(detail.id))
       if (success) showSuccess(success)
       setVersion((v) => v + 1)
     } catch (e) { showError(e) }
     finally { setBusy(false) }
   }
-  async function viewOrder(id: string) {
-    await run(async () => setDetail(await getCommerceOrder(id)), "")
-  }
-  const rows = tab === "orders" ? orders.length : tab === "events" ? events.length : accounts.length
-  const tabs = [{ id: "orders", label: "交易订单", icon: ReceiptText }, ...(can("payments.configure") ? [{ id: "accounts", label: "支付渠道", icon: CreditCard }] : []), { id: "events", label: "回调记录", icon: Radio }]
+  const rows = tab === "events" ? events.length : accounts.length
+  const tabs = [...(can("payments.configure") ? [{ id: "accounts", label: "支付渠道", icon: CreditCard }] : []), { id: "events", label: "回调记录", icon: Radio }]
 
   return <div className="flex h-full min-h-0 flex-col gap-4">
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -139,13 +127,11 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
     <ScrollArea orientation="both" className="min-h-0 flex-1 rounded-lg border" contentClassName="min-w-full">
       <Table containerClassName="overflow-visible!">
         <TableHeader><TableRow>
-          {tab === "orders" && <><TableHead>订单 / 商品</TableHead><TableHead>买家</TableHead><TableHead>金额</TableHead><TableHead>支付状态</TableHead><TableHead>交付状态</TableHead><TableHead>创建时间</TableHead><TableHead>操作</TableHead></>}
           {tab === "accounts" && <><TableHead>渠道名称</TableHead><TableHead>服务商 / 环境</TableHead><TableHead>币种</TableHead><TableHead>商户店铺</TableHead><TableHead>状态</TableHead><TableHead>操作</TableHead></>}
           {tab === "events" && <><TableHead>支付编号</TableHead><TableHead>类型</TableHead><TableHead>状态</TableHead><TableHead>接收时间</TableHead></>}
         </TableRow></TableHeader>
         <TableBody>
           {loading ? <TableRow><TableCell colSpan={7} className="h-40 text-center text-muted-foreground">正在加载...</TableCell></TableRow> : rows === 0 ? <TableRow><TableCell colSpan={7} className="h-48 text-center text-muted-foreground">{tab === "accounts" ? "尚未添加收款渠道，先配置一个沙箱账户开始测试。" : tab === "events" ? "尚未收到已验证的支付回调。" : "暂无订单，买家通过前台购买后，订单会显示在这里。"}</TableCell></TableRow> : <>
-            {tab === "orders" && orders.map((o) => <TableRow key={o.id}><TableCell><p className="font-medium">{o.items?.[0]?.name || o.item.name}{(o.items?.length ?? 1) > 1 ? ` 等 ${o.items.length} 种规格` : ` × ${o.quantity}`}</p><p className="text-xs text-muted-foreground">共 {o.quantity} 件</p><p className="mt-1 font-mono text-xs text-muted-foreground">{o.id}</p></TableCell><TableCell>{o.customer_name}<p className="text-xs text-muted-foreground">{o.email}</p></TableCell><TableCell>{money(o.amount, o.currency)}</TableCell><TableCell><State value={o.status} /></TableCell><TableCell><State value={o.fulfillment_status} /></TableCell><TableCell><TimeText value={o.created_at} /></TableCell><TableCell><Button variant="outline" size="sm" disabled={busy} onClick={() => viewOrder(o.id)}>查看详情</Button></TableCell></TableRow>)}
             {tab === "accounts" && accounts.map((a) => <TableRow key={a.id}><TableCell className="font-medium">{a.name}<p className="text-xs text-muted-foreground">{a.public_url}</p></TableCell><TableCell>PingPong Checkout v4<p className="text-xs text-muted-foreground">{environments[a.environment as keyof typeof environments]}</p></TableCell><TableCell>{a.currency}</TableCell><TableCell className="font-mono text-xs">{a.merchant_id}</TableCell><TableCell><Badge variant={a.enabled ? "default" : "secondary"}>{a.enabled ? "已启用" : "已停用"}</Badge></TableCell><TableCell><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy} onClick={() => { const draft = accountDraft(a); setAccountForm({ ...draft, name: a.name + "（新配置）", secret: "", enabled: false }) }}>复制为新渠道</Button><Button variant="outline" size="sm" disabled={busy} onClick={() => run(() => updatePaymentAccount({ ...a, enabled: !a.enabled }), a.enabled ? "渠道已停用，历史交易仍可同步及退款。" : "渠道已启用。")}>{a.enabled ? "停用" : "启用"}</Button></div><p className="mt-2 break-all text-xs text-muted-foreground">通知地址：{a.public_url}/api/payments/webhooks/{a.public_id}</p></TableCell></TableRow>)}
             {tab === "events" && events.map((e) => <TableRow key={e.id}><TableCell className="font-mono text-xs">{e.reference}</TableCell><TableCell>{e.kind === "refund" ? "退款" : "支付"}</TableCell><TableCell><State value={e.status} /></TableCell><TableCell><TimeText value={e.created_at} /></TableCell></TableRow>)}
           </>}
@@ -200,17 +186,5 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
       </DialogContent>
     </Dialog>
 
-    <Dialog open={detail !== null} onOpenChange={(open) => { if (!open && !busy) setDetail(null) }}>
-      <DialogContent className="flex max-h-[90svh] flex-col sm:max-w-3xl"><DialogHeader><DialogTitle>订单详情</DialogTitle><DialogDescription className="break-all font-mono">{detail?.id}</DialogDescription></DialogHeader>
-        {detail && <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-5 px-1 py-2">
-          <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-2"><div><p className="font-medium">共 {detail.quantity} 件 · {detail.items?.length || 1} 种规格</p><p className="mt-2 text-xl font-semibold">{money(detail.amount, detail.currency)}</p></div><div className="space-y-2"><p>{detail.customer_name} · {detail.email}</p><div className="flex gap-2"><State value={detail.status} /><State value={detail.fulfillment_status} /></div></div>{detail.address.street && <p className="text-sm text-muted-foreground sm:col-span-2">收货地址：{Object.values(detail.address).filter(Boolean).join(" · ")}</p>}</div>
-          <section className="space-y-3"><h3 className="text-sm font-semibold">商品明细</h3>{(detail.items?.length ? detail.items : [{ ...detail.item, quantity: detail.quantity }]).map((item, index) => <div key={index} className="flex justify-between gap-4 rounded-lg border p-3"><div><p className="text-sm font-medium">{item.name} × {item.quantity}</p><p className="mt-1 text-xs text-muted-foreground">{item.sku && `规格编号：${item.sku}`} {item.specifications?.map((spec) => `${spec.name}：${spec.value}`).join(" / ")}</p><p className="mt-1 text-xs text-muted-foreground">单价 {money(item.amount, detail.currency)}</p></div><p className="shrink-0 text-sm">{money(item.amount * item.quantity, detail.currency)}</p></div>)}</section>
-          <section className="space-y-3"><h3 className="text-sm font-semibold">支付流水</h3>{!detail.attempts?.length && <p className="text-sm text-muted-foreground">买家尚未发起支付。</p>}{detail.attempts?.map((a) => <div key={a.id} className="space-y-3 rounded-lg border p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="break-all font-mono text-xs">{a.id}</p><State value={a.status} /></div><p className="break-all text-xs text-muted-foreground">服务商交易号：{a.transaction_id || "待确认"} · 渠道 #{a.account_id}</p>{a.error && <p className="text-sm text-amber-700 dark:text-amber-300">{a.error}</p>}<div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => syncPayment(a.id), "支付状态已同步。", true)}>同步状态</Button>{can("payments.refund") && a.status === "succeeded" && !detail.refunds?.some((r) => r.attempt_id === a.id && (r.status === "succeeded" || r.status === "pending" || r.status === "creating")) && <Button size="sm" variant="outline" disabled={busy} onClick={() => setRefundID(a.id)}>全额退款</Button>}</div></div>)}</section>
-          {!!detail.refunds?.length && <section className="space-y-3"><h3 className="text-sm font-semibold">退款记录</h3>{detail.refunds.map((r) => <div key={r.id} className="space-y-2 rounded-lg border p-3"><div className="flex flex-wrap justify-between gap-2"><span className="break-all font-mono text-xs">{r.id}</span><State value={r.status} /></div><p className="text-sm">{money(r.amount, r.currency)} · {r.refund_id || "等待服务商确认"}</p>{r.error && <p className="text-sm text-amber-700 dark:text-amber-300">{r.error}</p>}<Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => syncPaymentRefund(r.id), "退款状态已同步。", true)}>同步退款</Button></div>)}</section>}
-          {detail.status === "paid" && can("payments.fulfill") && <section className="space-y-3"><h3 className="text-sm font-semibold">交付处理</h3><div className="flex flex-wrap gap-2">{["processing", "completed", "failed"].map((status) => <Button key={status} variant="outline" disabled={busy || detail.fulfillment_status === status} onClick={() => run(() => fulfillCommerceOrder(detail.id, status), "交付状态已更新。", true)}>{states[status]}</Button>)}</div></section>}
-        </ScrollArea>}
-      </DialogContent>
-    </Dialog>
-    <ConfirmDialog open={refundID !== null} onOpenChange={(open) => { if (!open && !busy) setRefundID(null) }} title="确认全额退款" description="将向原支付渠道退还本次付款的全部金额。退款提交后可能需要等待服务商处理，交付状态需单独核查。" confirmLabel="提交退款" pending={busy} onConfirm={() => { if (refundID) void run(async () => { try { await refundPayment(refundID) } finally { setRefundID(null) } }, "退款请求已提交，请查看退款记录确认结果。", true) }} />
   </div>
 }

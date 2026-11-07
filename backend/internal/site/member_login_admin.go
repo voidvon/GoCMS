@@ -78,7 +78,7 @@ func (s *Server) validateLoginKey(ctx context.Context, v *memberoauth.Vault) err
 	if s.database == nil {
 		return nil
 	}
-	rows, err := s.database.QueryContext(ctx, `SELECT site_id,secret_ciphertext FROM gocms_member_oauth_config WHERE secret_ciphertext<>'' UNION ALL SELECT CASE WHEN provider='facebook' THEN -1 ELSE secret_scope END,secret_ciphertext FROM gocms_platform_oauth_config WHERE secret_ciphertext<>''`)
+	rows, err := s.database.QueryContext(ctx, `SELECT site_id,secret_ciphertext FROM gocms_member_oauth_config WHERE secret_ciphertext<>'' UNION ALL SELECT CASE WHEN provider='facebook' THEN -1 ELSE secret_scope END,secret_ciphertext FROM gocms_platform_oauth_config WHERE secret_ciphertext<>'' UNION ALL SELECT -2,secret_ciphertext FROM gocms_platform_mail_config WHERE secret_ciphertext<>''`)
 	if err != nil {
 		return err
 	}
@@ -99,7 +99,7 @@ func (s *Server) authorizeMemberLogin(w http.ResponseWriter, r *http.Request, u 
 	if session && u.IsSuper {
 		return true
 	}
-	writeJSON(w, 403, map[string]string{"error": "平台第三方登录仅允许超级管理员通过后台管理"})
+	writeJSON(w, 403, map[string]string{"error": "平台安全配置仅允许超级管理员通过后台管理"})
 	return false
 }
 func loginAdminError(w http.ResponseWriter, status int, message string) {
@@ -185,7 +185,7 @@ func (s *Server) adminMemberLogin(w http.ResponseWriter, r *http.Request) {
 		key := strings.TrimSpace(in.Key)
 		if in.Mode == "generate" && key == "" {
 			var count int
-			if err := s.database.QueryRowContext(r.Context(), `SELECT (SELECT COUNT(*) FROM gocms_member_oauth_config WHERE secret_ciphertext<>'')+(SELECT COUNT(*) FROM gocms_platform_oauth_config WHERE secret_ciphertext<>'')`).Scan(&count); err != nil {
+			if err := s.database.QueryRowContext(r.Context(), `SELECT (SELECT COUNT(*) FROM gocms_member_oauth_config WHERE secret_ciphertext<>'')+(SELECT COUNT(*) FROM gocms_platform_oauth_config WHERE secret_ciphertext<>'')+(SELECT COUNT(*) FROM gocms_platform_mail_config WHERE secret_ciphertext<>'')`).Scan(&count); err != nil {
 				loginAdminError(w, 500, "无法检查已有配置")
 				return
 			}

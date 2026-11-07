@@ -84,6 +84,9 @@ func (s *Server) memberAPI(w http.ResponseWriter, r *http.Request) {
 	p := strings.TrimSuffix(r.URL.Path, "/")
 	// Authentication endpoints retain their existing response during migration.
 	switch p {
+	case "/api/v1/auth/password-options", "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password":
+		s.memberPasswordRecovery(w, r)
+		return
 	case "/api/v1/auth/register":
 		s.memberAuthAdapter(w, r, s.userRegister)
 		return

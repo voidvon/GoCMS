@@ -1,3 +1,4 @@
+import { currentLanguage } from "@/i18n"
 import { ArrowLeft, ArrowRight, CreditCard, Info, LoaderCircle, Mail, RotateCcw } from "lucide-react"
 import { CheckoutSteps, PageHeading, ProductImage, SectionHeading } from "@/components/app/commerce-ui"
 import { ShippingAddress } from "@/components/app/shipping-address"
@@ -62,10 +63,10 @@ function CheckoutForm({ currency }: { currency: string | null }) {
     if (busy || pending) return
     const form = new FormData(event.currentTarget)
     if (!channelID || !lines.length || missing) { showError(localError("errors.checkOptionsChannel")); return }
-    const address: Address = { street: "", city: "", state: "", postcode: "", country: "" }
+    const address: Address = { phone: "", street: "", city: "", state: "", postcode: "", country: "" }
     if (physical) for (const key of Object.keys(address) as (keyof Address)[]) address[key] = String(form.get(key) || "").trim()
     address.country = address.country.toUpperCase()
-    const input: OrderInput = { items: lines.map(line => ({ variant_id: line.id, quantity: line.quantity })), customer_name: String(form.get("customer_name")).trim(), email: String(form.get("email")).trim(), address, currency: selectedCurrency, expected_amount: total }
+    const input: OrderInput = { language: currentLanguage(), items: lines.map(line => ({ variant_id: line.id, quantity: line.quantity })), customer_name: String(form.get("customer_name")).trim(), email: String(form.get("email")).trim(), address, currency: selectedCurrency, expected_amount: total }
     const saved = { key: crypto.randomUUID(), body: JSON.stringify(input), channel: Number(channelID) }
     try { sessionStorage.setItem(pendingKey, JSON.stringify(saved)); setPending(saved) }
     catch { showError(localError("errors.checkoutStorage")); return }
@@ -85,7 +86,7 @@ function CheckoutForm({ currency }: { currency: string | null }) {
           <div className="field"><Label htmlFor="customer-email">{t("checkout.email")}</Label><Input id="customer-email" name="email" dir="ltr" type="email" defaultValue={member?.email} required maxLength={128} autoComplete="email" disabled={busy} /></div>
         </div>
       </section>
-      {physical && <ShippingAddress disabled={busy} />}
+      {physical && <><section className="panel form-panel"><div className="field"><Label htmlFor="shipping-phone">{t("shipping.phone")}</Label><Input id="shipping-phone" name="phone" type="tel" dir="ltr" autoComplete="tel" maxLength={32} required disabled={busy}/></div></section><ShippingAddress disabled={busy} /></>}
       <section className="panel form-panel">
         <SectionHeading icon={<CreditCard className="size-4" />}>{t("checkout.paymentMethod")}</SectionHeading>
         {channels.length ? <div className="space-y-5">

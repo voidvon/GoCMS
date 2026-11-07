@@ -9,7 +9,7 @@ export function localPath(value: string | null | undefined, fallback = "/"): str
 }
 export function authReturnPath(value: string | null | undefined) {
   const path = localPath(value, "/shop/cart")
-  return /^\/shop\/(?:login|register|cart\/add)(?:[/?#]|$)/i.test(path) ? "/shop/cart" : path
+  return /^\/shop\/(?:login|register|forgot-password|reset-password|cart\/add)(?:[/?#]|$)/i.test(path) ? "/shop/cart" : path
 }
 export function shoppingReturnPath(value: string | null | undefined) {
   const path = localPath(value)

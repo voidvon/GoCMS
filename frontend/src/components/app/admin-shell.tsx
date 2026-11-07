@@ -1,5 +1,7 @@
+import { MailSettings } from "@/components/app/mail-settings"
 import { GeographyPage } from "@/components/app/geography-page"
 import { MembersPage, MemberLoginSettings } from "@/components/app/member-login-settings"
+import { OrdersPage } from "@/components/app/orders-page"
 import { PaymentsPage } from "@/components/app/payments-page"
 import { useEffect, useState, type ComponentType } from "react"
 import {
@@ -13,6 +15,7 @@ import {
   LogOut,
   PanelLeft,
   MessageSquareText,
+  Mail,
   FileText,
   Globe,
   KeyRound,
@@ -23,6 +26,7 @@ import {
   Users,
   UserCheck,
   CreditCard,
+  Truck,
 } from "lucide-react"
 
 import { logout, type AdminUser } from "@/lib/api"
@@ -101,12 +105,14 @@ const mainNavItems: NavigationItem[] = [
   { id: "messages", label: "信息反馈", icon: MessageSquareText },
   { id: "traffic", label: "访问统计", icon: BarChart3 },
   { id: "members", label: "会员管理", icon: UserCheck },
+  { id: "orders", label: "订单管理", icon: Truck },
   { id: "payments", label: "支付管理", icon: CreditCard },
   { id: "publish", label: "网站发布", icon: Globe },
   { id: "theme", label: "模板管理", icon: Palette },
 ]
 
 const platformNavItems: NavigationItem[] = [
+  { id: "mail", label: "邮件设置", icon: Mail },
   { id: "member-login", label: "第三方登录", icon: KeyRound },
   { id: "geography", label: "地址数据", icon: Globe },
   { id: "sites", label: "多站点", icon: Globe },
@@ -117,7 +123,7 @@ const platformNavItems: NavigationItem[] = [
 ]
 
 function canView(user: AdminUser, view: AdminView, activeSiteId?: number) {
-  if (view === "member-login" || view === "geography" || view === "sites" || view === "users") return user.is_super
+  if (view === "mail" || view === "member-login" || view === "geography" || view === "sites" || view === "users") return user.is_super
   if (user.is_super) return true
   if (activeSiteId && user.site_ids && user.site_ids.length > 0 && !user.site_ids.includes(activeSiteId)) {
     return false
@@ -358,12 +364,16 @@ function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarP
 
 function viewMeta(view: AdminView): { parent?: string; title: string; description: string } {
   switch (view) {
+    case "mail":
+      return { parent: "平台管理", title: "邮件设置", description: "统一配置 SMTP、找回密码与公开联系邮箱" }
     case "member-login":
       return { parent: "平台管理", title: "第三方登录", description: "统一配置所有站点共享的第三方登录凭据、开关与加密密钥" }
     case "geography":
       return { parent: "平台管理", title: "地址数据", description: "维护所有站点共享的国家、行政区与城市目录" }
+    case "orders":
+      return {title: "订单管理", description: "管理站点订单、分批发货、物流与交付记录"}
     case "payments":
-      return { title: "支付管理", description: "配置收款渠道，管理商品、订单、退款与交付" }
+      return { title: "支付管理", description: "配置收款渠道，查看支付回调记录" }
     case "sites":
       return { parent: "平台管理", title: "多站点管理", description: "管理各独立网站实体、域名与主题配置" }
     case "logs":
@@ -401,10 +411,14 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
   const { activeSite } = useSite()
   if (!canView(user, view, activeSite?.id)) return <p className="text-sm text-muted-foreground">当前用户组没有此模块的管理权限。</p>
   switch (view) {
+    case "mail":
+      return <MailSettings />
     case "member-login":
       return <MemberLoginSettings />
     case "geography":
       return <GeographyPage />
+    case "orders":
+      return <OrdersPage user={user} key={activeSite?.id} />
     case "payments":
       return <PaymentsPage user={user} />
     case "sites":

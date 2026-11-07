@@ -65,6 +65,8 @@ Client Secret 留空保留已有值；读取接口只返回是否已配置。独
 
 平台配置接口忽略当前站点选择，不接受站点级凭据覆盖。后台按 Google / Facebook Tabs 切换。配置读取、保存和测试接口支持 `?provider=google|facebook`，省略时沿用 Google。两家开关、凭据和自动注册策略分别保存，加密主密钥共用且密文作用域隔离。Facebook 说明见 [facebook-login.md](facebook-login.md)。
 
+绑定身份也可用于密码找回：在 `start` 接口传入 `recover:true`，授权后只签发限时密码重置凭证，不创建新会员或登录会话。完整说明见 [member-password.md](member-password.md)。
+
 自动测试使用本地签名及模拟 Google 服务，覆盖共享配置、跨站会员复用、权限隔离、旧配置及身份迁移、跨域回调拒绝、平台关闭和令牌校验。正式 Google 授权及域名审核需在真实部署环境联调。
 
 Google 官方说明：[Web Server OAuth 与回调地址精确匹配要求](https://developers.google.com/identity/protocols/oauth2/web-server)。
