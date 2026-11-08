@@ -318,6 +318,8 @@ type OrderInput struct {
 }
 
 type Order struct {
+	Source            string      `json:"source"`
+	PaymentAccountID  int64       `json:"payment_account_id"`
 	Revision          int64       `json:"revision"`
 	Shipments         []Shipment  `json:"shipments"`
 	Items             []OrderLine `json:"items"`

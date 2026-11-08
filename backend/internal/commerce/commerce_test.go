@@ -14,6 +14,7 @@ import (
 )
 
 type fakeProvider struct {
+	checkout      payment.Checkout
 	mu            sync.Mutex
 	payments      map[string]payment.Result
 	refunds       map[string]payment.Result
@@ -26,6 +27,7 @@ func (f *fakeProvider) Validate(payment.Account) error { return nil }
 func (f *fakeProvider) Create(_ context.Context, _ payment.Account, c payment.Checkout) (payment.Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.checkout = c
 	r, ok := f.payments[c.Reference]
 	if !ok {
 		r = payment.Result{Reference: c.Reference, TransactionID: "tx_" + c.Reference, Amount: c.Amount, Currency: c.Currency, Status: "pending", PaymentURL: "https://sandbox-safepay.pingpongx.com?token=test", Kind: "payment"}

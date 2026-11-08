@@ -1,4 +1,7 @@
 {
+  "paymentLink.title": "订单付款",
+  "paymentLink.description": "核对为您创建的订单并完成付款，无需登录。请保留此专属链接，以便查看付款和交付进度。",
+  "paymentLink.missing": "付款链接不完整，请打开商家提供的完整链接，或联系商家重新获取。",
   "common.loading": "正在加载…",
   "common.retry": "重新加载",
   "common.continueSite": "继续浏览网站",

@@ -41,7 +41,7 @@ function OrderList({ page }: { page: number }) {
     <div className="mt-8 flex justify-end gap-3"><Button className="action-button" variant="outline" disabled={page === 1} nativeButton={false} render={<Link href={`/shop/orders?page=${page - 1}`} />}>{t("common.previous")}</Button><Button className="action-button" variant="outline" disabled={items.length < 50} nativeButton={false} render={<Link href={`/shop/orders?page=${page + 1}`} />}>{t("common.next")}</Button></div>
   </>
 }
-function OrderDetail({ id, returned }: { id: string; returned: boolean }) {
+function OrderDetail({ id, returned, token }: { id: string; returned: boolean; token?: string }) {
   const { t } = useTranslation()
   const [order, setOrder] = useState<Order | null>(null)
   const [channels, setChannels] = useState<Channel[]>([])
@@ -52,28 +52,28 @@ function OrderDetail({ id, returned }: { id: string; returned: boolean }) {
   useEffect(() => {
     let active = true
     setOrder(null); setError(null)
-    Promise.all([getOrder(id), getChannels()]).then(async ([result, available]) => {
+    Promise.all([getOrder(id, token), getChannels()]).then(async ([result, available]) => {
       if (!active) return
-      setOrder(result); setChannels(available.channels.filter(item => item.currency === result.currency))
-      if (returned && result.status === "unpaid") { try { const synced = await syncOrder(id); if (active) setOrder(synced) } catch (reason) { if (active) showError(reason) } }
+      setOrder(result); setChannels(available.channels.filter(item => item.currency === result.currency && (!result.payment_account_id || item.id === result.payment_account_id)))
+      if (returned && result.status === "unpaid") { try { const synced = await syncOrder(id, token); if (active) setOrder(synced) } catch (reason) { if (active) showError(reason) } }
     }).catch(reason => { if (active) setError(reason instanceof Error ? reason : localError("errors.load")) })
     return () => { active = false }
-  }, [id, version, returned])
+  }, [id, version, returned, token])
   useEffect(() => {
     if (order?.status !== "unpaid") return
     let active = true
-    const timer = window.setInterval(() => { if (!document.hidden) void getOrder(id).then(result => { if (active) setOrder(result) }).catch(() => {}) }, 5000)
+    const timer = window.setInterval(() => { if (!document.hidden) void getOrder(id, token).then(result => { if (active) setOrder(result) }).catch(() => {}) }, 5000)
     return () => { active = false; window.clearInterval(timer) }
-  }, [id, order?.status])
-  async function sync() { if (busy) return; setBusy(true); try { setOrder(await syncOrder(id)) } catch (reason) { showError(reason) } finally { setBusy(false) } }
+  }, [id, order?.status, token])
+  async function sync() { if (busy) return; setBusy(true); try { setOrder(await syncOrder(id, token)) } catch (reason) { showError(reason) } finally { setBusy(false) } }
   async function pay() {
     if (!order || busy) return
     const active = order.attempts?.find(attempt => ["creating", "pending", "failed"].includes(attempt.status))
     const selected = active?.account_id ?? Number(channel || channels[0]?.id)
     if (!selected) { showError(localError("errors.noChannels")); return }
     setBusy(true)
-    try { const attempt = await payOrder(id, selected); if (!attempt.payment_url) throw localError("errors.paymentPending"); window.location.assign(attempt.payment_url) }
-    catch (reason) { showError(reason); try { setOrder(await getOrder(id)) } catch {} }
+    try { const attempt = await payOrder(id, selected, token); if (!attempt.payment_url) throw localError("errors.paymentPending"); window.location.assign(attempt.payment_url) }
+    catch (reason) { showError(reason); try { setOrder(await getOrder(id, token)) } catch {} }
     finally { setBusy(false) }
   }
   if (error) return <Failure message={error} retry={() => setVersion(value => value + 1)} />
@@ -124,7 +124,7 @@ function OrderDetail({ id, returned }: { id: string; returned: boolean }) {
         <Button className="action-button h-auto w-full whitespace-normal py-3" disabled={busy || (!active && !channels.length)} onClick={() => void pay()}>{busy ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : <CreditCard className="size-4" aria-hidden="true" />}{busy ? t("common.processing") : t("orders.continuePayment")}</Button>
         <Button className="action-button h-auto w-full whitespace-normal py-3" variant="outline" disabled={busy} onClick={() => void sync()}><RefreshCw className={cn("size-4", busy && "animate-spin")} aria-hidden="true" />{t("orders.sync")}</Button>
       </div>}
-      <Link href="/shop/orders" className="text-link flex justify-center border-t pt-5"><ArrowLeft className="size-4 rtl:rotate-180" aria-hidden="true" />{t("orders.all")}</Link>
+      {!token && <Link href="/shop/orders" className="text-link flex justify-center border-t pt-5"><ArrowLeft className="size-4 rtl:rotate-180" aria-hidden="true" />{t("orders.all")}</Link>}
     </Card>
   </div>
 }
@@ -135,6 +135,33 @@ export function OrdersPage({ id, search }: { id?: string; search: string }) {
   return <div className="page">
     <PageHeading title={id ? t("orders.detail") : t("common.orders")} description={t("design.orderDescription")} action={id ? <Link className="text-link" href="/shop/orders"><ArrowLeft className="size-4 rtl:rotate-180" aria-hidden="true" />{t("orders.all")}</Link> : undefined} />
     {memberLoading ? <Loading /> : !member ? <AuthRequired next={`/shop/orders${id ? `/${encodeURIComponent(id)}` : ""}${search}`} /> : id ? <OrderDetail key={`${member.id}:${id}`} id={id} returned={params.get("returned") === "1"} /> : <OrderList key={member.id} page={page} />}
+  </div>
+}
+
+function paymentLinkToken(site: number, id: string) {
+  const key = `gocms-order-payment:${site}:${id}`
+  const supplied = new URLSearchParams(window.location.hash.slice(1)).get("token")
+  try {
+    if (supplied && /^[a-f0-9]{64}$/.test(supplied)) {
+      sessionStorage.setItem(key, supplied)
+      return supplied
+    }
+    return supplied !== null ? "" : sessionStorage.getItem(key) || ""
+  } catch { return supplied && /^[a-f0-9]{64}$/.test(supplied) ? supplied : "" }
+}
+
+export function PaymentLinkPage({ id, search }: { id: string; search: string }) {
+  const { t } = useTranslation()
+  const { store } = useShop()
+  const [token, setToken] = useState(() => paymentLinkToken(store.site_id, id))
+  useEffect(() => {
+    const update = () => setToken(paymentLinkToken(store.site_id, id))
+    window.addEventListener("hashchange", update)
+    return () => window.removeEventListener("hashchange", update)
+  }, [store.site_id, id])
+  return <div className="page">
+    <PageHeading title={t("paymentLink.title")} description={t("paymentLink.description")} />
+    {token ? <OrderDetail key={token} id={id} token={token} returned={new URLSearchParams(search).get("returned") === "1"} /> : <Failure message={localError("paymentLink.missing")} retry={() => window.location.reload()} />}
   </div>
 }
 

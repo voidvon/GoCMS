@@ -1,4 +1,7 @@
 {
+  "paymentLink.title": "Paiement de la commande",
+  "paymentLink.description": "Vérifiez la commande préparée pour vous et payez sans vous connecter. Conservez ce lien privé pour suivre le paiement et la livraison.",
+  "paymentLink.missing": "Ce lien de paiement est incomplet. Ouvrez le lien complet fourni par le vendeur ou demandez-en un nouveau.",
   "common.loading": "Chargement…",
   "common.retry": "Réessayer",
   "common.continueSite": "Continuer la visite",

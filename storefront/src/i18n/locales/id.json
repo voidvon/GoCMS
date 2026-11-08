@@ -1,4 +1,7 @@
 {
+  "paymentLink.title": "Pembayaran pesanan",
+  "paymentLink.description": "Periksa pesanan yang disiapkan untuk Anda dan bayar tanpa masuk akun. Simpan tautan pribadi ini untuk memantau pembayaran dan pengiriman.",
+  "paymentLink.missing": "Tautan pembayaran ini tidak lengkap. Buka tautan lengkap dari penjual atau minta tautan baru.",
   "common.loading": "Memuat…",
   "common.retry": "Coba lagi",
   "common.continueSite": "Lanjut menjelajah",

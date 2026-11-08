@@ -88,6 +88,9 @@ func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 	for _, column := range []struct{ table, name, definition string }{
 		{"gocms_commerce_product", "dimensions_json", "TEXT NOT NULL DEFAULT '[]'"},
 		{"gocms_commerce_order", "language", "TEXT NOT NULL DEFAULT 'en'"},
+		{"gocms_commerce_order", "source", "TEXT NOT NULL DEFAULT 'checkout'"},
+		{"gocms_commerce_order", "payment_account_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"gocms_commerce_order", "payment_token_hash", "TEXT NOT NULL DEFAULT ''"},
 		{"gocms_commerce_order", "revision", "INTEGER NOT NULL DEFAULT 0"},
 		{"gocms_commerce_offer", "fixed_prices_json", "TEXT NOT NULL DEFAULT '{}'"},
 		{"gocms_commerce_order", "pricing_json", "TEXT NOT NULL DEFAULT '{}'"},

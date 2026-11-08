@@ -1,4 +1,7 @@
 {
+  "paymentLink.title": "Thanh toán đơn hàng",
+  "paymentLink.description": "Kiểm tra đơn hàng được tạo cho bạn và thanh toán mà không cần đăng nhập. Lưu liên kết riêng tư này để theo dõi thanh toán và giao hàng.",
+  "paymentLink.missing": "Liên kết thanh toán chưa đầy đủ. Hãy mở liên kết đầy đủ do người bán cung cấp hoặc yêu cầu liên kết mới.",
   "common.loading": "Đang tải…",
   "common.retry": "Thử lại",
   "common.continueSite": "Tiếp tục duyệt",

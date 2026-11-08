@@ -1,4 +1,7 @@
 {
+  "paymentLink.title": "Order payment",
+  "paymentLink.description": "Review the order prepared for you and complete your payment. No sign-in is required. Keep this private link to view payment and delivery updates.",
+  "paymentLink.missing": "This payment link is incomplete. Open the full link provided by the seller, or ask them for a new one.",
   "common.loading": "Loading…",
   "common.retry": "Try again",
   "common.continueSite": "Continue browsing",

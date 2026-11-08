@@ -1,4 +1,7 @@
 {
+  "paymentLink.title": "Sipariş ödemesi",
+  "paymentLink.description": "Sizin için hazırlanan siparişi inceleyin ve giriş yapmadan ödeme yapın. Ödeme ve teslimatı takip etmek için bu özel bağlantıyı saklayın.",
+  "paymentLink.missing": "Bu ödeme bağlantısı eksik. Satıcının gönderdiği tam bağlantıyı açın veya yeni bir bağlantı isteyin.",
   "common.loading": "Yükleniyor…",
   "common.retry": "Yeniden dene",
   "common.continueSite": "Gezinmeye devam et",

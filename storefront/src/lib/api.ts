@@ -11,7 +11,7 @@ export type Address = { phone: string; street: string; city: string; state: stri
 export type OrderInput = { pricing_revision?: number; language: string; items: CartLine[]; email: string; customer_name: string; address: Address; expected_amount: number; currency: string }
 export type Attempt = { id: string; account_id: number; status: string; payment_url?: string }
 export type Shipment = { id: string; method: string; carrier: string; tracking_number: string; tracking_url: string; shipped_at: string; note: string; items: {line_number: number; quantity: number}[] }
-export type Order = { shipments: Shipment[]; id: string; buyer_id: number; items: OrderLine[]; amount: number; quantity: number; currency: string; status: string; fulfillment_status: string; customer_name: string; email: string; address: Address; created_at: string; attempts?: Attempt[]; refunds?: { id: string; status: string }[] }
+export type Order = { source: "checkout" | "admin"; payment_account_id: number; shipments: Shipment[]; id: string; buyer_id: number; items: OrderLine[]; amount: number; quantity: number; currency: string; status: string; fulfillment_status: string; customer_name: string; email: string; address: Address; created_at: string; attempts?: Attempt[]; refunds?: { id: string; status: string }[] }
 export class APIError extends LocalizedError {
   status: number
   code: string
@@ -38,10 +38,11 @@ export const login = (username: string, password: string) => api("/api/v1/auth/l
 export const register = (username: string, password: string, email = "") => api("/api/v1/auth/register", { method: "POST", body: JSON.stringify({ username, password, email }) })
 export const logout = () => api("/api/v1/auth/logout", { method: "POST", body: "{}" })
 export const createOrder = (body: string, key: string) => api<Order>("/api/commerce/orders", { method: "POST", headers: { "Idempotency-Key": key }, body })
-export const getOrder = (id: string) => api<Order>(`/api/commerce/orders/${encodeURIComponent(id)}`)
+const orderHeaders = (token?: string) => token ? { "X-Order-Token": token } : undefined
+export const getOrder = (id: string, token?: string) => api<Order>(`/api/commerce/orders/${encodeURIComponent(id)}`, { headers: orderHeaders(token) })
 export const getOrders = (page: number) => api<{ items: Order[] }>(`/api/commerce/orders?page=${page}`)
-export const syncOrder = (id: string) => api<Order>(`/api/commerce/orders/${encodeURIComponent(id)}/sync`, { method: "POST", body: "{}" })
-export const payOrder = (id: string, channel: number) => api<Attempt>(`/api/commerce/orders/${encodeURIComponent(id)}/pay`, { method: "POST", body: JSON.stringify({ account_id: channel }) })
+export const syncOrder = (id: string, token?: string) => api<Order>(`/api/commerce/orders/${encodeURIComponent(id)}/sync`, { method: "POST", headers: orderHeaders(token), body: "{}" })
+export const payOrder = (id: string, channel: number, token?: string) => api<Attempt>(`/api/commerce/orders/${encodeURIComponent(id)}/pay`, { method: "POST", headers: orderHeaders(token), body: JSON.stringify({ account_id: channel }) })
 export const money = (amount: number, currency: string) => new Intl.NumberFormat(currentLanguage(), { style: "currency", currency }).format(amount / (currency === "JPY" ? 1 : 100))
 export const specification = (item: Variant) => item.specifications?.map(spec => `${spec.name}: ${spec.value}${spec.unit ? ` ${spec.unit}` : ""}`).join(" / ") || String(i18n.t("common.standardSpec"))
 

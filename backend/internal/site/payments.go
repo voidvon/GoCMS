@@ -386,8 +386,20 @@ func (s *Server) publicCommerce(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"offers": offers, "channels": channels, "dimensions": dimensions})
 		return
 	}
+	// A dedicated credential authorizes only this manual order; it never grants
+	// access to a member account, another order, or the order list.
+	token := r.Header.Get("X-Order-Token")
+	linked := token != "" && len(p) >= 2 && p[0] == "orders"
+	var linkedOrder commerce.Order
+	if linked {
+		linkedOrder, err = s.commerce.LinkedOrder(r.Context(), site, p[1], token)
+		if err != nil {
+			commerceError(w, err)
+			return
+		}
+	}
 	u, ok := s.currentSiteUser(r)
-	if !ok {
+	if !ok && !linked {
 		memberError(w, 401, "authentication_required", "请先登录会员账户")
 		return
 	}
@@ -419,8 +431,11 @@ func (s *Server) publicCommerce(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if len(p) >= 2 && p[0] == "orders" {
-		o, err := s.commerce.Order(r.Context(), site, p[1])
-		if err != nil || o.BuyerID != u.ID {
+		o := linkedOrder
+		if !linked {
+			o, err = s.commerce.Order(r.Context(), site, p[1])
+		}
+		if err != nil || (!linked && o.BuyerID != u.ID) {
 			commerceError(w, commerce.ErrNotFound)
 			return
 		}
@@ -429,7 +444,11 @@ func (s *Server) publicCommerce(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(p) == 3 && r.Method == http.MethodPost {
-			if !s.memberAttempt(w, r, "commerce-payment", strconv.FormatInt(u.ID, 10), 20) {
+			identifier := o.ID
+			if !linked {
+				identifier = strconv.FormatInt(u.ID, 10)
+			}
+			if !s.memberAttempt(w, r, "commerce-payment", identifier, 20) {
 				return
 			}
 			if p[2] == "pay" {

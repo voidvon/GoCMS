@@ -1,10 +1,11 @@
+import { CreateOrderDialog } from "@/components/app/create-order-dialog"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
 import { Label } from "@/components/ui/label"
 import { ChevronDown } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { useEffect, useState, type FormEvent, type ReactNode } from "react"
-import { getOrderCarriers, getManagedOrder, listManagedOrders, manageOrder, type AdminUser, type CommerceOrder, type Shipment, type ShipmentInput } from "@/lib/api"
+import { issueOrderPaymentLink, getOrderCarriers, getManagedOrder, listManagedOrders, manageOrder, type AdminUser, type CommerceOrder, type Shipment, type ShipmentInput } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
 import { showError, showSuccess } from "@/components/app/admin-notifications"
 import { Button } from "@/components/ui/button"
@@ -22,7 +23,7 @@ const states: Record<string, string> = { unpaid: "待付款", paid: "已付款",
 const methods: Record<string, string> = {courier: "快递配送", pickup: "到店自提", no_shipping: "无需物流的交付"}
 function State({value}: {value: string}) { return <Badge variant="secondary">{states[value] ?? value}</Badge> }
 function Field({label, children}: {label: string; children: ReactNode}) {return <Label className="grid gap-2 text-sm font-normal"><span className="font-medium">{label}</span>{children}</Label>}
-function amount(order: CommerceOrder) {return new Intl.NumberFormat("zh-CN", {style: "currency", currency: order.currency}).format(order.amount / (order.currency === "JPY" ? 1 : 100))}
+function amount(order: Pick<CommerceOrder, "amount" | "currency">) {return new Intl.NumberFormat("zh-CN", {style: "currency", currency: order.currency}).format(order.amount / (order.currency === "JPY" ? 1 : 100))}
 function localTime(value: string) {const d = new Date(value); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0,16)}
 function emptyShipment(order: CommerceOrder): ShipmentInput {return {revision: order.revision, idempotency_key: crypto.randomUUID(), method: order.items.some(i => i.kind === "physical" && i.quantity > i.shipped_quantity) ? "courier" : "no_shipping", carrier: "", tracking_number: "", tracking_url: "", shipped_at: new Date().toISOString(), note: "", internal_note: "", reason: "", items: []}}
 
@@ -33,6 +34,8 @@ export function OrdersPage({user}: {user: AdminUser}) {
  const [items, setItems] = useState<CommerceOrder[]>([]), [page, setPage] = useState(1), [status, setStatus] = useState(""), [query, setQuery] = useState(""), [search, setSearch] = useState("")
  const [version, setVersion] = useState(0), [loadedKey,setLoadedKey] = useState(""), [busy, setBusy] = useState(false)
  const [order, setOrder] = useState<CommerceOrder | null>(null)
+ const [creating, setCreating] = useState(false)
+ const [paymentLink, setPaymentLink] = useState<{id: string; url: string} | null>(null)
  const [carriers,setCarriers]=useState<string[]>([])
  useEffect(()=>{let active=true;void getOrderCarriers().then(r=>{if(active)setCarriers(r.items)}).catch(showError);return()=>{active=false}},[version])
  const [draft, setDraft] = useState<ShipmentInput | null>(null), [editing, setEditing] = useState("")
@@ -44,23 +47,40 @@ export function OrdersPage({user}: {user: AdminUser}) {
  async function mutate(action: string, body: unknown, method = "POST") {if(!order || busy)return;setBusy(true);try {setOrder(await manageOrder(order.id,action,body,method));setDraft(null);setRecipient(false);setConfirmation(null);setVersion(v=>v+1);showSuccess("订单已更新")}catch(e){showError(e)}finally{setBusy(false)}}
  function editShipment(p: Shipment) {if(!order)return;setEditing(p.id);setDraft({method:p.method,carrier:p.carrier,tracking_number:p.tracking_number,tracking_url:p.tracking_url,shipped_at:p.shipped_at,note:p.note,internal_note:p.internal_note,items:p.items,revision: order.revision, idempotency_key: crypto.randomUUID(), reason: ""})}
  function saveShipment(e: FormEvent) {e.preventDefault();if(!draft)return;void mutate(editing ? `shipments/${editing}` : "shipments", draft, editing ? "PUT" : "POST")}
+ async function generateLink(target: CommerceOrder) {
+  setBusy(true)
+  try {
+   const result = await issueOrderPaymentLink(target)
+   setPaymentLink({id: target.id, url: result.payment_url})
+   setOrder(await getManagedOrder(target.id))
+   setVersion(v => v + 1)
+   showSuccess("付款链接已生成，请复制后发送给客户")
+  } catch (reason) { showError(reason) }
+  finally { setBusy(false) }
+ }
+ async function created(target: CommerceOrder) {
+  setCreating(false); setOrder(target); setPaymentLink(null); setVersion(v => v + 1)
+  await generateLink(target)
+ }
  const refundable = order?.attempts?.find(a => a.id === order.paid_attempt && a.status === "succeeded")
  const refundPending = order?.refunds?.some(r => ["creating","pending","failed"].includes(r.status))
  const remaining = order?.items.some(i=>i.shipped_quantity<i.quantity)
  return <div className="flex h-full min-h-0 flex-col gap-4">
+  {creating && <CreateOrderDialog key={activeSiteId} canMedia={can("media")} onClose={() => setCreating(false)} onCreated={created}/>}
   <form className="flex flex-wrap items-center gap-3" onSubmit={e=>{e.preventDefault();setSearch(query.trim());setPage(1)}}>
    <Input className="w-72 max-w-full" aria-label="搜索订单" placeholder="订单号、收货人、电话或物流单号" maxLength={128} value={query} onChange={e=>setQuery(e.target.value)} />
    <Select value={status || "all"} onValueChange={v=>{setStatus(v === "all" ? "" : v || "");setPage(1)}}><SelectTrigger className="w-48" aria-label="订单状态"><SelectValue>{status ? states[status] : "全部订单"}</SelectValue></SelectTrigger><SelectContent>{["all","unpaid","pending","partial","shipped","completed","refunded"].map(v=><SelectItem key={v} value={v}>{v === "all" ? "全部订单" : states[v]}</SelectItem>)}</SelectContent></Select>
-   <Button type="submit" disabled={loading}>搜索</Button><Button type="button" variant="outline" disabled={loading} onClick={()=>setVersion(v=>v+1)}>刷新</Button>
+   <Button type="submit" disabled={loading}>搜索</Button><Button type="button" variant="outline" disabled={loading} onClick={()=>setVersion(v=>v+1)}>刷新</Button>{can("orders.create") && <Button type="button" disabled={busy} onClick={() => setCreating(true)}>创建收款订单</Button>}
   </form>
   <ScrollArea orientation="both" className="min-h-0 flex-1 rounded-lg border"><Table><TableHeader><TableRow>{["订单 / 商品","收货人","金额","支付状态","交付状态","创建时间","操作"].map(h=><TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>
    {loading ? <TableRow><TableCell colSpan={7} className="h-36 text-center">正在加载…</TableCell></TableRow> : !items.length ? <TableRow><TableCell colSpan={7} className="h-36 text-center text-muted-foreground">暂无符合条件的订单</TableCell></TableRow> : items.map(o=><TableRow key={o.id}><TableCell><p>{o.items[0]?.name}</p><p className="mt-1 font-mono text-xs text-muted-foreground">{o.id}</p><p className="text-xs text-muted-foreground">{o.items.length} 种规格，共 {o.quantity} 件</p></TableCell><TableCell>{o.customer_name}<p className="text-xs text-muted-foreground">{o.address.phone || o.email}</p></TableCell><TableCell>{amount(o)}</TableCell><TableCell><State value={o.status}/></TableCell><TableCell><State value={o.fulfillment_status}/></TableCell><TableCell><TimeText value={o.created_at}/></TableCell><TableCell><Button size="sm" variant="outline" disabled={busy} onClick={()=>void view(o.id)}>查看详情</Button></TableCell></TableRow>)}
   </TableBody></Table></ScrollArea>
   <div className="flex items-center justify-between text-sm text-muted-foreground"><span>第 {page} 页 · 每页最多 50 条</span><div className="flex gap-2"><Button variant="outline" disabled={loading || page===1} onClick={()=>setPage(p=>p-1)}>上一页</Button><Button variant="outline" disabled={loading || items.length<50} onClick={()=>setPage(p=>p+1)}>下一页</Button></div></div>
-  <Dialog open={!!order} onOpenChange={v=>{if(!v&&!busy){setOrder(null);setDraft(null);setRecipient(false)}}}><DialogContent className="flex max-h-[90svh] flex-col sm:max-w-5xl"><DialogHeader><DialogTitle>订单详情</DialogTitle><DialogDescription className="break-all">{order?.id}</DialogDescription></DialogHeader>
+  <Dialog open={!!order} onOpenChange={v=>{if(!v&&!busy){setOrder(null);setDraft(null);setRecipient(false);setPaymentLink(null)}}}><DialogContent className="flex max-h-[90svh] flex-col sm:max-w-5xl"><DialogHeader><DialogTitle>订单详情</DialogTitle><DialogDescription className="break-all">{order?.id}</DialogDescription></DialogHeader>
    <ScrollArea className="max-h-[75vh]" contentClassName="space-y-6 pe-3 pb-2">{order&&<>
     <div className="flex flex-wrap items-center gap-3"><State value={order.status}/><State value={order.fulfillment_status}/><strong>{amount(order)}</strong><Button variant="outline" size="sm" disabled={busy} onClick={()=>void view(order.id)}>刷新详情</Button></div>
-    <section className="space-y-3"><h3 className="font-medium">商品快照</h3>{order.items.map(i=><Card key={i.line_number} className="flex flex-wrap justify-between gap-2 rounded-md border p-3 flex-row"><div><p>{i.name}</p><p className="text-xs text-muted-foreground">{i.sku} {i.specifications?.map(s=>`${s.name}: ${s.value}${s.unit ? ` ${s.unit}` : ""}`).join(" · ")}</p></div><p className="text-sm">订购 {i.quantity} · 已交付 {i.shipped_quantity}</p></Card>)}</section>
+    {order.source === "admin" && <section className="space-y-3 rounded-lg border bg-muted/20 p-4"><div className="flex flex-wrap items-center justify-between gap-3"><h3 className="font-medium">后台收款订单</h3>{can("orders.create") && order.status === "unpaid" && <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmation({action: "payment-link"})}>生成 / 重置付款链接</Button>}</div><p className="text-sm text-muted-foreground">客户凭专属链接查看订单并付款，无需登录。链接包含访问凭证，请仅发送给客户；重置会立即使旧链接失效。订单使用创建时的渠道和币种。</p>{paymentLink?.id === order.id && <div className="flex flex-wrap gap-2"><Input readOnly aria-label="客户付款链接" className="min-w-0 flex-1 basis-64 font-mono text-xs" value={paymentLink.url}/><Button type="button" variant="outline" onClick={() => void navigator.clipboard.writeText(paymentLink.url).then(() => showSuccess("付款链接已复制")).catch(showError)}>复制链接</Button><Button variant="outline" nativeButton={false} render={<a href={paymentLink.url} target="_blank" rel="noopener noreferrer"/>}>打开付款页</Button></div>}<p className="text-xs text-muted-foreground">完整链接仅在生成后本次显示；关闭后可重置生成新链接。</p></section>}
+    <section className="space-y-3"><h3 className="font-medium">商品快照</h3>{order.items.map(i=><Card key={i.line_number} className="flex flex-wrap justify-between gap-2 rounded-md border p-3 flex-row"><div><p>{i.name}</p><p className="text-xs text-muted-foreground">{i.sku} {i.specifications?.map(s=>`${s.name}: ${s.value}${s.unit ? ` ${s.unit}` : ""}`).join(" · ")}</p></div><div className="text-end text-sm"><p>{amount({amount: i.amount, currency: order.currency})} / 件</p><p>订购 {i.quantity} · 已交付 {i.shipped_quantity}</p></div></Card>)}</section>
     <section className="space-y-3"><h3 className="font-medium">收货与联系方式</h3><p className="break-words text-sm">{order.customer_name} · {order.address.phone || "未填写电话"} · {order.email}</p><p className="break-words text-sm text-muted-foreground">{[order.address.country,order.address.state,order.address.city,order.address.street,order.address.postcode].filter(Boolean).join(" ")}</p>{can("orders.recipient.edit")&&!order.shipments.length&&order.status!=="refunded"&&<Button size="sm" variant="outline" disabled={busy} onClick={()=>setRecipient(v=>!v)}>修改 / 补录收货信息</Button>}
     {recipient&&<form className="grid gap-3 rounded-md border p-4 sm:grid-cols-2" onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);const address=Object.fromEntries(["phone","street","city","state","postcode","country"].map(k=>[k,String(f.get(k)||"").trim()]));void mutate("recipient",{revision:order.revision,customer_name:f.get("customer_name"),address,reason:f.get("reason")},"PUT")}}>
      <Field label="收货人"><Input name="customer_name" defaultValue={order.customer_name} maxLength={100} required/></Field>{([['phone','联系电话',32],['country','国家代码（两位字母）',2],['state','省 / 州',128],['city','城市',50],['street','详细地址',256],['postcode','邮编',16]] as const).map(([k,label,max])=><Field key={k} label={label}><Input name={k} defaultValue={order.address[k]} maxLength={max} required={["phone","country","city","street"].includes(k)}/></Field>)}<Field label="修改原因"><Input name="reason" maxLength={500} required/></Field><Button disabled={busy} type="submit">保存收货信息</Button>
@@ -78,9 +98,9 @@ export function OrdersPage({user}: {user: AdminUser}) {
      <div className="flex gap-2"><Button type="submit" disabled={busy||(!editing&&!draft.items.length)||(draft.method==="courier"&&!order.address.phone)}>保存{editing?"更正":"发货单"}</Button><Button type="button" variant="outline" disabled={busy} onClick={()=>setDraft(null)}>取消</Button></div>
     </form>}
     <section className="space-y-3"><h3 className="font-medium">支付与退款</h3>{order.attempts?.map(a=><Card key={a.id} className="flex flex-wrap items-center gap-2 rounded-md border p-3 flex-row"><span className="break-all font-mono text-xs">{a.id}</span><State value={a.status}/>{["creating","pending","failed"].includes(a.status)&&<Button variant="outline" size="sm" disabled={busy} onClick={()=>void mutate("sync",{id:a.id})}>同步支付</Button>}</Card>)}{order.refunds?.map(r=><div key={r.id} className="flex flex-wrap items-center gap-2 text-sm"><span className="break-all">退款 {r.id}</span><State value={r.status}/>{can("orders.refund")&&["creating","pending","failed"].includes(r.status)&&<Button variant="outline" size="sm" disabled={busy} onClick={()=>void mutate("refund-sync",{id:r.id})}>同步退款</Button>}</div>)}{can("orders.refund")&&refundable&&order.status==="paid"&&!refundPending&&<Button variant="destructive" size="sm" disabled={busy} onClick={()=>setConfirmation({action:"refund",id:refundable.id})}>发起全额退款</Button>}</section>
-    <section className="space-y-3"><h3 className="font-medium">订单操作记录</h3>{!order.events?.length&&<p className="text-sm text-muted-foreground">暂无订单操作记录</p>}{order.events?.map(e=><Collapsible key={e.id} className="rounded-md border p-3 text-sm"><CollapsibleTrigger render={<Button type="button" variant="ghost" className="h-auto w-full justify-start whitespace-normal text-start" />}>{({"shipment.created":"创建发货单","shipment.corrected":"更正物流","recipient.updated":"修改收货信息","order.completed":"确认完成"} as Record<string,string>)[e.action]||e.action} · {e.actor} · <TimeText value={e.created_at}/><ChevronDown className="ms-auto size-4 shrink-0" aria-hidden="true" /></CollapsibleTrigger><CollapsibleContent><pre className="mt-2 whitespace-pre-wrap break-all text-xs text-muted-foreground">{e.detail}</pre></CollapsibleContent></Collapsible>)}</section>
+    <section className="space-y-3"><h3 className="font-medium">订单操作记录</h3>{!order.events?.length&&<p className="text-sm text-muted-foreground">暂无订单操作记录</p>}{order.events?.map(e=><Collapsible key={e.id} className="rounded-md border p-3 text-sm"><CollapsibleTrigger render={<Button type="button" variant="ghost" className="h-auto w-full justify-start whitespace-normal text-start" />}>{({"order.created":"后台创建订单","order.payment_link_issued":"生成 / 重置付款链接","shipment.created":"创建发货单","shipment.corrected":"更正物流","recipient.updated":"修改收货信息","order.completed":"确认完成"} as Record<string,string>)[e.action]||e.action} · {e.actor} · <TimeText value={e.created_at}/><ChevronDown className="ms-auto size-4 shrink-0" aria-hidden="true" /></CollapsibleTrigger><CollapsibleContent><pre className="mt-2 whitespace-pre-wrap break-all text-xs text-muted-foreground">{e.detail}</pre></CollapsibleContent></Collapsible>)}</section>
    </>}</ScrollArea>
   </DialogContent></Dialog>
-  <ConfirmDialog open={!!confirmation} onOpenChange={v=>{if(!v&&!busy)setConfirmation(null)}} title={confirmation?.action==="refund"?"确认全额退款？":"确认订单已完成？"} description={confirmation?.action==="refund"?"退款会影响付款状态。已经发出的商品需要另行处理退货，发货记录将保留。":"请确认客户已收到全部商品或服务。完成后不可继续新增发货单。"} onConfirm={()=>{if(order&&confirmation)void mutate(confirmation.action,confirmation.action==="complete"?{revision:order.revision}:{id:confirmation.id})}} pending={busy} confirmLabel="确认"/>
+  <ConfirmDialog open={!!confirmation} onOpenChange={v=>{if(!v&&!busy)setConfirmation(null)}} title={confirmation?.action==="payment-link"?"生成新的付款链接？":confirmation?.action==="refund"?"确认全额退款？":"确认订单已完成？"} description={confirmation?.action==="payment-link"?"旧链接会立即失效，请复制新链接并发送给客户。":confirmation?.action==="refund"?"退款会影响付款状态。已经发出的商品需要另行处理退货，发货记录将保留。":"请确认客户已收到全部商品或服务。完成后不可继续新增发货单。"} onConfirm={()=>{if(order&&confirmation?.action==="payment-link"){setConfirmation(null);void generateLink(order);return}if(order&&confirmation)void mutate(confirmation.action,confirmation.action==="complete"?{revision:order.revision}:{id:confirmation.id})}} pending={busy} confirmLabel="确认"/>
  </div>
 }

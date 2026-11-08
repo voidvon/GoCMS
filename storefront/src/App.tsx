@@ -19,7 +19,7 @@ import { CartPage } from "@/pages/cart-page"
 import { CheckoutPage } from "@/pages/checkout-page"
 import { AccountPage } from "@/pages/account-page"
 import { apiErrorKey, localError } from "@/lib/errors"
-import { OrdersPage } from "@/pages/orders-page"
+import { OrdersPage, PaymentLinkPage } from "@/pages/orders-page"
 
 function Shell() {
   const { t } = useTranslation()
@@ -27,7 +27,7 @@ function Shell() {
   const { store, member, memberLoading, cart, refreshMember } = useShop()
   const [busy, setBusy] = useState(false)
   const path = url.pathname
-  const title = path === "/shop/forgot-password" ? t("password.forgot") : path === "/shop/reset-password" ? t("password.resetTitle") : path === "/shop/account" ? t("google.account") : path === "/shop/login" ? t("auth.loginTitle") : path === "/shop/register" ? t("auth.registerTitle") : path === "/shop/checkout" ? t("checkout.title") : path === "/shop/cart/add" ? t("add.title") : path.startsWith("/shop/orders/") ? t("orders.detail") : path === "/shop/orders" ? t("common.orders") : t("common.cart")
+  const title = path.startsWith("/shop/pay/") ? t("paymentLink.title") : path === "/shop/forgot-password" ? t("password.forgot") : path === "/shop/reset-password" ? t("password.resetTitle") : path === "/shop/account" ? t("google.account") : path === "/shop/login" ? t("auth.loginTitle") : path === "/shop/register" ? t("auth.registerTitle") : path === "/shop/checkout" ? t("checkout.title") : path === "/shop/cart/add" ? t("add.title") : path.startsWith("/shop/orders/") ? t("orders.detail") : path === "/shop/orders" ? t("common.orders") : t("common.cart")
   useEffect(() => {
     const oauthError = url.searchParams.get("oauth_error")
     if (oauthError) {
@@ -59,6 +59,7 @@ function Shell() {
   else if (path === "/shop/cart" || path === "/shop/" || path === "/shop") page = <CartPage />
   else if (path === "/shop/login" || path === "/shop/register") page = <AuthPage mode={path === "/shop/login" ? "login" : "register"} search={url.search} />
   else if (path === "/shop/checkout") page = <CheckoutPage search={url.search} />
+  else if (/^\/shop\/pay\/ord_[a-f0-9]{32}$/.test(path)) page = <PaymentLinkPage key={path} id={path.split("/")[3]} search={url.search} />
   else if (path === "/shop/orders" || path.startsWith("/shop/orders/")) page = <OrdersPage id={path.split("/")[3]} search={url.search} />
   else page = <div className="page"><div className="panel py-16 text-center"><h1>{t("common.notFound")}</h1><Link href="/shop/cart" className="text-link mt-6">{t("common.backCart")}</Link></div></div>
   return <div className="storefront grid h-dvh grid-rows-[auto_minmax(0,1fr)]">

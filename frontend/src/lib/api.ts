@@ -45,6 +45,7 @@ export type PaymentRefund = {
 }
 export type CommerceOrderLine = CommerceOffer & { quantity: number; line_number: number; shipped_quantity: number }
 export type CommerceOrder = {
+ source: "checkout" | "admin"; payment_account_id: number
  revision: number; shipments: Shipment[]; events?: OrderEvent[]
   items: CommerceOrderLine[]
   id: string; buyer_id: number; amount: number; currency: string; status: string; fulfillment_status: string
@@ -1383,3 +1384,15 @@ export const getManagedOrder = (id: string) => request<CommerceOrder>(`/api/admi
 export const manageOrder = (id: string, action: string, body: unknown, method = "POST") => request<CommerceOrder>(`/api/admin/orders/${encodeURIComponent(id)}/${action}`, {method, body: JSON.stringify(body)})
 
 export const getOrderCarriers = () => request<{items: string[]}>("/api/admin/orders/carriers")
+
+export type OrderCreationChannel = { id: number; name: string; currency: string; public_url: string; sandbox: boolean }
+export type ManualOrderInput = {
+  account_id: number; customer_name: string; email: string; language: string
+  address: CommerceOrder["address"]
+  items: { variant_id?: number; currency?: string; name: string; kind: CommerceOffer["kind"]; price: string; quantity: number; image_url: string }[]
+}
+export const getOrderCreationOptions = () => request<{items: OrderCreationChannel[]}>("/api/admin/orders/creation-options")
+export type OrderCatalogVariant = CommerceOffer & { pricing_unavailable?: boolean }
+export const searchOrderCatalog = (accountId: number, q: string, page: number) => request<{items: OrderCatalogVariant[]; has_more: boolean}>(`/api/admin/orders/catalog?account_id=${accountId}&q=${encodeURIComponent(q)}&page=${page}`)
+export const createManagedOrder = (input: ManualOrderInput, key: string) => request<CommerceOrder>("/api/admin/orders", { method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(input) })
+export const issueOrderPaymentLink = (order: CommerceOrder) => request<{payment_url: string}>(`/api/admin/orders/${encodeURIComponent(order.id)}/payment-link`, { method: "POST", body: JSON.stringify({ revision: order.revision }) })

@@ -34,12 +34,12 @@ type Refund struct {
 	Error     string `json:"error"`
 }
 
-const orderSelect = `SELECT o.id,o.buyer_id,o.amount,o.currency,o.status,o.fulfillment_status,o.paid_attempt,o.email,o.customer_name,o.address_json,o.created_at,o.revision,i.offer_id,i.name,i.kind,i.unit_price,i.quantity,i.image_url,i.content_id,i.sku,i.specifications_json FROM gocms_commerce_order o JOIN gocms_commerce_order_item i ON i.order_id=o.id AND i.line_number=1`
+const orderSelect = `SELECT o.id,o.buyer_id,o.amount,o.currency,o.status,o.fulfillment_status,o.paid_attempt,o.email,o.customer_name,o.address_json,o.created_at,o.revision,o.source,o.payment_account_id,i.offer_id,i.name,i.kind,i.unit_price,i.quantity,i.image_url,i.content_id,i.sku,i.specifications_json FROM gocms_commerce_order o JOIN gocms_commerce_order_item i ON i.order_id=o.id AND i.line_number=1`
 
 func scanOrder(row scanner) (Order, error) {
 	var o Order
 	var address, specifications string
-	err := row.Scan(&o.ID, &o.BuyerID, &o.Amount, &o.Currency, &o.Status, &o.FulfillmentStatus, &o.PaidAttempt, &o.Email, &o.CustomerName, &address, &o.CreatedAt, &o.Revision, &o.Item.ID, &o.Item.Name, &o.Item.Kind, &o.Item.Amount, &o.Quantity, &o.Item.ImageURL, &o.Item.ContentID, &o.Item.SKU, &specifications)
+	err := row.Scan(&o.ID, &o.BuyerID, &o.Amount, &o.Currency, &o.Status, &o.FulfillmentStatus, &o.PaidAttempt, &o.Email, &o.CustomerName, &address, &o.CreatedAt, &o.Revision, &o.Source, &o.PaymentAccountID, &o.Item.ID, &o.Item.Name, &o.Item.Kind, &o.Item.Amount, &o.Quantity, &o.Item.ImageURL, &o.Item.ContentID, &o.Item.SKU, &specifications)
 	if errors.Is(err, sql.ErrNoRows) {
 		return o, ErrNotFound
 	}
@@ -171,11 +171,15 @@ func (s Service) Pay(ctx context.Context, site int64, id string, accountID int64
 	}
 	defer tx.Rollback()
 	var status, currency string
-	if err := tx.QueryRowContext(ctx, `SELECT status,currency FROM gocms_commerce_order WHERE id=? AND site_id=?`, id, site).Scan(&status, &currency); err != nil {
+	var fixedAccount int64
+	if err := tx.QueryRowContext(ctx, `SELECT status,currency,payment_account_id FROM gocms_commerce_order WHERE id=? AND site_id=?`, id, site).Scan(&status, &currency, &fixedAccount); err != nil {
 		return Attempt{}, ErrNotFound
 	}
 	if status != "unpaid" {
 		return Attempt{}, ErrConflict
+	}
+	if fixedAccount != 0 && fixedAccount != accountID {
+		return Attempt{}, ErrInvalid
 	}
 	a, err := scanAccount(tx.QueryRowContext(ctx, `SELECT `+accountColumns+` FROM gocms_payment_account WHERE id=? AND site_id=?`, accountID, site))
 	if err != nil {
@@ -231,7 +235,11 @@ func (s Service) Pay(ctx context.Context, site int64, id string, accountID int64
 		}
 		checkoutItems = append(checkoutItems, payment.CheckoutItem{Name: line.Name, Kind: line.Kind, Quantity: line.Quantity, UnitPrice: line.Amount, ImageURL: imageURL})
 	}
-	r, err := p.Create(ctx, credentials, payment.Checkout{Reference: attempt.ID, Amount: o.Amount, Currency: o.Currency, Items: checkoutItems, Name: o.Item.Name, Kind: o.Item.Kind, Quantity: o.Quantity, UnitPrice: o.Item.Amount, ImageURL: checkoutItems[0].ImageURL, Email: o.Email, CustomerName: o.CustomerName, Address: payment.Address{Street: o.Address.Street, Postcode: o.Address.Postcode, City: o.Address.City, State: o.Address.State, Country: o.Address.Country}, IP: ip, NotifyURL: a.PublicURL + "/api/payments/webhooks/" + a.PublicID, ReturnURL: a.PublicURL + a.ReturnPath + "?payment_order=" + o.ID})
+	returnURL := a.PublicURL + a.ReturnPath + "?payment_order=" + o.ID
+	if o.Source == "admin" {
+		returnURL = a.PublicURL + "/shop/pay/" + o.ID + "?returned=1"
+	}
+	r, err := p.Create(ctx, credentials, payment.Checkout{Reference: attempt.ID, Amount: o.Amount, Currency: o.Currency, Items: checkoutItems, Name: o.Item.Name, Kind: o.Item.Kind, Quantity: o.Quantity, UnitPrice: o.Item.Amount, ImageURL: checkoutItems[0].ImageURL, Email: o.Email, CustomerName: o.CustomerName, Address: payment.Address{Street: o.Address.Street, Postcode: o.Address.Postcode, City: o.Address.City, State: o.Address.State, Country: o.Address.Country}, IP: ip, NotifyURL: a.PublicURL + "/api/payments/webhooks/" + a.PublicID, ReturnURL: returnURL})
 	if err == nil {
 		if r.Reference != attempt.ID {
 			err = ErrInvalid

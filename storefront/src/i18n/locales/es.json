@@ -1,4 +1,7 @@
 {
+  "paymentLink.title": "Pago del pedido",
+  "paymentLink.description": "Revisa el pedido preparado para ti y completa el pago sin iniciar sesión. Guarda este enlace privado para consultar el pago y la entrega.",
+  "paymentLink.missing": "El enlace de pago está incompleto. Abre el enlace completo del vendedor o solicita uno nuevo.",
   "common.loading": "Cargando…",
   "common.retry": "Volver a intentar",
   "common.continueSite": "Seguir explorando",
