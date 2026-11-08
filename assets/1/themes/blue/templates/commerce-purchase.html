@@ -11,6 +11,7 @@
   .commerce-purchase input[type="number"] { width: 90px; }
   .commerce-purchase__variant { flex: 1 1 220px; min-width: 0; }
   .commerce-purchase__variant select { width: 100%; }
+  .commerce-purchase__dimensions { display: contents; }
   .commerce-purchase__price { margin: 16px 0 4px; font-size: 22px; font-weight: bold; }
   .commerce-purchase__sku, .commerce-purchase__status { margin: 6px 0; color: #52657c; }
   .commerce-purchase__actions, .commerce-purchase__links { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 16px; }
@@ -29,6 +30,7 @@
     <fieldset disabled>
       <div class="commerce-purchase__fields">
         <label class="commerce-purchase__variant"><span>规格</span><select name="variant_id" required aria-label="商品规格"></select></label>
+        <div class="commerce-purchase__dimensions" data-dimensions hidden></div>
         <label data-currency-field hidden><span>币种</span><select data-currency aria-label="展示币种"></select></label>
         <label><span>数量</span><input name="quantity" type="number" min="1" max="1000" step="1" value="1" required aria-label="购买数量"></label>
       </div>
@@ -59,6 +61,7 @@
   const form = panel.querySelector("form")
   const fields = form.querySelector("fieldset")
   const select = form.elements.namedItem("variant_id")
+  const dimensionFields = panel.querySelector("[data-dimensions]")
   const quantity = form.elements.namedItem("quantity")
   const price = panel.querySelector("[data-price]")
   const charge = panel.querySelector("[data-charge]")
@@ -69,7 +72,7 @@
   const sku = panel.querySelector("[data-sku]")
   const status = panel.querySelector("[data-status]")
   const retry = panel.querySelector("[data-retry]")
-  let variants = [], loading = false, submitting = false
+  let variants = [], dimensionControls = [], loading = false, submitting = false
   const returnPath = location.pathname + location.search + location.hash
   form.elements.namedItem("return_to").value = returnPath
   for (const link of panel.querySelectorAll("[data-auth]")) {
@@ -83,13 +86,55 @@
   }
   function showPrice() {
     const variant = variants.find(item => String(item.id) === select.value)
-    if (!variant) { fields.disabled = true; return }
+    for (const button of form.querySelectorAll('button[type="submit"]')) button.disabled = !variant
+    if (!variant) {
+      price.textContent = ""; charge.hidden = true; sku.hidden = true
+      status.textContent = "此规格组合暂不可购买，请调整选择。"
+      return
+    }
     const format = (amount, currency) => new Intl.NumberFormat(document.documentElement.lang || "zh-CN", { style: "currency", currency }).format(amount / (currency === "JPY" ? 1 : 100)) + " " + currency
     price.textContent = variant.display_currency ? "约 " + format(variant.display_amount, variant.display_currency) : format(variant.amount, variant.currency)
     charge.hidden = !variant.display_currency && !variant.pricing_unavailable
     charge.textContent = variant.display_currency ? "实际支付 " + format(variant.amount, variant.currency) : variant.pricing_unavailable ? "当前币种暂无有效报价，使用商品原币种结算。" : ""
     sku.textContent = variant.sku ? "规格编号：" + variant.sku : ""
     sku.hidden = !variant.sku
+  }
+  const specValue = (variant, name) => (variant.specifications || []).find(spec => spec.name.trim().toLowerCase() === name.trim().toLowerCase())?.value || ""
+  function chooseDimensions() {
+    let candidates = variants
+    for (const control of dimensionControls) {
+      const available = new Set(candidates.map(item => specValue(item, control.name)))
+      for (const option of control.select.options) option.disabled = !available.has(option.value)
+      if (!available.has(control.select.value)) control.select.value = control.values.find(value => available.has(value)) || ""
+      candidates = candidates.filter(item => specValue(item, control.name) === control.select.value)
+    }
+    select.value = candidates.length === 1 ? String(candidates[0].id) : ""
+    showPrice()
+    if (candidates.length === 1) status.textContent = "价格为所选规格的单价。可先加入购物车，结算时再登录。"
+  }
+  function renderDimensions(dimensions) {
+    dimensionControls = []
+    dimensionFields.replaceChildren()
+    const selected = variants.find(item => String(item.id) === select.value) || variants[0]
+    if (!variants.every(item => Array.isArray(item.specifications) && item.specifications.length === dimensions.length && dimensions.every(d => specValue(item, d.name)))) throw new Error("规格数据与维度配置不一致，请联系商家。")
+    select.closest("label").hidden = dimensions.length > 0
+    dimensionFields.hidden = dimensions.length === 0
+    if (!dimensions.length) return
+    for (const dimension of dimensions) {
+      const values = [...new Set(variants.map(item => specValue(item, dimension.name)))]
+      const ordered = [...new Set([...(dimension.options || []).filter(value => values.includes(value)), ...values])]
+      const label = document.createElement("label"), title = document.createElement("span"), control = document.createElement("select")
+      label.className = "commerce-purchase__variant"
+      title.textContent = dimension.name + (dimension.unit ? " (" + dimension.unit + ")" : "")
+      control.setAttribute("aria-label", title.textContent)
+      control.required = true
+      control.replaceChildren(...ordered.map(value => new Option(value, value)))
+      control.value = specValue(selected, dimension.name)
+      control.addEventListener("change", chooseDimensions)
+      label.append(title, control); dimensionFields.append(label)
+      dimensionControls.push({ name: dimension.name, values: ordered, select: control })
+    }
+    chooseDimensions()
   }
   async function load() {
     if (loading) { queued = true; return }
@@ -112,18 +157,31 @@
       currencySelect.replaceChildren(new Option("自动 · " + (pricing.recommended_currency || ""), "auto"), ...choices.map(item => new Option(item.code, item.code)))
       currencySelect.value = choices.some(item => item.code === manual) ? manual : "auto"
       currencyField.hidden = !pricing.enabled
-      const response = await fetch("/api/commerce/catalog?content_id=" + encodeURIComponent(contentID) + (selectedCurrency ? "&currency=" + encodeURIComponent(selectedCurrency) : ""), { credentials: "same-origin", cache: "no-store" })
-      const result = await response.json().catch(() => null)
-      if (!response.ok) throw new Error(errorText(result) || "规格加载失败，请重试")
-      if (!result || !Array.isArray(result.offers)) throw new Error("规格数据暂不可用，请重试")
-      variants = result.offers.filter(item => item.content_id === contentID && Number.isSafeInteger(item.id) && item.id > 0)
+      const catalogURL = "/api/commerce/catalog?content_id=" + encodeURIComponent(contentID) + (selectedCurrency ? "&currency=" + encodeURIComponent(selectedCurrency) : "")
+      const offers = []
+      let definitions = []
+      // Catalog pages remain limited to 50; a product supports up to 500 SKUs.
+      for (let page = 1; page <= 10; page++) {
+        const response = await fetch(catalogURL + "&page=" + page, { credentials: "same-origin", cache: "no-store" })
+        const result = await response.json().catch(() => null)
+        if (!response.ok) throw new Error(errorText(result) || "规格加载失败，请重试")
+        if (!result || !Array.isArray(result.offers)) throw new Error("规格数据暂不可用，请重试")
+        if (page === 1) {
+          if (!Array.isArray(result.dimensions)) throw new Error("规格维度配置暂不可用，请重试")
+          definitions = result.dimensions
+        }
+        offers.push(...result.offers)
+        if (result.offers.length < 50) break
+      }
+      variants = [...new Map(offers.filter(item => item.content_id === contentID && Number.isSafeInteger(item.id) && item.id > 0).map(item => [item.id, item])).values()]
       if (!variants.length) { panel.hidden = true; return }
       const selected = select.value
       select.replaceChildren(...variants.map(item => {
-        const name = (item.specifications || []).map(spec => spec.name + "：" + spec.value).join(" / ") || "标准规格"
+        const name = (item.specifications || []).map(spec => spec.name + "：" + spec.value + (spec.unit ? " " + spec.unit : "")).join(" / ") || "标准规格"
         return new Option(name, String(item.id))
       }))
       if (variants.some(item => String(item.id) === selected)) select.value = selected
+      renderDimensions(definitions)
       showPrice()
       status.textContent = "价格为所选规格的单价。可先加入购物车，结算时再登录。"
       fields.disabled = false; panel.hidden = false

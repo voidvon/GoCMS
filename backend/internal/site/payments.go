@@ -107,6 +107,10 @@ func (s *Server) adminPayments(w http.ResponseWriter, r *http.Request) {
 		page = 100000
 	}
 	ctx := r.Context()
+	if p[0] == "dimensions" {
+		s.adminCommerceDimensions(w, r, site, p[1:])
+		return
+	}
 	if len(p) == 1 && p[0] == "pricing-options" && r.Method == http.MethodGet {
 		pricing, err := s.commerce.Pricing(ctx, site)
 		if err != nil {
@@ -355,7 +359,8 @@ func (s *Server) publicCommerce(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(p) == 1 && p[0] == "catalog" && r.Method == http.MethodGet {
-		offers, err := s.commerce.Offers(r.Context(), site, true, page, parseIntOrZero(r.URL.Query().Get("content_id")), parseIntOrZero(r.URL.Query().Get("category_id")))
+		contentID := parseIntOrZero(r.URL.Query().Get("content_id"))
+		offers, err := s.commerce.Offers(r.Context(), site, true, page, contentID, parseIntOrZero(r.URL.Query().Get("category_id")))
 		if err != nil {
 			commerceError(w, err)
 			return
@@ -370,7 +375,15 @@ func (s *Server) publicCommerce(w http.ResponseWriter, r *http.Request) {
 			commerceError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"offers": offers, "channels": channels})
+		dimensions := []commerce.Dimension{}
+		if contentID > 0 && len(offers) > 0 {
+			dimensions, err = s.commerce.PublicDimensions(r.Context(), site, contentID)
+			if err != nil {
+				commerceError(w, err)
+				return
+			}
+		}
+		writeJSON(w, 200, map[string]any{"offers": offers, "channels": channels, "dimensions": dimensions})
 		return
 	}
 	u, ok := s.currentSiteUser(r)
@@ -503,6 +516,9 @@ func (s *Server) authorizePaymentOperation(w http.ResponseWriter, r *http.Reques
 		key = "theme"
 	}
 	if strings.HasPrefix(path, "accounts") || path == "pricing" {
+		key = "payments.configure"
+	}
+	if strings.HasPrefix(path, "dimensions") && r.Method != http.MethodGet {
 		key = "payments.configure"
 	}
 	if strings.HasSuffix(path, "/refund") {

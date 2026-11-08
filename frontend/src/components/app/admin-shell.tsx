@@ -3,6 +3,7 @@ import { GeographyPage } from "@/components/app/geography-page"
 import { MembersPage, MemberLoginSettings } from "@/components/app/member-login-settings"
 import { OrdersPage } from "@/components/app/orders-page"
 import { PaymentsPage } from "@/components/app/payments-page"
+import { CommerceDimensionsPage } from "@/components/app/commerce-dimensions-page"
 import { useEffect, useState, type ComponentType } from "react"
 import {
   BarChart3,
@@ -99,6 +100,7 @@ type NavigationItem = {
 const mainNavItems: NavigationItem[] = [
   { id: "overview", label: "仪表盘", icon: LayoutDashboard },
   { id: "content", label: "内容", icon: FileText },
+  { id: "commerce-dimensions", label: "规格维度", icon: Boxes },
   { id: "media", label: "附件", icon: Paperclip },
   { id: "categories", label: "分类", icon: FolderTree },
   { id: "languages", label: "多语言", icon: Languages },
@@ -130,11 +132,12 @@ function canView(user: AdminUser, view: AdminView, activeSiteId?: number) {
   }
   if (view === "logs") return user.permissions.includes("logs") || user.permissions.includes("login_logs")
   if (view === "overview") return true
+  const permission = view === "commerce-dimensions" ? "payments" : view
   if (activeSiteId && user.site_permissions && user.site_permissions[activeSiteId]) {
     const sitePerms = user.site_permissions[activeSiteId]
-    return sitePerms.includes(view) || sitePerms.includes("*")
+    return sitePerms.includes(permission) || sitePerms.includes("*")
   }
-  return user.permissions.includes(view)
+  return user.permissions.includes(permission) || user.permissions.includes("*")
 }
 
 function Navigation({ activeView, onNavigate, onClose, collapsed = false, user }: NavigationProps) {
@@ -364,6 +367,8 @@ function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarP
 
 function viewMeta(view: AdminView): { parent?: string; title: string; description: string } {
   switch (view) {
+    case "commerce-dimensions":
+      return { title: "规格维度", description: "统一维护当前站点的规格名称、类型、单位和候选值，供内容选用" }
     case "mail":
       return { parent: "平台管理", title: "邮件设置", description: "统一配置 SMTP、找回密码与公开联系邮箱" }
     case "member-login":
@@ -411,6 +416,8 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
   const { activeSite } = useSite()
   if (!canView(user, view, activeSite?.id)) return <p className="text-sm text-muted-foreground">当前用户组没有此模块的管理权限。</p>
   switch (view) {
+    case "commerce-dimensions":
+      return <CommerceDimensionsPage user={user} key={activeSite?.id} />
     case "mail":
       return <MailSettings />
     case "member-login":

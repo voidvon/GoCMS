@@ -24,9 +24,14 @@ export type PaymentAccount = {
   client_id: string; merchant_id: string; currency: string; public_url: string; return_path: string; enabled: boolean
 }
 export type PaymentAccountInput = Omit<PaymentAccount, "id" | "public_id"> & { secret: string }
-export type CommerceSpecification = { name: string; value: string }
+export type CommerceSpecification = { name: string; value: string; unit?: string }
 export type CommerceVariant = { fixed_prices?: Record<string, number>; id: number; sku: string; specifications: CommerceSpecification[]; amount: number; enabled: boolean }
-export type CommerceProduct = { enabled: boolean; kind: "physical" | "digital" | "service"; currency: string; variants: CommerceVariant[] }
+export type CommerceDimension = { key: string; name: string; type: "text" | "number" | "select"; unit: string; options: string[] }
+export type CommerceDimensionRecord = CommerceDimension & { version: number; product_count: number }
+export const getCommerceDimensions = () => request<{ items: CommerceDimensionRecord[] }>("/api/admin/payments/dimensions")
+export const saveCommerceDimension = (input: CommerceDimensionRecord) => request<CommerceDimensionRecord>(`/api/admin/payments/dimensions${input.key ? `/${encodeURIComponent(input.key)}` : ""}`, { method: input.key ? "PUT" : "POST", body: JSON.stringify(input) })
+export const deleteCommerceDimension = (input: CommerceDimensionRecord) => request(`/api/admin/payments/dimensions/${encodeURIComponent(input.key)}?version=${input.version}`, { method: "DELETE" })
+export type CommerceProduct = { enabled: boolean; kind: "physical" | "digital" | "service"; currency: string; dimensions: CommerceDimension[]; variants: CommerceVariant[] }
 export type CommerceOffer = {
   sku?: string; specifications?: CommerceSpecification[]
   id: number; name: string; kind: "physical" | "digital" | "service"; amount: number

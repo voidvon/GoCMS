@@ -15,6 +15,7 @@ import (
 type Specification struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
+	Unit  string `json:"unit,omitempty"`
 }
 
 type Variant struct {
@@ -27,10 +28,11 @@ type Variant struct {
 }
 
 type Product struct {
-	Enabled  bool      `json:"enabled"`
-	Kind     string    `json:"kind"`
-	Currency string    `json:"currency"`
-	Variants []Variant `json:"variants"`
+	Enabled    bool        `json:"enabled"`
+	Kind       string      `json:"kind"`
+	Currency   string      `json:"currency"`
+	Dimensions []Dimension `json:"dimensions"`
+	Variants   []Variant   `json:"variants"`
 }
 
 const publicOfferColumns = `f.id,c.title,p.kind,f.amount,p.currency,c.cover_image,c.id,f.enabled,f.sku,f.specifications_json,f.fixed_prices_json`
@@ -54,24 +56,29 @@ func scanOffer(row scanner) (Offer, error) {
 	return o, err
 }
 
-// Product loads the content's trading configuration. Existing content-linked
-// offers can be edited here without replacing IDs used by historical orders.
+// Product loads the content's trading configuration and selected dimensions.
 func (s Service) Product(ctx context.Context, site, content int64) (*Product, error) {
-	p := Product{Kind: "physical", Variants: []Variant{}}
-	err := s.DB.QueryRowContext(ctx, `SELECT enabled,kind,currency FROM gocms_commerce_product WHERE site_id=? AND content_id=?`, site, content).Scan(&p.Enabled, &p.Kind, &p.Currency)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	p := Product{Dimensions: []Dimension{}, Variants: []Variant{}}
+	var dimensions string
+	err := s.DB.QueryRowContext(ctx, `SELECT enabled,kind,currency,dimensions_json FROM gocms_commerce_product WHERE site_id=? AND content_id=?`, site, content).Scan(&p.Enabled, &p.Kind, &p.Currency, &dimensions)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, err
 	}
-	configured := err == nil
-	rows, err := s.DB.QueryContext(ctx, `SELECT id,sku,specifications_json,amount,enabled,kind,currency,fixed_prices_json FROM gocms_commerce_offer WHERE site_id=? AND content_id=? AND archived=0 ORDER BY id`, site, content)
+	if err := json.Unmarshal([]byte(dimensions), &p.Dimensions); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id,sku,specifications_json,amount,enabled,fixed_prices_json FROM gocms_commerce_offer WHERE site_id=? AND content_id=? AND archived=0 ORDER BY id`, site, content)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var v Variant
-		var raw, kind, currency, fixed string
-		if err := rows.Scan(&v.ID, &v.SKU, &raw, &v.Amount, &v.Enabled, &kind, &currency, &fixed); err != nil {
+		var raw, fixed string
+		if err := rows.Scan(&v.ID, &v.SKU, &raw, &v.Amount, &v.Enabled, &fixed); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(raw), &v.Specifications); err != nil {
@@ -80,17 +87,10 @@ func (s Service) Product(ctx context.Context, site, content int64) (*Product, er
 		if err := json.Unmarshal([]byte(fixed), &v.FixedPrices); err != nil {
 			return nil, err
 		}
-		if !configured && len(p.Variants) == 0 {
-			p.Kind = kind
-			p.Currency = currency
-		}
 		p.Variants = append(p.Variants, v)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-	if !configured && len(p.Variants) == 0 {
-		return nil, nil
 	}
 	return &p, nil
 }
@@ -104,8 +104,17 @@ func (s Service) SaveProduct(ctx context.Context, tx *sql.Tx, site, content int6
 	if _, err := payment.Exponent(p.Currency); err != nil {
 		return fmt.Errorf("请选择支持的币种: %w", ErrInvalid)
 	}
-	if len(p.Variants) > 50 || (p.Enabled && len(p.Variants) == 0) {
-		return fmt.Errorf("启用销售需至少一个规格，每条内容最多 50 个规格: %w", ErrInvalid)
+	if len(p.Variants) > MaxProductVariants || (p.Enabled && len(p.Variants) == 0) {
+		return fmt.Errorf("启用销售需至少一个规格，每条内容最多 %d 个规格: %w", MaxProductVariants, ErrInvalid)
+	}
+	if p.Dimensions == nil {
+		p.Dimensions = []Dimension{}
+	}
+	if err := normalizeDimensions(p.Dimensions); err != nil {
+		return err
+	}
+	if err := resolveProductDimensions(ctx, tx, site, p.Dimensions); err != nil {
+		return err
 	}
 	var title, image string
 	var category int64
@@ -168,7 +177,7 @@ func (s Service) SaveProduct(ctx context.Context, tx *sql.Tx, site, content int6
 		if _, err := payment.FormatAmount(v.Amount, p.Currency); err != nil {
 			return fmt.Errorf("每个规格都需要有效的正数价格: %w", ErrInvalid)
 		}
-		if v.Amount <= 0 || len(v.Specifications) > 12 {
+		if v.Amount <= 0 || len(v.Specifications) > MaxProductDimensions {
 			return ErrInvalid
 		}
 		if v.Specifications == nil {
@@ -180,12 +189,24 @@ func (s Service) SaveProduct(ctx context.Context, tx *sql.Tx, site, content int6
 			spec := &v.Specifications[j]
 			spec.Name = strings.TrimSpace(spec.Name)
 			spec.Value = strings.TrimSpace(spec.Value)
+			spec.Unit = strings.TrimSpace(spec.Unit)
 			name := strings.ToLower(spec.Name)
-			if !validText(spec.Name, 40) || !validText(spec.Value, 120) || names[name] {
+			if !validText(spec.Name, 40) || !validText(spec.Value, 120) || names[name] || (spec.Unit != "" && !validText(spec.Unit, 20)) {
 				return fmt.Errorf("规格参数名称和值不能为空，同一规格内参数名称不能重复: %w", ErrInvalid)
 			}
 			names[name] = true
 			canonical = append(canonical, name+"\x00"+spec.Value)
+		}
+		if err := validateVariantDimensions(v.Specifications, p.Dimensions); err != nil {
+			return fmt.Errorf("规格 %d: %w", i+1, err)
+		}
+		for j := range v.Specifications {
+			for _, d := range p.Dimensions {
+				if strings.EqualFold(v.Specifications[j].Name, d.Name) {
+					v.Specifications[j].Name = d.Name
+					v.Specifications[j].Unit = d.Unit
+				}
+			}
 		}
 		sort.Strings(canonical)
 		raw, _ := json.Marshal(canonical)
@@ -199,7 +220,11 @@ func (s Service) SaveProduct(ctx context.Context, tx *sql.Tx, site, content int6
 	if p.Enabled && !enabled {
 		return fmt.Errorf("启用销售需至少启用一个规格: %w", ErrInvalid)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO gocms_commerce_product(content_id,site_id,enabled,kind,currency) VALUES(?,?,?,?,?) ON CONFLICT(content_id) DO UPDATE SET enabled=excluded.enabled,kind=excluded.kind,currency=excluded.currency WHERE site_id=excluded.site_id`, content, site, p.Enabled, p.Kind, p.Currency); err != nil {
+	dimensionsJSON, err := json.Marshal(p.Dimensions)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO gocms_commerce_product(content_id,site_id,enabled,kind,currency,dimensions_json) VALUES(?,?,?,?,?,?) ON CONFLICT(content_id) DO UPDATE SET enabled=excluded.enabled,kind=excluded.kind,currency=excluded.currency,dimensions_json=excluded.dimensions_json WHERE site_id=excluded.site_id`, content, site, p.Enabled, p.Kind, p.Currency, string(dimensionsJSON)); err != nil {
 		return err
 	}
 	// Archive first so replacement rows may reuse an old SKU without deleting it.

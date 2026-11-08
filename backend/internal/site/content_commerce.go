@@ -24,5 +24,9 @@ func contentCommerceError(w http.ResponseWriter, err error) {
 		writeJSON(w, 400, map[string]string{"error": strings.TrimSuffix(err.Error(), ": "+commerce.ErrInvalid.Error())})
 		return
 	}
+	if errors.Is(err, commerce.ErrConflict) && err != commerce.ErrConflict {
+		writeJSON(w, 409, map[string]string{"error": strings.TrimSuffix(err.Error(), ": "+commerce.ErrConflict.Error()), "code": "conflict"})
+		return
+	}
 	commerceError(w, err)
 }

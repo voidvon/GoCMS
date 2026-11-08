@@ -1,6 +1,6 @@
 import { apiErrorKey, LocalizedError } from "./errors"
 import i18n, { currentLanguage } from "@/i18n"
-export type Specification = { name: string; value: string }
+export type Specification = { name: string; value: string; unit?: string }
 export type Variant = { source_amount?: number; source_currency?: string; display_amount?: number; display_currency?: string; pricing_revision?: number; pricing_unavailable?: boolean; id: number; content_id: number; name: string; image_url: string; kind: "physical" | "digital" | "service"; currency: string; amount: number; sku: string; specifications: Specification[] }
 export type OrderLine = Variant & { quantity: number; line_number: number; shipped_quantity: number }
 export type Channel = { id: number; name: string; currency: string; provider: string; sandbox: boolean }
@@ -43,7 +43,7 @@ export const getOrders = (page: number) => api<{ items: Order[] }>(`/api/commerc
 export const syncOrder = (id: string) => api<Order>(`/api/commerce/orders/${encodeURIComponent(id)}/sync`, { method: "POST", body: "{}" })
 export const payOrder = (id: string, channel: number) => api<Attempt>(`/api/commerce/orders/${encodeURIComponent(id)}/pay`, { method: "POST", body: JSON.stringify({ account_id: channel }) })
 export const money = (amount: number, currency: string) => new Intl.NumberFormat(currentLanguage(), { style: "currency", currency }).format(amount / (currency === "JPY" ? 1 : 100))
-export const specification = (item: Variant) => item.specifications?.map(spec => `${spec.name}: ${spec.value}`).join(" / ") || String(i18n.t("common.standardSpec"))
+export const specification = (item: Variant) => item.specifications?.map(spec => `${spec.name}: ${spec.value}${spec.unit ? ` ${spec.unit}` : ""}`).join(" / ") || String(i18n.t("common.standardSpec"))
 
 export const loginProviders = ["google", "facebook", "microsoft"] as const
 export type LoginProvider = typeof loginProviders[number]

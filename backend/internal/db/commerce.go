@@ -10,6 +10,10 @@ import (
 // the content publishing pipeline or ordinary content deletion cascades.
 func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 	statements := []string{
+		`CREATE TABLE IF NOT EXISTS gocms_commerce_dimension (
+		 site_id INTEGER NOT NULL REFERENCES gocms_site(id), dimension_key TEXT NOT NULL,
+		 identity_key TEXT NOT NULL, name_key TEXT NOT NULL, definition_json TEXT NOT NULL,
+		 version INTEGER NOT NULL DEFAULT 1, PRIMARY KEY(site_id,dimension_key), UNIQUE(site_id,identity_key))`,
 		`CREATE TABLE IF NOT EXISTS gocms_commerce_pricing (site_id INTEGER PRIMARY KEY REFERENCES gocms_site(id), settings_json TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS gocms_commerce_offer (
 		 id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL REFERENCES gocms_site(id),
@@ -21,7 +25,8 @@ func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS gocms_commerce_product (
 		 content_id INTEGER PRIMARY KEY REFERENCES gocms_content(id) ON DELETE CASCADE,
 		 site_id INTEGER NOT NULL REFERENCES gocms_site(id), enabled INTEGER NOT NULL DEFAULT 0,
-		 kind TEXT NOT NULL CHECK(kind IN ('physical','digital','service')), currency TEXT NOT NULL
+		 kind TEXT NOT NULL CHECK(kind IN ('physical','digital','service')), currency TEXT NOT NULL,
+		 dimensions_json TEXT NOT NULL DEFAULT '[]'
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_commerce_product_site ON gocms_commerce_product(site_id,content_id)`,
 		`CREATE TABLE IF NOT EXISTS gocms_payment_account (
@@ -81,6 +86,7 @@ func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 		}
 	}
 	for _, column := range []struct{ table, name, definition string }{
+		{"gocms_commerce_product", "dimensions_json", "TEXT NOT NULL DEFAULT '[]'"},
 		{"gocms_commerce_order", "language", "TEXT NOT NULL DEFAULT 'en'"},
 		{"gocms_commerce_order", "revision", "INTEGER NOT NULL DEFAULT 0"},
 		{"gocms_commerce_offer", "fixed_prices_json", "TEXT NOT NULL DEFAULT '{}'"},
