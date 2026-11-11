@@ -1,3 +1,4 @@
+import { mediaImageAccept } from "@/lib/media"
 import { useDialogState } from "@/lib/use-dialog-state"
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react"
 import { ArrowDown, ArrowUp, ExternalLink, FileText, ImagePlus, Library, LoaderCircle, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react"
@@ -296,7 +297,7 @@ function MultiImageField({
       }
       onChange([...photos, ...added])
     } catch (err) {
-      alert(err instanceof Error ? err.message : "图片上传失败")
+      showError(err, "图片上传失败")
     } finally {
       setUploading(false)
       if (fileInputRef.current) fileInputRef.current.value = ""
@@ -322,7 +323,7 @@ function MultiImageField({
             ref={fileInputRef}
             type="file"
             multiple
-            accept="image/jpeg,image/png,image/gif,image/webp,image/svg+xml"
+            accept={mediaImageAccept}
             className="hidden"
             onChange={handleFileUpload}
           />
@@ -599,7 +600,6 @@ function SingleImageField({
   onChange: (url: string) => void
 }) {
   const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState("")
   const [pickerOpen, setPickerOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -608,12 +608,11 @@ function SingleImageField({
     e.target.value = ""
     if (!file) return
     setUploading(true)
-    setError("")
     try {
       const res = await uploadMedia(file)
       if (res.asset) onChange(res.asset.url)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "图片上传失败")
+      showError(err, "图片上传失败")
     } finally {
       setUploading(false)
     }
@@ -633,7 +632,7 @@ function SingleImageField({
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/gif,image/webp"
+        accept={mediaImageAccept}
         className="hidden"
         onChange={handleUpload}
       />
@@ -661,7 +660,6 @@ function SingleImageField({
           </IconButton>
         ) : null}
       </div>
-      {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
       <MediaPickerDialog
         open={pickerOpen}
         onOpenChange={setPickerOpen}

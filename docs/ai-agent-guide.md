@@ -174,14 +174,14 @@
   ```json
   {
     "ok": true,
-    "data": {
+    "asset": {
       "id": 5,
-      "url": "/images/media-20260914-123456.jpg",
+      "url": "/assets/1/uploads/2026/11/example.webp",
       "original_name": "photo.jpg"
     }
   }
   ```
-- **说明**：上传返回的 `url` 可直接填入内容的 `cover_image` 或正文 `<img>` 标签中。
+- **说明**：上传返回的 `asset.url` 可直接填入内容的 `cover_image` 或正文 `<img>` 标签中。支持 JPEG、PNG、GIF、WebP 和 HEIC/HEIF，单文件不超过 10 MiB。默认自动选择较小的图片格式，请使用返回的地址，不要根据原文件名拼接 URL。优化规则与后台配置见 [图片优化](image-optimization.md)。
 
 ---
 

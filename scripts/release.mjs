@@ -151,7 +151,7 @@ function createReleaseAssets(tag) {
     const binarySuffix = goos === "windows" ? ".exe" : ""
     const binaryName = `gocms-${tag}-${goos}-${goarch}${binarySuffix}`
     const binaryPath = join(temporaryRoot, binaryName)
-    run("go", ["build", "-trimpath", "-ldflags", "-s -w", "-o", binaryPath, "./cmd/site"], {
+    run("go", ["build", "-tags", "nodynamic", "-trimpath", "-ldflags", "-s -w", "-o", binaryPath, "./cmd/site"], {
       cwd: backendRoot,
       env: { ...process.env, CGO_ENABLED: "0", GOOS: goos, GOARCH: goarch },
     })

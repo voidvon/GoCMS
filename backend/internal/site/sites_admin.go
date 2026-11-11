@@ -11,6 +11,7 @@ import (
 
 	"gocms/internal/consent"
 	"gocms/internal/db"
+	"gocms/internal/imageopt"
 )
 
 func (s *Server) currentAdmin(r *http.Request) *AdminUser {
@@ -298,6 +299,10 @@ func (s *Server) adminSiteSettings(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]string
 		if err := decodeRequest(r, &payload); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式不正确"})
+			return
+		}
+		if _, err := imageopt.ParseSettings(payload); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
 		if raw, ok := payload[consent.SettingKey]; ok {

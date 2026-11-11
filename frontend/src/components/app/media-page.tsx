@@ -1,3 +1,6 @@
+import { showError, showSuccess } from "@/components/app/admin-notifications"
+import { getErrorMessage } from "@/lib/errors"
+import { mediaImageAccept } from "@/lib/media"
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Copy, ImageIcon, LoaderCircle, RefreshCw, Trash2, Upload } from "lucide-react"
 
@@ -26,7 +29,6 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
 }) {
   const [detail, setDetail] = useState<MediaDetail | null>(null)
   const [error, setError] = useState("")
-  const [notice, setNotice] = useState("")
   const [retry, setRetry] = useState(0)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -36,7 +38,7 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
     getMediaItem(asset.id).then((result) => {
       if (active) setDetail(result)
     }).catch((err) => {
-      if (active) setError(err instanceof Error ? err.message : "附件详情加载失败")
+      if (active) setError(getErrorMessage(err, "附件详情加载失败"))
     })
     return () => { active = false }
   }, [asset.id, retry])
@@ -44,9 +46,9 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
   async function copyURL() {
     try {
       await navigator.clipboard.writeText(new URL(asset.url, window.location.origin).href)
-      setNotice("链接已复制")
+      showSuccess("链接已复制")
     } catch {
-      setError("复制失败，请手动复制下方地址")
+      showError("复制失败，请手动复制下方地址")
     }
   }
 
@@ -58,7 +60,7 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
       setConfirmOpen(false)
       onDeleted()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "删除附件失败")
+      showError(err, "删除附件失败")
       setConfirmOpen(false)
       setDetail(null)
       setRetry((value) => value + 1)
@@ -79,7 +81,6 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
             <img src={asset.url} alt={asset.original_name} className="max-h-72 max-w-full object-contain" />
           </div>
           {error ? <InlineAlert>{error}</InlineAlert> : null}
-          {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
           <dl className="grid grid-cols-2 gap-3 text-sm">
             <div><dt className="text-muted-foreground">格式 / 大小</dt><dd>{asset.mime_type} · {fileSize(asset.size_bytes)}</dd></div>
             <div><dt className="text-muted-foreground">尺寸</dt><dd>{asset.width} × {asset.height}</dd></div>
@@ -138,7 +139,6 @@ export function MediaPage() {
   const [revision, setRevision] = useState(0)
   const [loadedKey, setLoadedKey] = useState("")
   const [error, setError] = useState("")
-  const [notice, setNotice] = useState("")
   const [uploading, setUploading] = useState(false)
   const [selected, setSelected, selectedDialog] = useDialogState<MediaAsset>()
   const fileInput = useRef<HTMLInputElement>(null)
@@ -158,7 +158,7 @@ export function MediaPage() {
     }).catch((err) => {
       if (!active) return
       setAssets([])
-      setError(err instanceof Error ? err.message : "附件加载失败")
+      setError(getErrorMessage(err, "附件加载失败"))
       setLoadedKey(requestKey)
     })
     return () => { active = false }
@@ -173,19 +173,18 @@ export function MediaPage() {
 
   async function upload(file: File) {
     setError("")
-    setNotice("")
-    if (file.size > 10 * 1024 * 1024) { setError("图片不能超过 10 MB"); return }
-    if (!/\.(jpe?g|png|gif)$/i.test(file.name)) { setError("只支持 JPEG、PNG 和 GIF 图片"); return }
+    if (file.size > 10 * 1024 * 1024) { showError("图片不能超过 10 MB"); return }
     setUploading(true)
     try {
-      await uploadMedia(file)
+      const result = await uploadMedia(file)
       setSearch("")
       setAppliedSearch("")
       setPage(1)
       setRevision((value) => value + 1)
-      setNotice("图片上传成功")
+      const saved = file.size - result.asset.size_bytes
+      showSuccess(saved > 0 ? `图片上传成功，节省 ${fileSize(saved)}` : "图片上传成功")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "上传失败")
+      showError(err, "上传失败")
     } finally {
       setUploading(false)
     }
@@ -196,7 +195,7 @@ export function MediaPage() {
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" disabled={uploading} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}{uploading ? "上传中…" : "上传图片"}</Button>
         <Button size="sm" variant="outline" disabled={loading || uploading} onClick={() => setRevision((value) => value + 1)}><RefreshCw className={loading ? "animate-spin" : ""} />刷新</Button>
-        <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/gif" className="hidden" aria-label="选择上传图片" onChange={(event) => {
+        <input ref={fileInput} type="file" accept={mediaImageAccept} className="hidden" aria-label="选择上传图片" onChange={(event) => {
           const file = event.target.files?.[0]
           event.target.value = ""
           if (file) void upload(file)
@@ -209,7 +208,6 @@ export function MediaPage() {
         </form>
       </div>
       {error ? <InlineAlert>{error}<Button className="ml-2" variant="outline" size="sm" onClick={() => setRevision((value) => value + 1)}>重新加载</Button></InlineAlert> : null}
-      {notice ? <p role="status" className="text-sm text-muted-foreground">{notice}</p> : null}
       <PaginatedTable
         className="lg:overflow-hidden"
         page={page}
@@ -263,7 +261,7 @@ export function MediaPage() {
       </PaginatedTable>
       {selected ? <MediaDetails key={selected.id} asset={selected} {...selectedDialog} onClose={() => setSelected(null)} onDeleted={() => {
         setSelected(null)
-        setNotice("附件已删除")
+        showSuccess("附件已删除")
         setRevision((value) => value + 1)
       }} /> : null}
     </div>

@@ -1,3 +1,4 @@
+import { mediaImageAccept } from "@/lib/media"
 import { useEffect, useState, type FormEvent, type ReactNode } from "react"
 import { Plus, Trash2 } from "lucide-react"
 import { createManagedOrder, getOrderCreationOptions, uploadMedia, type CommerceOrder, type ManualOrderInput, type OrderCreationChannel, type OrderCatalogVariant } from "@/lib/api"
@@ -102,7 +103,7 @@ export function CreateOrderDialog({ canMedia, onClose, onCreated }: { canMedia: 
                   {item.price && item.currency && item.currency !== channel?.currency && <p className="text-xs text-destructive">此单价原币种为 {item.currency}，请按 {channel?.currency} 重新填写。</p>}
                   <Field label="商品图片（收银台使用）"><Input required readOnly={!!item.variant_id} maxLength={255} placeholder="本站素材路径或公开 HTTPS 图片地址" value={item.image_url} onChange={e => updateItem(index, {image_url: e.target.value})}/></Field>
                   {item.image_url && <img className="size-16 rounded-md border object-cover" src={item.image_url} alt="商品图片预览"/>}
-                  {canMedia && !item.variant_id && <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setMediaIndex(index)}>从素材库选择</Button><Label className="inline-flex cursor-pointer items-center rounded-md border px-3 text-sm">上传图片<input className="sr-only" type="file" accept="image/*" disabled={busy} onChange={e => {
+                  {canMedia && !item.variant_id && <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setMediaIndex(index)}>从素材库选择</Button><Label className="inline-flex cursor-pointer items-center rounded-md border px-3 text-sm">上传图片<input className="sr-only" type="file" accept={mediaImageAccept} disabled={busy} onChange={e => {
                     const file = e.target.files?.[0]; e.target.value = ""
                     if (!file) return
                     setBusy(true)

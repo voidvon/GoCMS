@@ -1,3 +1,5 @@
+import { showError } from "@/components/app/admin-notifications"
+import { mediaImageAccept } from "@/lib/media"
 import { useEffect, useRef, useState } from "react"
 import {
   AlignCenter,
@@ -301,7 +303,6 @@ export function RichTextEditor({ id, value, onChange, onUploadingChange, classNa
   const imageInputRef = useRef<HTMLInputElement>(null)
   const imageSelectionRef = useRef<{ from: number; to: number } | null>(null)
   const [imageUploading, setImageUploading] = useState(false)
-  const [imageError, setImageError] = useState("")
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false)
 
   useEffect(() => {
@@ -392,13 +393,12 @@ export function RichTextEditor({ id, value, onChange, onUploadingChange, classNa
     if (!editor || imageUploading) return
     if (!preserveSelection && !rememberSelection()) return
     setImageUploading(true)
-    setImageError("")
     onUploadingChange?.(true)
     try {
       const result = await uploadMedia(file)
       insertImage({ url: result.asset.url, original_name: file.name })
     } catch (uploadError) {
-      setImageError(uploadError instanceof Error ? uploadError.message : "图片上传失败")
+      showError(uploadError, "图片上传失败")
     } finally {
       imageSelectionRef.current = null
       setImageUploading(false)
@@ -416,7 +416,7 @@ export function RichTextEditor({ id, value, onChange, onUploadingChange, classNa
       <input
         ref={imageInputRef}
         type="file"
-        accept="image/jpeg,image/png,image/gif"
+        accept={mediaImageAccept}
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0]
@@ -444,7 +444,6 @@ export function RichTextEditor({ id, value, onChange, onUploadingChange, classNa
       >
         <EditorContent editor={editor} />
       </div>
-      {imageError ? <p role="alert" className="border-t px-3 py-2 text-xs text-destructive">{imageError}</p> : null}
       <MediaPickerDialog
         open={mediaPickerOpen}
         onOpenChange={setMediaPickerOpen}

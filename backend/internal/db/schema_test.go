@@ -24,6 +24,8 @@ func TestCreateSchemaContainsOnlyRuntimeTables(t *testing.T) {
 	want := map[string]bool{
 		"gocms_commerce_shipment": false, "gocms_commerce_shipment_item": false, "gocms_commerce_order_event": false,
 		"gocms_commerce_product":        false,
+		"gocms_commerce_dimension":      false,
+		"gocms_commerce_pricing":        false,
 		"gocms_commerce_offer":          false,
 		"gocms_commerce_order":          false,
 		"gocms_commerce_order_item":     false,

@@ -44,7 +44,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ConfirmDialog, InlineAlert } from "@/components/app/app-ui"
-import { showSuccess } from "@/components/app/admin-notifications"
+import { showError, showSuccess } from "@/components/app/admin-notifications"
+import { ImageOptimizationFields } from "@/components/app/image-optimization-fields"
 import { ConsentSettingsDialog } from "@/components/app/consent-settings-dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
@@ -96,15 +97,17 @@ export function SitesPage() {
     icp_beian: "",
     police_beian: "",
     copyright: "",
+    image_optimization_enabled: "true",
+    image_optimization_quality: "80",
   })
   const [customSettingsList, setCustomSettingsList] = useState<Array<{ key: string; value: string }>>([])
-  const [settingsError, setSettingsError] = useState("")
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
 
   const handleOpenSettings = async (site: Site) => {
     setSettingsSite(site)
     setSettingsDialogOpen(true)
     setSettingsLoading(true)
-    setSettingsError("")
+    setSettingsLoaded(false)
     try {
       const data = await getSiteSettings(site.id)
       const stdKeys = new Set([
@@ -115,6 +118,8 @@ export function SitesPage() {
         "icp_beian",
         "police_beian",
         "copyright",
+        "image_optimization_enabled",
+        "image_optimization_quality",
       ])
       setStandardSettings({
         site_name: data.site_name || site.name || "",
@@ -124,6 +129,8 @@ export function SitesPage() {
         icp_beian: data.icp_beian || data.icp || "",
         police_beian: data.police_beian || "",
         copyright: data.copyright || "",
+        image_optimization_enabled: data.image_optimization_enabled ?? "true",
+        image_optimization_quality: data.image_optimization_quality ?? "80",
       })
       const custom: Array<{ key: string; value: string }> = []
       for (const [k, v] of Object.entries(data)) {
@@ -132,8 +139,9 @@ export function SitesPage() {
         }
       }
       setCustomSettingsList(custom)
+      setSettingsLoaded(true)
     } catch (err: unknown) {
-      setSettingsError(err instanceof Error ? err.message : "加载站点配置失败")
+      showError(err, "加载站点配置失败")
     } finally {
       setSettingsLoading(false)
     }
@@ -141,9 +149,8 @@ export function SitesPage() {
 
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!settingsSite) return
+    if (!settingsSite || !settingsLoaded) return
     setSettingsSaving(true)
-    setSettingsError("")
     try {
       const merged: Record<string, string> = { ...standardSettings }
       for (const item of customSettingsList) {
@@ -156,7 +163,7 @@ export function SitesPage() {
       showSuccess(`站点“${settingsSite.name}”配置已保存`)
       setSettingsDialogOpen(false)
     } catch (err: unknown) {
-      setSettingsError(err instanceof Error ? err.message : "保存配置失败")
+      showError(err, "保存配置失败")
     } finally {
       setSettingsSaving(false)
     }
@@ -588,14 +595,13 @@ export function SitesPage() {
 
       {/* Site Parameters / Global Settings Dialog */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
-        <DialogContent className="max-w-2xl flex flex-col overflow-hidden">
+        <DialogContent className="max-h-[calc(100dvh-2rem)] sm:max-w-2xl flex flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>站点参数配置 - {settingsSite?.name}</DialogTitle>
             <DialogDescription>
-              配置该站点的全局变量与模板标签参数（对应模板中的 {"{{setting \"key\"}}"} ），保存后请执行全站发布。
+              配置本站图片上传规则和模板参数。图片优化保存后立即生效；模板参数修改后请执行全站发布。
             </DialogDescription>
           </DialogHeader>
-          {settingsError && <InlineAlert>{settingsError}</InlineAlert>}
           {settingsLoading ? (
             <div className="flex h-48 items-center justify-center">
               <LoaderCircle className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -603,6 +609,7 @@ export function SitesPage() {
           ) : (
             <ScrollArea className="min-h-0 flex-1" contentClassName="pr-1 py-2">
             <form onSubmit={handleSaveSettings} className="space-y-4">
+              <ImageOptimizationFields settings={standardSettings} onChange={setStandardSettings} />
               <div className="space-y-3 rounded-lg border p-3.5 bg-muted/20">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">基础与链接</h4>
                 <div className="grid grid-cols-2 gap-3">
@@ -750,7 +757,7 @@ export function SitesPage() {
                 <Button type="button" variant="outline" onClick={() => setSettingsDialogOpen(false)}>
                   取消
                 </Button>
-                <Button type="submit" disabled={settingsSaving}>
+                <Button type="submit" disabled={settingsSaving || !settingsLoaded}>
                   {settingsSaving && <LoaderCircle className="mr-2 h-4 w-4 animate-spin" />}
                   保存配置
                 </Button>

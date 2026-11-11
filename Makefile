@@ -30,14 +30,14 @@ build:
 	cd frontend && npm ci && npm run build
 	cd storefront && npm ci && npm run build
 	node scripts/sync-embedded.mjs
-	cd backend && go build -o ../bin/site ./cmd/site
+	cd backend && go build -tags nodynamic -o ../bin/site ./cmd/site
 generate:
 	cd backend && go run ./cmd/generate
 test:
 	cd frontend && npm run build
 	cd storefront && npm run build
 	node scripts/sync-embedded.mjs
-	cd backend && go test ./... && go vet ./...
+	cd backend && go test -tags nodynamic ./... && go vet -tags nodynamic ./...
 release:
 	node scripts/release.mjs
 release-dry-run:

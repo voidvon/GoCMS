@@ -1,6 +1,7 @@
 package site
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -23,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"gocms/internal/db"
+	"gocms/internal/imageopt"
 	"gocms/internal/timestamps"
 )
 
@@ -149,6 +152,55 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 	}
 	siteIDStr := strconv.FormatInt(siteID, 10)
 
+	data, err := io.ReadAll(io.LimitReader(file, maxMediaUploadSize+1))
+	if err != nil {
+		http.Error(response, "读取图片失败", http.StatusBadRequest)
+		return
+	}
+	if int64(len(data)) > maxMediaUploadSize {
+		http.Error(response, "图片不能超过 10 MB", http.StatusRequestEntityTooLarge)
+		return
+	}
+	if len(data) == 0 {
+		http.Error(response, "图片文件为空", http.StatusBadRequest)
+		return
+	}
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		http.Error(response, "文件不是受支持的图片格式（JPEG、PNG、GIF、WebP、HEIC/HEIF）", http.StatusBadRequest)
+		return
+	}
+	if _, _, ok := mediaImageFormat(format); !ok {
+		http.Error(response, "只支持 JPEG、PNG、GIF、WebP 和 HEIC/HEIF 图片", http.StatusBadRequest)
+		return
+	}
+	if config.Width < 1 || config.Height < 1 || int64(config.Width) > maxMediaDimension || int64(config.Height) > maxMediaDimension || int64(config.Width)*int64(config.Height) > maxMediaPixels {
+		http.Error(response, "图片尺寸过大", http.StatusBadRequest)
+		return
+	}
+	settings, err := db.LoadSiteSettingsForSite(request.Context(), s.database, siteID)
+	if err != nil {
+		http.Error(response, "读取图片优化配置失败", http.StatusInternalServerError)
+		return
+	}
+	options, err := imageopt.ParseSettings(settings)
+	if err != nil {
+		http.Error(response, "图片优化配置无效", http.StatusInternalServerError)
+		return
+	}
+	optimized, err := imageopt.Optimize(request.Context(), data, format, config, options)
+	if err != nil {
+		http.Error(response, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if int64(len(optimized.Data)) > maxMediaUploadSize {
+		http.Error(response, "转换后的图片不能超过 10 MB", http.StatusRequestEntityTooLarge)
+		return
+	}
+	mimeType, extension, _ := mediaImageFormat(optimized.Format)
+	config.Width, config.Height = optimized.Width, optimized.Height
+	data = optimized.Data
+
 	monthPath := time.Now().UTC().Format("2006/01")
 	uploadDirectory := filepath.Join(s.assetsRoot, siteIDStr, "uploads", filepath.FromSlash(monthPath))
 	if err := os.MkdirAll(uploadDirectory, 0o755); err != nil {
@@ -161,46 +213,20 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 		return
 	}
 	temporaryPath := temporary.Name()
+	defer temporary.Close()
 	defer func() {
 		if temporaryPath != "" {
 			_ = os.Remove(temporaryPath)
 		}
 	}()
-
 	hasher := sha256.New()
-	written, err := io.Copy(io.MultiWriter(temporary, hasher), io.LimitReader(file, maxMediaUploadSize+1))
+	written, err := io.Copy(io.MultiWriter(temporary, hasher), bytes.NewReader(data))
 	if err != nil {
-		http.Error(response, "读取图片失败", http.StatusBadRequest)
-		return
-	}
-	if written > maxMediaUploadSize {
-		http.Error(response, "图片不能超过 10 MB", http.StatusRequestEntityTooLarge)
-		return
-	}
-	if written == 0 {
-		http.Error(response, "图片文件为空", http.StatusBadRequest)
+		http.Error(response, "保存图片失败", http.StatusInternalServerError)
 		return
 	}
 	if err := temporary.Sync(); err != nil {
 		http.Error(response, "保存图片失败", http.StatusInternalServerError)
-		return
-	}
-	if _, err := temporary.Seek(0, io.SeekStart); err != nil {
-		http.Error(response, "读取图片失败", http.StatusInternalServerError)
-		return
-	}
-	config, format, err := image.DecodeConfig(temporary)
-	if err != nil {
-		http.Error(response, "文件不是受支持的图片格式", http.StatusBadRequest)
-		return
-	}
-	mimeType, extension, ok := mediaImageFormat(format)
-	if !ok {
-		http.Error(response, "只支持 JPEG、PNG 和 GIF 图片", http.StatusBadRequest)
-		return
-	}
-	if config.Width < 1 || config.Height < 1 || int64(config.Width) > maxMediaDimension || int64(config.Height) > maxMediaDimension || int64(config.Width)*int64(config.Height) > maxMediaPixels {
-		http.Error(response, "图片尺寸过大", http.StatusBadRequest)
 		return
 	}
 
@@ -274,6 +300,10 @@ func mediaImageFormat(format string) (string, string, bool) {
 		return "image/png", ".png", true
 	case "gif":
 		return "image/gif", ".gif", true
+	case "webp":
+		return "image/webp", ".webp", true
+	case "heic":
+		return "image/heic", ".heic", true
 	default:
 		return "", "", false
 	}
