@@ -1254,7 +1254,7 @@ function ContentEditor({
                 </div>
               )}
 
-              {(categories.find((category) => category.id === form.category_id)?.commerce_enabled || sale) && <ContentCommerceEditor value={sale} onChange={setSale} categoryEnabled={!!categories.find((category) => category.id === form.category_id)?.commerce_enabled} disabled={!canManageCommerce || saving} />}
+              <ContentCommerceEditor value={sale} onChange={setSale} categoryEnabled={!!selectedCategory?.commerce_enabled} canManage={canManageCommerce} disabled={!canManageCommerce || saving} />
 
               {/* 发布与展示属性 */}
               <div className="space-y-3 rounded-lg border p-3.5 bg-card">

@@ -20,7 +20,7 @@ export function commerceDraft(product?: CommerceProduct): CommerceDraft | undefi
     variants: product.variants.map(({ amount, ...variant }) => ({
       ...variant,
       specifications: dimensions.map(d => ({ name: d.name, value: variant.specifications?.find(s => s.name.trim().toLowerCase() === d.name.trim().toLowerCase())?.value ?? "" })),
-      price: String(amount / (product.currency === "JPY" ? 1 : 100)),
+      price: amount > 0 ? String(amount / (product.currency === "JPY" ? 1 : 100)) : "",
       fixedPriceInputs: Object.fromEntries(Object.entries(variant.fixed_prices ?? {}).map(([currency, amount]) => [currency, String(amount / (currency === "JPY" ? 1 : 100))])),
       localID: `variant-${++sequence}`,
     })),
@@ -55,7 +55,7 @@ export function appendCombinations(draft: CommerceDraft): VariantDraft[] {
   const dimensions = normalizedDimensions(draft.dimensions)
   if (!dimensions.length || dimensions.some(d => d.type !== "select")) throw new Error("批量生成需要所有维度均为选项类型，并已配置候选值；文本或数字维度可在表格中逐行填写")
   const count = dimensions.reduce((n, d) => n * d.options.length, 1)
-  if (count > maxProductVariants) throw new Error(`候选值共有 ${count} 种组合，超过 ${maxProductVariants} 行上限，请缩减候选值或手动添加实际售卖组合`)
+  if (count > maxProductVariants) throw new Error(`候选值共有 ${count} 种组合，超过 ${maxProductVariants} 行上限，请缩减候选值或手动添加需要的组合`)
   // Only an untouched, unsaved placeholder may be replaced. Prices, SKU IDs,
   // currency overrides and incomplete existing rows are never silently removed.
   const variants = draft.variants.filter(v => !v.enabled || v.id || v.sku.trim() || v.price.trim() || Object.values(v.fixedPriceInputs).some(s => s.trim()) || v.specifications.some(s => s.value.trim()))
@@ -78,6 +78,9 @@ function priceAmount(raw: string, currency: string, label: string) {
 
 export function commercePayload(draft?: CommerceDraft): CommerceProduct | undefined {
   if (!draft) return undefined
+  if ((draft.enabled || draft.variants.some(v => v.price.trim() || Object.values(v.fixedPriceInputs).some(s => s.trim()))) && !commerceCurrencies.includes(draft.currency)) {
+    throw new Error("填写售价或开启销售前请选择计价币种")
+  }
   const dimensions = normalizedDimensions(draft.dimensions), combinations = new Set<string>(), skus = new Set<string>()
   const variants = draft.variants
     .filter(v => draft.enabled || v.id || v.price.trim() || v.sku.trim() || Object.values(v.fixedPriceInputs).some(s => s.trim()) || v.specifications.some(s => s.value.trim()))
@@ -94,7 +97,7 @@ export function commercePayload(draft?: CommerceDraft): CommerceProduct | undefi
       if (combinations.has(key)) throw new Error(`${label}的规格组合重复，每个组合只能配置一行`)
       if (sku && (!validText(sku, 64) || skus.has(sku.toLowerCase()))) throw new Error(`${label}的规格编号无效或重复，最多 64 字节`)
       combinations.add(key); if (sku) skus.add(sku.toLowerCase())
-      const amount = priceAmount(variant.price, draft.currency, `${label}售价`)
+      const amount = !draft.enabled && !variant.price.trim() ? 0 : priceAmount(variant.price, draft.currency, `${label}售价`)
       const fixed_prices: Record<string, number> = {}
       for (const [currency, raw] of Object.entries(variant.fixedPriceInputs)) {
         if (raw.trim() && currency !== draft.currency) fixed_prices[currency] = priceAmount(raw, currency, `${label} ${currency} 固定售价`)

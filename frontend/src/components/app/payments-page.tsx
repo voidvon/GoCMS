@@ -127,7 +127,7 @@ export function PaymentsPage({ user }: { user: AdminUser }) {
     </div>
     <TabsContent value={tab} className="flex min-h-0 flex-1 flex-col gap-4">
     {tab === "pricing" ? <CurrencySettings key={`${activeSiteId}:${version}`} /> : <>
-    <p className="text-sm text-muted-foreground">商品直接使用分类中的内容。请在<a href="/admin/categories" className="underline underline-offset-4">分类管理</a>开启在线销售，再到<a href="/admin/content" className="underline underline-offset-4">内容管理</a>配置规格和价格。</p>
+    <p className="text-sm text-muted-foreground">商品直接使用分类中的内容。可在<a href="/admin/content" className="underline underline-offset-4">内容管理</a>直接配置规格；需要购买功能时，再填写售价并同时开启内容与<a href="/admin/categories" className="underline underline-offset-4">所属分类</a>的在线销售。</p>
     {configured === false && <Alert role="status" className="flex flex-wrap items-center justify-between gap-3"><AlertDescription>{keyStatus?.key_requires_restore ? "已有支付渠道，请导入原加密密钥恢复支付功能。" : "支付凭据加密尚未配置，请由超级管理员初始化支付密钥。"}</AlertDescription>{keyStatus?.key_can_initialize && <Button variant="outline" onClick={() => { setKeyMode(keyStatus.key_requires_restore ? "import" : "generate"); setImportKey(""); setKeyDialog(true) }}>配置支付密钥</Button>}</Alert>}
     {configured && user.is_super && <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">支付加密密钥已配置 · {keyStatus?.key_source === "environment" ? "来自环境变量，可接管到后台管理" : "保存在服务端独立文件"}</p><Button variant="outline" size="sm" disabled={busy} onClick={() => { setImportKey(""); setKeyDialog(true) }}>密钥管理与备份</Button></div>}
     <ScrollArea orientation="both" className="min-h-0 flex-1 rounded-lg border" contentClassName="min-w-full">

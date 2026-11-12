@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // Financial records intentionally restrict site deletion and are never part of
@@ -18,7 +19,7 @@ func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 		`CREATE TABLE IF NOT EXISTS gocms_commerce_offer (
 		 id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL REFERENCES gocms_site(id),
 		 name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('physical','digital','service')),
-		 amount INTEGER NOT NULL CHECK(amount > 0), currency TEXT NOT NULL, image_url TEXT NOT NULL,
+		 amount INTEGER NOT NULL CHECK(amount >= 0), currency TEXT NOT NULL, image_url TEXT NOT NULL,
 		 content_id INTEGER, enabled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_commerce_offer_site ON gocms_commerce_offer(site_id,id)`,
@@ -105,6 +106,9 @@ func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 			return err
 		}
 	}
+	if err := ensureUnpricedSpecifications(ctx, database); err != nil {
+		return err
+	}
 	if _, err := database.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_commerce_variant_sku ON gocms_commerce_offer(site_id,content_id,sku COLLATE NOCASE) WHERE content_id IS NOT NULL AND sku<>'' AND archived=0`); err != nil {
 		return err
 	}
@@ -112,6 +116,70 @@ func EnsureCommerce(ctx context.Context, database *sql.DB) error {
 		return err
 	}
 	return ensureShipments(ctx, database)
+}
+
+// Allow display-only specifications to have no price. Orders and refunds keep
+// their positive-amount constraints; offer IDs and historical snapshots survive.
+func ensureUnpricedSpecifications(ctx context.Context, database *sql.DB) error {
+	var definition string
+	if err := database.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name='gocms_commerce_offer'`).Scan(&definition); err != nil {
+		return err
+	}
+	if !strings.Contains(definition, "CHECK(amount > 0)") {
+		return nil
+	}
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Save indexes and triggers before replacing the table. Nothing references
+	// offers with a foreign key: order items deliberately retain independent IDs.
+	rows, err := tx.QueryContext(ctx, `SELECT sql FROM sqlite_master WHERE tbl_name='gocms_commerce_offer' AND type IN ('index','trigger') AND sql IS NOT NULL`)
+	if err != nil {
+		return err
+	}
+	var objects []string
+	for rows.Next() {
+		var statement string
+		if err := rows.Scan(&statement); err != nil {
+			rows.Close()
+			return err
+		}
+		objects = append(objects, statement)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	var sequence int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name='gocms_commerce_offer'),0)`).Scan(&sequence); err != nil {
+		return err
+	}
+	statements := []string{
+		`CREATE TABLE gocms_commerce_offer_unpriced (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL REFERENCES gocms_site(id),
+ name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('physical','digital','service')),
+ amount INTEGER NOT NULL CHECK(amount >= 0), currency TEXT NOT NULL, image_url TEXT NOT NULL,
+ content_id INTEGER, enabled INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ fixed_prices_json TEXT NOT NULL DEFAULT '{}', sku TEXT NOT NULL DEFAULT '',
+ specifications_json TEXT NOT NULL DEFAULT '[]', archived INTEGER NOT NULL DEFAULT 0)`,
+		`INSERT INTO gocms_commerce_offer_unpriced(id,site_id,name,kind,amount,currency,image_url,content_id,enabled,created_at,fixed_prices_json,sku,specifications_json,archived)
+ SELECT id,site_id,name,kind,amount,currency,image_url,content_id,enabled,created_at,fixed_prices_json,sku,specifications_json,archived FROM gocms_commerce_offer`,
+		`DROP TABLE gocms_commerce_offer`,
+		`ALTER TABLE gocms_commerce_offer_unpriced RENAME TO gocms_commerce_offer`,
+	}
+	for _, statement := range append(statements, objects...) {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("upgrade unpriced specifications: %w", err)
+		}
+	}
+	// Preserve the high-water mark, including IDs of previously deleted offers.
+	if _, err := tx.ExecContext(ctx, `UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='gocms_commerce_offer'`, sequence); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Upgrade the original one-row-per-order snapshot without changing historical

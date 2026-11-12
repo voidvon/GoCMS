@@ -101,8 +101,11 @@ func (s Service) SaveProduct(ctx context.Context, tx *sql.Tx, site, content int6
 	if p.Kind != "physical" && p.Kind != "digital" && p.Kind != "service" {
 		return fmt.Errorf("请选择有效的商品或服务类型: %w", ErrInvalid)
 	}
-	if _, err := payment.Exponent(p.Currency); err != nil {
-		return fmt.Errorf("请选择支持的币种: %w", ErrInvalid)
+	// Display-only specifications do not need a currency or pricing setup.
+	if p.Currency != "" || p.Enabled {
+		if _, err := payment.Exponent(p.Currency); err != nil {
+			return fmt.Errorf("请选择支持的币种: %w", ErrInvalid)
+		}
 	}
 	if len(p.Variants) > MaxProductVariants || (p.Enabled && len(p.Variants) == 0) {
 		return fmt.Errorf("启用销售需至少一个规格，每条内容最多 %d 个规格: %w", MaxProductVariants, ErrInvalid)
@@ -141,6 +144,9 @@ func (s Service) SaveProduct(ctx context.Context, tx *sql.Tx, site, content int6
 	enabled := false
 	for i := range p.Variants {
 		v := &p.Variants[i]
+		if p.Currency == "" && (v.Amount != 0 || len(v.FixedPrices) > 0) {
+			return fmt.Errorf("填写售价前请选择计价币种: %w", ErrInvalid)
+		}
 		if len(v.FixedPrices) > len(SupportedCurrencies()) {
 			return ErrInvalid
 		}
@@ -174,10 +180,17 @@ func (s Service) SaveProduct(ctx context.Context, tx *sql.Tx, site, content int6
 			return fmt.Errorf("规格编号不能为空或重复，最多 64 字节: %w", ErrInvalid)
 		}
 		skus[strings.ToLower(v.SKU)] = true
-		if _, err := payment.FormatAmount(v.Amount, p.Currency); err != nil {
-			return fmt.Errorf("每个规格都需要有效的正数价格: %w", ErrInvalid)
+		if p.Currency != "" {
+			if _, err := payment.FormatAmount(v.Amount, p.Currency); err != nil {
+				return fmt.Errorf("规格售价无效: %w", ErrInvalid)
+			}
 		}
-		if v.Amount <= 0 || len(v.Specifications) > MaxProductDimensions {
+		// Zero represents an unpriced specification while content sales are off.
+		// Enabling sales still requires a positive price for every variant.
+		if p.Enabled && v.Amount == 0 {
+			return fmt.Errorf("开启销售后每个规格都需要有效的正数价格: %w", ErrInvalid)
+		}
+		if len(v.Specifications) > MaxProductDimensions {
 			return ErrInvalid
 		}
 		if v.Specifications == nil {
