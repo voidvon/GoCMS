@@ -16,11 +16,15 @@ import (
 
 	"gocms/internal/db"
 	"gocms/internal/embedded"
+	"gocms/internal/imageopt"
 	"gocms/internal/site"
 	"gocms/internal/theme"
 )
 
 func main() {
+	if imageopt.RunWorker() {
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "__apply-update" {
 		if err := site.ApplyUpdate(os.Args[2:]); err != nil {
 			log.Fatal(err)

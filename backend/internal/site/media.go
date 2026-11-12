@@ -7,12 +7,9 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html"
-	"image"
-	_ "image/gif"
-	_ "image/jpeg"
-	_ "image/png"
 	"io"
 	"net/http"
 	"net/url"
@@ -30,10 +27,8 @@ import (
 )
 
 const (
-	maxMediaUploadSize  int64 = 10 << 20
+	maxMediaUploadSize  int64 = imageopt.MaxBytes
 	maxMediaRequestSize int64 = maxMediaUploadSize + 1<<20
-	maxMediaDimension   int64 = 12000
-	maxMediaPixels      int64 = 48_000_000
 )
 
 var contentImageSource = regexp.MustCompile(`(?is)<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
@@ -165,19 +160,6 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 		http.Error(response, "图片文件为空", http.StatusBadRequest)
 		return
 	}
-	config, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		http.Error(response, "文件不是受支持的图片格式（JPEG、PNG、GIF、WebP、HEIC/HEIF）", http.StatusBadRequest)
-		return
-	}
-	if _, _, ok := mediaImageFormat(format); !ok {
-		http.Error(response, "只支持 JPEG、PNG、GIF、WebP 和 HEIC/HEIF 图片", http.StatusBadRequest)
-		return
-	}
-	if config.Width < 1 || config.Height < 1 || int64(config.Width) > maxMediaDimension || int64(config.Height) > maxMediaDimension || int64(config.Width)*int64(config.Height) > maxMediaPixels {
-		http.Error(response, "图片尺寸过大", http.StatusBadRequest)
-		return
-	}
 	settings, err := db.LoadSiteSettingsForSite(request.Context(), s.database, siteID)
 	if err != nil {
 		http.Error(response, "读取图片优化配置失败", http.StatusInternalServerError)
@@ -188,9 +170,21 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 		http.Error(response, "图片优化配置无效", http.StatusInternalServerError)
 		return
 	}
-	optimized, err := imageopt.Optimize(request.Context(), data, format, config, options)
+	optimized, err := imageopt.Optimize(request.Context(), data, options)
 	if err != nil {
-		http.Error(response, err.Error(), http.StatusBadRequest)
+		status := http.StatusBadRequest
+		switch {
+		case errors.Is(err, imageopt.ErrBusy), errors.Is(err, imageopt.ErrWorker):
+			status = http.StatusServiceUnavailable
+			response.Header().Set("Retry-After", "2")
+		case errors.Is(err, context.DeadlineExceeded):
+			status = http.StatusGatewayTimeout
+		case errors.Is(err, context.Canceled):
+			status = http.StatusRequestTimeout
+		case errors.Is(err, imageopt.ErrTooLarge):
+			status = http.StatusRequestEntityTooLarge
+		}
+		http.Error(response, err.Error(), status)
 		return
 	}
 	if int64(len(optimized.Data)) > maxMediaUploadSize {
@@ -198,7 +192,6 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 		return
 	}
 	mimeType, extension, _ := mediaImageFormat(optimized.Format)
-	config.Width, config.Height = optimized.Width, optimized.Height
 	data = optimized.Data
 
 	monthPath := time.Now().UTC().Format("2006/01")
@@ -270,7 +263,7 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 		INSERT INTO "gocms_media"
 		("site_id", "kind", "storage_path", "public_path", "original_name", "mime_type", "size_bytes", "width", "height", "sha256", "status", "uploaded_by", "created_at")
 		VALUES (?, 'image', ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
-		siteID, storagePath, publicPath, originalName, mimeType, written, config.Width, config.Height,
+		siteID, storagePath, publicPath, originalName, mimeType, written, optimized.Width, optimized.Height,
 		hex.EncodeToString(hasher.Sum(nil)), uploadedBy, createdAt)
 	if err != nil {
 		http.Error(response, "保存图片记录失败", http.StatusInternalServerError)
@@ -286,7 +279,7 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 		"ok": true,
 		"asset": MediaAsset{
 			ID: id, SiteID: siteID, Kind: "image", URL: publicPath, OriginalName: originalName,
-			MimeType: mimeType, SizeBytes: written, Width: config.Width, Height: config.Height,
+			MimeType: mimeType, SizeBytes: written, Width: optimized.Width, Height: optimized.Height,
 			SHA256: hex.EncodeToString(hasher.Sum(nil)), Status: "active", UploadedBy: uploadedBy, CreatedAt: createdAt,
 		},
 	})

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -176,5 +177,49 @@ func TestHEIFUploadConvertsEvenWhenOptimizationDisabled(t *testing.T) {
 	}
 	if _, _, err := image.Decode(bytes.NewReader(stored)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDamagedMediaUploadsLeaveNoFilesOrRecords(t *testing.T) {
+	s, database, token := newCategoryTestServer(t)
+	s.assetsRoot = t.TempDir()
+	var jpegBytes bytes.Buffer
+	if err := jpeg.Encode(&jpegBytes, image.NewNRGBA(image.Rect(0, 0, 32, 24)), nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []string{"true", "false"} {
+		if err := db.SaveSiteSettingsForSite(context.Background(), database, 1, map[string]string{imageopt.EnabledKey: enabled}); err != nil {
+			t.Fatal(err)
+		}
+		for name, data := range map[string][]byte{
+			"broken.png": testPNG(t)[:33],
+			"broken.jpg": jpegBytes.Bytes()[:jpegBytes.Len()-20],
+		} {
+			res := mediaUploadRequest(t, s, token, name, data)
+			if res.Code != http.StatusBadRequest {
+				t.Fatalf("damaged upload with optimization=%s: %d %s", enabled, res.Code, res.Body.String())
+			}
+		}
+	}
+	// A still-image major brand must not conceal sequence data from validation.
+	data, err := os.ReadFile("../imageopt/testdata/gradient.heic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append(data, 0, 0, 0, 8, 'm', 'o', 'o', 'v')
+	res := mediaUploadRequest(t, s, token, "sequence.heic", data)
+	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "图片序列") {
+		t.Fatalf("concealed sequence: %d %s", res.Code, res.Body.String())
+	}
+	var count int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM gocms_media`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("rejected uploads created records: %d %v", count, err)
+	}
+	if entries, err := os.ReadDir(s.assetsRoot); err != nil || len(entries) != 0 {
+		t.Fatalf("rejected uploads created files: %v %v", entries, err)
+	}
+	// Rejection must not leave the worker slot occupied.
+	if res := mediaUploadRequest(t, s, token, "valid.png", testPNG(t)); res.Code != http.StatusCreated {
+		t.Fatalf("valid upload after rejection: %d %s", res.Code, res.Body.String())
 	}
 }

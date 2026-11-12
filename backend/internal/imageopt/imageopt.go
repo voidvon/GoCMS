@@ -4,11 +4,10 @@ package imageopt
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"image"
-	_ "image/gif"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -23,6 +22,10 @@ const (
 	EnabledKey    = "image_optimization_enabled"
 	QualityKey    = "image_optimization_quality"
 	MinBytesSaved = 512
+	MaxBytes      = 10 << 20
+	MaxDimension  = 12000
+	MaxPixels     = 48_000_000
+	MaxFrames     = 200
 )
 
 type Config struct {
@@ -56,40 +59,70 @@ type Result struct {
 	Width, Height int
 }
 
-// Serialize pixel decoding and encoding to bound concurrent image memory use.
-var processing = make(chan struct{}, 1)
-
-// Optimize expects the caller to validate file size and DecodeConfig dimensions
-// first. GIF, APNG and animated WebP keep their frames and timing unchanged.
-// HEIC is always converted to a browser-compatible format, even when disabled.
-func Optimize(ctx context.Context, data []byte, format string, cfg image.Config, options Config) (Result, error) {
+// optimize runs only in the disposable worker. Header inspection, validation and
+// pixel decoding all share its deadline and cannot block the HTTP server.
+func optimize(data []byte, options Config) (result Result, err error) {
+	defer func() {
+		if recover() != nil {
+			result, err = Result{}, fmt.Errorf("图片数据损坏或格式不受支持")
+		}
+	}()
+	if len(data) == 0 {
+		return Result{}, fmt.Errorf("图片文件为空")
+	}
+	if len(data) > MaxBytes {
+		return Result{}, ErrTooLarge
+	}
+	if len(data) >= 12 && string(data[4:8]) == "ftyp" {
+		if err := validateHEIC(data); err != nil {
+			return Result{}, err
+		}
+	}
+	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return Result{}, fmt.Errorf("文件不是受支持的图片格式（JPEG、PNG、GIF、WebP、HEIC/HEIF）")
+	}
+	if !validDimensions(cfg.Width, cfg.Height) {
+		return Result{}, fmt.Errorf("图片尺寸过大")
+	}
 	original := Result{Data: data, Format: format, Width: cfg.Width, Height: cfg.Height}
 	mustConvert := format == "heic"
-	if !mustConvert && (!options.Enabled || format == "gif" || animated(data, format)) {
-		return original, nil
-	}
-	select {
-	case processing <- struct{}{}:
-		defer func() { <-processing }()
-	case <-ctx.Done():
-		return Result{}, ctx.Err()
+	animationFrames, err := validateAnimation(data, format, cfg)
+	if err != nil {
+		return Result{}, fmt.Errorf("图片校验失败: %w", err)
 	}
 	var img image.Image
-	var err error
 	switch format {
 	case "webp":
+		if animated(data, format) {
+			var decoded *webp.WEBP
+			decoded, err = webp.DecodeAll(bytes.NewReader(data))
+			if err == nil && len(decoded.Image) != animationFrames {
+				err = fmt.Errorf("WebP 动画帧不完整")
+			}
+			break
+		}
 		img, err = webp.Decode(bytes.NewReader(data), webp.Options{AutoRotate: true})
 	case "heic":
 		img, err = heic.Decode(bytes.NewReader(data))
-	default:
+	case "gif":
+		_, err = gif.DecodeAll(bytes.NewReader(data))
+	case "jpeg", "png":
 		img, err = imaging.Decode(bytes.NewReader(data), imaging.AutoOrientation(true))
+	default:
+		return Result{}, fmt.Errorf("只支持 JPEG、PNG、GIF、WebP 和 HEIC/HEIF 图片")
 	}
 	if err != nil {
 		if mustConvert {
 			return Result{}, fmt.Errorf("HEIC/HEIF 图片转换失败: %w", err)
 		}
-		// A failed optimization must not discard an otherwise accepted upload.
+		return Result{}, fmt.Errorf("图片数据损坏，无法解码: %w", err)
+	}
+	if !mustConvert && (!options.Enabled || format == "gif" || animated(data, format)) {
 		return original, nil
+	}
+	if !validDimensions(img.Bounds().Dx(), img.Bounds().Dy()) {
+		return Result{}, fmt.Errorf("图片尺寸过大")
 	}
 	quality := options.Quality
 	if quality < 1 || quality > 100 {
@@ -100,10 +133,7 @@ func Optimize(ctx context.Context, data []byte, format string, cfg image.Config,
 		best = Result{}
 	}
 	consider := func(format string, encode func(io.Writer) error) {
-		if ctx.Err() != nil {
-			return
-		}
-		var output bytes.Buffer
+		output := limitedBuffer{limit: MaxBytes}
 		if err := encode(&output); err != nil || output.Len() == 0 {
 			return
 		}
@@ -124,9 +154,6 @@ func Optimize(ctx context.Context, data []byte, format string, cfg image.Config,
 		encoder := png.Encoder{CompressionLevel: png.BestCompression}
 		return encoder.Encode(w, img)
 	})
-	if err := ctx.Err(); err != nil {
-		return Result{}, err
-	}
 	if len(best.Data) == 0 {
 		return Result{}, fmt.Errorf("图片转换失败")
 	}
@@ -134,6 +161,10 @@ func Optimize(ctx context.Context, data []byte, format string, cfg image.Config,
 		return original, nil
 	}
 	return best, nil
+}
+
+func validDimensions(width, height int) bool {
+	return width > 0 && height > 0 && width <= MaxDimension && height <= MaxDimension && int64(width)*int64(height) <= MaxPixels
 }
 
 func opaque(img image.Image) bool {

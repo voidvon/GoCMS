@@ -5,16 +5,26 @@ import (
 	"context"
 	_ "embed"
 	"encoding/binary"
+	"errors"
 	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
 	"image/jpeg"
 	"image/png"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/gen2brain/webp"
 )
+
+func TestMain(m *testing.M) {
+	if RunWorker() {
+		os.Exit(0)
+	}
+	os.Exit(m.Run())
+}
 
 // Synthetic 64x48 gradient, generated with macOS sips; no site content.
 //
@@ -44,13 +54,9 @@ func pngData(t *testing.T, img image.Image, level png.CompressionLevel) []byte {
 	return b.Bytes()
 }
 
-func optimize(t *testing.T, data []byte, options Config) Result {
+func optimizeImage(t *testing.T, data []byte, options Config) Result {
 	t.Helper()
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := Optimize(context.Background(), data, format, cfg, options)
+	result, err := Optimize(context.Background(), data, options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,20 +69,20 @@ func optimize(t *testing.T, data []byte, options Config) Result {
 
 func TestSmallestRepresentationAndThreshold(t *testing.T) {
 	data := pngData(t, gradient(), png.NoCompression)
-	result := optimize(t, data, DefaultConfig())
+	result := optimizeImage(t, data, DefaultConfig())
 	if result.Format != "webp" || len(data)-len(result.Data) < MinBytesSaved {
 		t.Fatalf("expected smaller WebP, got %s (%d -> %d)", result.Format, len(data), len(result.Data))
 	}
 	t.Logf("PNG %d bytes -> WebP %d bytes", len(data), len(result.Data))
 	// A small source cannot save 512 bytes, even if another format is smaller.
 	small := pngData(t, image.NewNRGBA(image.Rect(0, 0, 3, 2)), png.DefaultCompression)
-	if got := optimize(t, small, DefaultConfig()); !bytes.Equal(got.Data, small) {
+	if got := optimizeImage(t, small, DefaultConfig()); !bytes.Equal(got.Data, small) {
 		t.Fatal("small image was needlessly re-encoded")
 	}
-	if got := optimize(t, result.Data, DefaultConfig()); !bytes.Equal(got.Data, result.Data) {
+	if got := optimizeImage(t, result.Data, DefaultConfig()); !bytes.Equal(got.Data, result.Data) {
 		t.Fatal("small WebP was repeatedly re-encoded")
 	}
-	if got := optimize(t, data, Config{Enabled: false}); !bytes.Equal(got.Data, data) {
+	if got := optimizeImage(t, data, Config{Enabled: false}); !bytes.Equal(got.Data, data) {
 		t.Fatal("disabled optimization changed upload")
 	}
 }
@@ -91,7 +97,7 @@ func TestTransparencySurvivesOptimization(t *testing.T) {
 		}
 	}
 	data := pngData(t, img, png.NoCompression)
-	result := optimize(t, data, DefaultConfig())
+	result := optimizeImage(t, data, DefaultConfig())
 	if result.Format == "jpeg" || len(result.Data) >= len(data) {
 		t.Fatal("transparent input lost alpha or was not optimized")
 	}
@@ -121,7 +127,7 @@ func TestAnimatedImagesKeepOriginalBytes(t *testing.T) {
 	}
 	for name, data := range map[string][]byte{"gif": gifBytes.Bytes(), "webp": webpBytes.Bytes(), "apng": animatedPNG(t)} {
 		t.Run(name, func(t *testing.T) {
-			if got := optimize(t, data, DefaultConfig()); !bytes.Equal(got.Data, data) {
+			if got := optimizeImage(t, data, DefaultConfig()); !bytes.Equal(got.Data, data) {
 				t.Fatal("animation was modified")
 			}
 		})
@@ -179,12 +185,12 @@ func TestJPEGOrientationAndHEICConversion(t *testing.T) {
 	data = append(data, segment...)
 	data = append(data, exif...)
 	data = append(data, jpegBytes.Bytes()[2:]...)
-	got := optimize(t, data, DefaultConfig())
+	got := optimizeImage(t, data, DefaultConfig())
 	if got.Width != 96 || got.Height != 128 {
 		t.Fatalf("orientation not applied: %dx%d", got.Width, got.Height)
 	}
 	for _, enabled := range []bool{true, false} {
-		result := optimize(t, gradientHEIC, Config{Enabled: enabled, Quality: 80})
+		result := optimizeImage(t, gradientHEIC, Config{Enabled: enabled, Quality: 80})
 		if result.Format == "heic" || result.Width != 64 || result.Height != 48 {
 			t.Fatalf("HEIC conversion failed: %s %dx%d", result.Format, result.Width, result.Height)
 		}
@@ -194,21 +200,98 @@ func TestJPEGOrientationAndHEICConversion(t *testing.T) {
 	}
 }
 
-func TestEncodingFailureAndCancellation(t *testing.T) {
+func TestInvalidImagesAndCancellation(t *testing.T) {
 	data := pngData(t, gradient(), png.DefaultCompression)
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Header is readable, but pixel decoding fails. Keep the source on failure.
-	broken := data[:33]
-	got, err := Optimize(context.Background(), broken, format, cfg, DefaultConfig())
-	if err != nil || !bytes.Equal(got.Data, broken) {
-		t.Fatalf("fallback failed: %v", err)
+	for _, enabled := range []bool{true, false} {
+		if _, err := Optimize(context.Background(), data[:33], Config{Enabled: enabled, Quality: 80}); err == nil {
+			t.Fatal("truncated PNG was accepted")
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := Optimize(ctx, data, format, cfg, DefaultConfig()); err == nil {
-		t.Fatal("canceled optimization succeeded")
+	if _, err := Optimize(ctx, data, DefaultConfig()); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled optimization: %v", err)
 	}
+}
+
+func TestWorkerDeadlineAndSlotRecovery(t *testing.T) {
+	// This source takes long enough to encode that cancellation happens inside
+	// the codec, rather than just being checked between candidate encodings.
+	img := image.NewNRGBA(image.Rect(0, 0, 1600, 1200))
+	seed := uint32(1)
+	for y := 0; y < 1200; y++ {
+		for x := 0; x < 1600; x++ {
+			seed = seed*1664525 + 1013904223
+			n := int(seed >> 28)
+			img.SetNRGBA(x, y, color.NRGBA{uint8(x + n), uint8(y + n), uint8(x + y + n), 255})
+		}
+	}
+	data := pngData(t, img, png.NoCompression)
+	started := time.Now()
+	_, err := run(context.Background(), data, DefaultConfig(), 200*time.Millisecond, time.Second)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("worker timeout: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("worker was not stopped: %s", elapsed)
+	} else {
+		t.Logf("200ms deadline stopped and reaped worker in %s", elapsed)
+	}
+	// A timed-out worker must be reaped and release its slot for the next upload.
+	small := pngData(t, gradient(), png.DefaultCompression)
+	optimizeImage(t, small, DefaultConfig())
+}
+
+func BenchmarkOptimizeCameraPhoto(b *testing.B) {
+	img := image.NewNRGBA(image.Rect(0, 0, 4000, 3000))
+	seed := uint32(1)
+	for y := 0; y < 3000; y++ {
+		for x := 0; x < 4000; x++ {
+			seed = seed*1664525 + 1013904223
+			n := int(seed >> 28)
+			img.SetNRGBA(x, y, color.NRGBA{uint8(x + n), uint8(y + n), uint8(x + y + n), 255})
+		}
+	}
+	var source bytes.Buffer
+	if err := jpeg.Encode(&source, img, &jpeg.Options{Quality: 90}); err != nil {
+		b.Fatal(err)
+	}
+	b.SetBytes(int64(source.Len()))
+	b.ResetTimer()
+	for b.Loop() {
+		result, err := Optimize(context.Background(), source.Bytes(), DefaultConfig())
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.ReportMetric(float64(len(result.Data)), "output-bytes")
+	}
+}
+
+func TestBoundedQueueAndCanceledWait(t *testing.T) {
+	data := pngData(t, gradient(), png.DefaultCompression)
+	for i := 0; i < cap(admission); i++ {
+		admission <- struct{}{}
+	}
+	_, err := Optimize(context.Background(), data, DefaultConfig())
+	for i := 0; i < cap(admission); i++ {
+		<-admission
+	}
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("full queue: %v", err)
+	}
+	processing <- struct{}{}
+	_, err = run(context.Background(), data, DefaultConfig(), time.Second, 10*time.Millisecond)
+	<-processing
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("queue deadline: %v", err)
+	}
+	processing <- struct{}{}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err = Optimize(ctx, data, DefaultConfig())
+	<-processing
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("canceled queue wait: %v", err)
+	}
+	optimizeImage(t, data, DefaultConfig())
 }
