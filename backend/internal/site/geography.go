@@ -92,7 +92,7 @@ func (s *Server) adminGeography(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	// All catalogue mutations require a real super-admin session (enforced by
+	// All catalogue mutations require a super administrator (enforced by
 	// authorizeAdminRoute) and same-origin requests, including multipart uploads.
 	if !geographyOrigin(r) {
 		writeJSON(w, 403, map[string]string{"error": "请求来源不被允许"})

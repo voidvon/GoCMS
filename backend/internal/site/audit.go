@@ -193,9 +193,9 @@ func (s *Server) adminLoginLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) adminClearLogs(w http.ResponseWriter, r *http.Request) {
-	u, ok, session := s.authenticateRequest(r)
-	if !ok || !session || u == nil || !u.IsSuper {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "清理日志需要超级管理员登录"})
+	u, ok, _ := s.authenticateRequest(r)
+	if !ok || u == nil || !u.IsSuper {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "清理日志需要超级管理员权限"})
 		return
 	}
 	if r.Method != http.MethodPost {

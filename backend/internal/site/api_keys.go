@@ -10,7 +10,7 @@ import (
 )
 
 func (s *Server) adminApiKeys(response http.ResponseWriter, request *http.Request) {
-	user, ok := s.requireAdminSession(response, request)
+	user, ok := s.requireAdminUser(response, request)
 	if !ok {
 		return
 	}
@@ -69,7 +69,7 @@ func (s *Server) adminApiKeys(response http.ResponseWriter, request *http.Reques
 }
 
 func (s *Server) adminApiKeyRoute(response http.ResponseWriter, request *http.Request, subpath string) {
-	user, ok := s.requireAdminSession(response, request)
+	user, ok := s.requireAdminUser(response, request)
 	if !ok {
 		return
 	}

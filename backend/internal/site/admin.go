@@ -1000,6 +1000,9 @@ func (s *Server) adminSessionUser(request *http.Request) (*AdminUser, bool) {
 	return user, err == nil
 }
 
+// authenticateRequest resolves the administrator behind either credential type.
+// Authorization uses that administrator's permissions; the session flag is only
+// for browser session behavior, not an additional permission requirement.
 func (s *Server) authenticateRequest(request *http.Request) (*AdminUser, bool, bool) {
 	if s.database == nil {
 		return nil, false, false
@@ -1029,10 +1032,10 @@ func (s *Server) requireAdmin(response http.ResponseWriter, request *http.Reques
 	return false
 }
 
-func (s *Server) requireAdminSession(response http.ResponseWriter, request *http.Request) (*AdminUser, bool) {
-	user, ok, isSession := s.authenticateRequest(request)
-	if !ok || !isSession || user == nil {
-		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "请通过管理员后台登录操作"})
+func (s *Server) requireAdminUser(response http.ResponseWriter, request *http.Request) (*AdminUser, bool) {
+	user, ok, _ := s.authenticateRequest(request)
+	if !ok || user == nil {
+		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "未登录或账号已停用"})
 		return nil, false
 	}
 	return user, true

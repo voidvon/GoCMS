@@ -129,7 +129,7 @@ func (u *AdminUser) canManageCategory(id int64) bool {
 }
 
 func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, route string) bool {
-	u, ok, session := s.authenticateRequest(r)
+	u, ok, _ := s.authenticateRequest(r)
 	if !ok || u == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或账号已停用"})
 		return false
@@ -140,30 +140,23 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 	}
 	*r = *r.WithContext(context.WithValue(r.Context(), contentScopeKey{}, u))
 	if module == "geography" {
-		if u.IsSuper && session {
+		if u.IsSuper {
 			return true
 		}
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "地址数据仅允许超级管理员通过后台管理"})
 		return false
 	}
 	if module == "member-login" || module == "mail" {
-		return s.authorizeMemberLogin(w, r, u, session)
+		return s.authorizeMemberLogin(w, u)
 	}
 	if module == "orders" {
-		return s.authorizeOrders(w, r, u, session)
+		return s.authorizeOrders(w, r, u)
 	}
 	if module == "payments" {
-		return s.authorizePaymentOperation(w, r, u, session)
-	}
-	// API keys cannot administer accounts or groups or member accounts even when owned by a super administrator.
-	if module == "users" || module == "groups" || module == "site-users" || module == "member-groups" {
-		if !session {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "API Key 无权管理用户或会员"})
-			return false
-		}
+		return s.authorizePaymentOperation(w, r, u)
 	}
 	if module == "users" || module == "groups" || (module == "sites" && r.Method != http.MethodGet) {
-		if u.IsSuper && session {
+		if u.IsSuper {
 			return true
 		}
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此操作权限"})

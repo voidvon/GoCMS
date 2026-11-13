@@ -12,7 +12,20 @@ import (
 )
 
 func TestContentSpecificationsWithoutOnlineSales(t *testing.T) {
+	for _, auth := range []string{"session", "api-key"} {
+		t.Run(auth, func(t *testing.T) {
+			testContentSpecificationsWithoutOnlineSales(t, auth)
+		})
+	}
+}
+
+func testContentSpecificationsWithoutOnlineSales(t *testing.T, auth string) {
 	s, database, token := newCategoryTestServer(t)
+	send := categoryRequest
+	if auth == "api-key" {
+		token = apiKeyForTest(t, s, "gocms").Key
+		send = apiKeyRequest
+	}
 	ctx := context.Background()
 	request := func(method, path string, payload any, want int) []byte {
 		t.Helper()
@@ -24,7 +37,7 @@ func TestContentSpecificationsWithoutOnlineSales(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		response := categoryRequest(t, s, token, method, path, string(body))
+		response := send(t, s, token, method, path, string(body))
 		if response.Code != want {
 			t.Fatalf("%s %s: %d %s", method, path, response.Code, response.Body.String())
 		}

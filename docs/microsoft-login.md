@@ -1,6 +1,6 @@
 # 平台共享 Microsoft 会员登录
 
-入口：**平台管理 → 第三方登录 → Microsoft**（`/admin/member-login?provider=microsoft`）。仅超级管理员后台会话可配置。所有站点共享一套应用凭据、总开关和身份绑定，会员组、订单与权限仍按站点区分。
+入口：**平台管理 → 第三方登录 → Microsoft**（`/admin/member-login?provider=microsoft`）。仅超级管理员可配置，配置接口支持后台会话或 API Key；交互式授权测试仍需浏览器登录会话。所有站点共享一套应用凭据、总开关和身份绑定，会员组、订单与权限仍按站点区分。
 
 ## Microsoft Entra 配置
 

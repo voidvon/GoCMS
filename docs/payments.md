@@ -36,7 +36,7 @@ cloudflared tunnel --no-autoupdate --url http://127.0.0.1:18081 --protocol http2
 
 当前传给 PingPong 的 `shopperIP` 取 Go 服务的直接连接地址，不信任任意客户端传入的转发头；反向代理部署时该地址可能是代理 IP。第一版尚未提供可信代理网段配置，正式风控联调时需确认这一限制。
 
-密钥用于 AES-GCM 加密数据库里的 Salt，并绑定站点和渠道身份。它由超级管理员统一管理，所有站点共用；普通站点管理员和 API Key 均不能初始化、导出或接管。`payment.key` 与数据库需要分别备份，不能提交到仓库、放进主题包或公开目录；服务启动时检查数据目录与公开资源目录的位置关系。后台密钥接口为 `POST /api/admin/payments/key`，请求体为 `{"mode":"generate"}` 或 `{"mode":"import","key":"..."}`，只返回保存结果。`GET /api/admin/payments/status` 只返回配置状态、来源、是否可初始化、导出、接管及是否需恢复。导出接口为 `POST /api/admin/payments/key/export`，返回不可缓存的下载附件；接管环境变量为 `POST /api/admin/payments/key/adopt`。这些接口要求超级管理员后台会话及同源请求。
+密钥用于 AES-GCM 加密数据库里的 Salt，并绑定站点和渠道身份。它由超级管理员统一管理，所有站点共用；普通站点管理员不能初始化、导出或接管；超级管理员可通过后台会话或 API Key 操作。`payment.key` 与数据库需要分别备份，不能提交到仓库、放进主题包或公开目录；服务启动时检查数据目录与公开资源目录的位置关系。后台密钥接口为 `POST /api/admin/payments/key`，请求体为 `{"mode":"generate"}` 或 `{"mode":"import","key":"..."}`，只返回保存结果。`GET /api/admin/payments/status` 只返回配置状态、来源、是否可初始化、导出、接管及是否需恢复。导出接口为 `POST /api/admin/payments/key/export`，返回不可缓存的下载附件；接管环境变量为 `POST /api/admin/payments/key/adopt`。这些接口要求超级管理员权限（后台会话或 API Key），并保留同源校验。
 
 仍兼容部署环境配置的 `GOCMS_PAYMENT_KEY`。尚无本地密钥文件时使用环境变量，可在“密钥管理与备份”点击“接管到后台管理”，将当前同一密钥保存到独立文件，无需手动修改环境变量或重启。重启时文件优先，环境变量作为无文件时的兼容来源。下载或接管前会验证来源密钥与当前生效密钥一致，不改变商户凭据和历史交易。已有渠道时禁止重新生成，导入前会验证该密钥能够解密全部站点的历史凭据；错误密钥不会写入。加载文件或环境变量时也会验证历史凭据，格式错误、文件权限过宽或不能解密会阻止服务启动。
 
@@ -87,7 +87,7 @@ cloudflared tunnel --no-autoupdate --url http://127.0.0.1:18081 --protocol http2
 
 ## 后台权限与操作
 
-侧边栏入口需要 `payments`；账户读取与配置另需 `payments.configure`；发起退款另需 `payments.refund`；变更交付另需 `payments.fulfill`。超级管理员默认可用，普通用户组需显式授权。支付写操作要求后台会话及同源请求，不接受 API Key 写入。所有数据按当前站点授权隔离。分类销售开关及内容规格配置还需要对应分类／内容操作权限；公开内容的修改仍需要 `content.review`。销售配置只接受有 `payments` 权限的后台登录会话及同源请求，不接受 API Key 修改价格。
+侧边栏入口需要 `payments`；账户读取与配置另需 `payments.configure`；发起退款另需 `payments.refund`；变更交付另需 `payments.fulfill`。超级管理员默认可用，普通用户组需显式授权。支付接口支持后台会话或 API Key，二者按所属管理员使用相同权限；写操作保留同源校验。所有数据按当前站点授权隔离。分类销售开关及内容规格配置还需要对应分类／内容操作权限；公开内容的修改仍需要 `content.review`。销售配置要求该站点的 `payments` 权限，支持后台会话或 API Key 修改规格、价格及销售开关，并保留同源校验。
 
 后台可查询订单、同步支付、对每笔成功交易发起一次全额退款、同步退款，并维护“等待交付／正在交付／已完成／失败”的交付状态。退款成功不会撤销已经发生的实体发货或服务交付，相关业务需人工处理。交易历史不提供删除入口，站点存在交易数据时不能直接删除。
 
@@ -120,7 +120,7 @@ cloudflared tunnel --no-autoupdate --url http://127.0.0.1:18081 --protocol http2
 
 规格维度由独立后台页面 `/admin/commerce-dimensions` 统一维护，按站点隔离，定义保存在 `gocms_commerce_dimension`；产品的 `dimensions_json` 保存选用的定义及排列顺序。内容编辑只允许选择、调整选用顺序和取消引用，不提供维度名称、类型、单位和候选值的编辑入口，API 也拒绝通过内容保存创建或修改共享定义。示例中的维度 `key` 需替换为维度管理接口返回的真实值。
 
-维度管理接口位于 `/api/admin/payments/dimensions`：GET 返回 `items`（定义、`version`、`product_count`），POST 新建；`/<key>` 的 PUT 修改，DELETE 带 `?version=<version>` 删除。读取和内容选用需要 `payments`；新建、修改和删除另需 `payments.configure`、后台登录会话及同源请求。写入校验版本，防止旧窗口覆盖其他管理员的修改。
+维度管理接口位于 `/api/admin/payments/dimensions`：GET 返回 `items`（定义、`version`、`product_count`），POST 新建；`/<key>` 的 PUT 修改，DELETE 带 `?version=<version>` 删除。读取和内容选用需要 `payments`；新建、修改和删除另需 `payments.configure`，支持后台会话或 API Key，并保留同源校验。写入校验版本，防止旧窗口覆盖其他管理员的修改。
 
 修改维度名称、增加或删除未使用的候选值，会在同一事务内同步引用产品的定义和当前 SKU 参数名称，保留规格 ID、编号、价格、固定币种价格和启停状态；历史订单及归档规格不改写。已引用的维度不能修改类型或单位，仍被当前规格行使用的候选值不能删除，引用数大于零的维度不能删除。需要改变类型或单位时，新建维度并按产品调整。后端同时校验每行覆盖所有选用维度、选项值属于候选集、数字格式有效，单位由共享定义写入 `specifications[].unit` 并进入订单快照。规格值继续使用名称和值兼容已有主题、购物车和订单，单位不参与组合定价运算。
 

@@ -95,8 +95,8 @@ func (s *Server) validateLoginKey(ctx context.Context, v *memberoauth.Vault) err
 	}
 	return rows.Err()
 }
-func (s *Server) authorizeMemberLogin(w http.ResponseWriter, r *http.Request, u *AdminUser, session bool) bool {
-	if session && u.IsSuper {
+func (s *Server) authorizeMemberLogin(w http.ResponseWriter, u *AdminUser) bool {
+	if u.IsSuper {
 		return true
 	}
 	writeJSON(w, 403, map[string]string{"error": "平台安全配置仅允许超级管理员通过后台管理"})

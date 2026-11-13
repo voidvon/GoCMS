@@ -103,7 +103,7 @@ OpenAPI: member-api.openapi.json。
 后台 PATCH /api/admin/site-users 支持：
 - {"id":123,"max_sessions":2}：调整上限，不修改账号状态。
 - {"id":123,"revoke_sessions":true}：撤销全部会话，不禁用账号。
-上述操作仅限超级管理员登录会话，不允许前台账号或 API Key 操作。
+上述操作要求目标站点的会员管理权限，支持后台会话或 API Key；站点归属等账号管理约束保持生效，前台账号无权操作。
 
 ## Google 登录与绑定
 

@@ -140,18 +140,18 @@ func TestApiKeyEndpointsAndAuth(t *testing.T) {
 		t.Fatalf("expected 200 OK with Bearer API Key, got %d: %s", recStatsBearer.Code, recStatsBearer.Body.String())
 	}
 
-	// 5. Test that API Key CANNOT be used to manage API Keys (must require session auth)
+	// 5. A super administrator's API key can manage API keys too.
 	reqManageWithKey := httptest.NewRequest(http.MethodGet, "/api/admin/api-keys", nil)
 	reqManageWithKey.Header.Set("X-API-Key", apiKeySecret)
 	recManageWithKey := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recManageWithKey, reqManageWithKey)
-	if recManageWithKey.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 when accessing API Key management using API Key, got %d", recManageWithKey.Code)
+	if recManageWithKey.Code != http.StatusOK {
+		t.Fatalf("expected 200 when accessing API Key management using API Key, got %d", recManageWithKey.Code)
 	}
 
 	// 6. Rotate API Key
 	reqRotate := httptest.NewRequest(http.MethodPost, "/api/admin/api-keys/"+strconv.FormatInt(apiKeyID, 10)+"/rotate", nil)
-	reqRotate.AddCookie(&http.Cookie{Name: "gocms_admin", Value: sessionToken})
+	reqRotate.Header.Set("X-API-Key", apiKeySecret)
 	recRotate := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recRotate, reqRotate)
 	if recRotate.Code != http.StatusOK {
@@ -190,7 +190,7 @@ func TestApiKeyEndpointsAndAuth(t *testing.T) {
 	revokeBody := []byte(`{"reason":"Testing revocation"}`)
 	reqRevoke := httptest.NewRequest(http.MethodPost, "/api/admin/api-keys/"+strconv.FormatInt(rotatedKeyID, 10)+"/revoke", bytes.NewReader(revokeBody))
 	reqRevoke.Header.Set("Content-Type", "application/json")
-	reqRevoke.AddCookie(&http.Cookie{Name: "gocms_admin", Value: sessionToken})
+	reqRevoke.Header.Set("Authorization", "Bearer "+rotatedSecret)
 	recRevoke := httptest.NewRecorder()
 	server.Handler().ServeHTTP(recRevoke, reqRevoke)
 	if recRevoke.Code != http.StatusOK {

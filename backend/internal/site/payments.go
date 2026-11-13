@@ -510,14 +510,10 @@ func (s *Server) publicPaymentChannels(ctx context.Context, site int64) ([]map[s
 	return channels, nil
 }
 
-// Payment account mutation and refund initiation require an interactive admin
-// session, same-origin validation and explicit operation-level permission.
-func (s *Server) authorizePaymentOperation(w http.ResponseWriter, r *http.Request, u *AdminUser, session bool) bool {
+// Payment mutations require same-origin validation and explicit operation-level
+// permission, whether authenticated by an admin session or an API key.
+func (s *Server) authorizePaymentOperation(w http.ResponseWriter, r *http.Request, u *AdminUser) bool {
 	if r.Method != http.MethodGet {
-		if !session {
-			writeJSON(w, 403, map[string]string{"error": "支付操作需要后台登录会话"})
-			return false
-		}
 		if !memberRequest(w, r) {
 			return false
 		}

@@ -23,9 +23,9 @@
 
 ## 权限
 
-在平台管理的用户组中分配站点权限：`orders` 查看订单；`orders.create` 创建收款订单和生成 / 重置付款链接；`orders.ship` 创建发货单；`orders.shipping.edit` 更正物流；`orders.recipient.edit` 补录收货信息；`orders.complete` 确认完成；`orders.refund` 发起和同步退款。操作权限同时要求 `orders`，超级管理员具备全部权限。订单管理只接受后台会话，不接受 API Key。写操作校验同源请求。
+在平台管理的用户组中分配站点权限：`orders` 查看订单；`orders.create` 创建收款订单和生成 / 重置付款链接；`orders.ship` 创建发货单；`orders.shipping.edit` 更正物流；`orders.recipient.edit` 补录收货信息；`orders.complete` 确认完成；`orders.refund` 发起和同步退款。操作权限同时要求 `orders`，超级管理员具备全部权限。订单管理支持后台会话或 API Key，按所属管理员校验相同的站点与操作权限。写操作保留同源校验。
 
-后台创建接口为 `POST /api/admin/orders`，请求头携带至少 16 字符的 `Idempotency-Key`，请求体包含 `account_id`、`customer_name`、`email`、`language`、`address`、`items`。手动明细为 `{name, kind, price, quantity, image_url}`，`price` 是十进制金额字符串；选择现有规格时传 `variant_id` 和 `currency`，服务端从对应规格读取名称、类型、图片、内容与规格信息，单价仍是本单约定价。`GET /api/admin/orders/catalog?account_id=<渠道ID>&q=<关键词>&page=1` 提供分页规格搜索与报价，返回 `items`、`has_more`，要求后台会话及 `orders`、`orders.create` 权限。`GET /api/admin/orders/creation-options` 提供本站已启用渠道的必要信息；`POST /api/admin/orders/<订单号>/payment-link` 携带 `{revision}` 返回一次性的完整 `payment_url`。公开查询、付款和同步复用 `/api/commerce/orders/<订单号>`、其 `/pay` 和 `/sync` 子路由，专属链接访问需携带 `X-Order-Token`；原会员订单仍仅允许所属会员访问。
+后台创建接口为 `POST /api/admin/orders`，请求头携带至少 16 字符的 `Idempotency-Key`，请求体包含 `account_id`、`customer_name`、`email`、`language`、`address`、`items`。手动明细为 `{name, kind, price, quantity, image_url}`，`price` 是十进制金额字符串；选择现有规格时传 `variant_id` 和 `currency`，服务端从对应规格读取名称、类型、图片、内容与规格信息，单价仍是本单约定价。`GET /api/admin/orders/catalog?account_id=<渠道ID>&q=<关键词>&page=1` 提供分页规格搜索与报价，返回 `items`、`has_more`，要求 `orders`、`orders.create` 权限，支持后台会话或 API Key。`GET /api/admin/orders/creation-options` 提供本站已启用渠道的必要信息；`POST /api/admin/orders/<订单号>/payment-link` 携带 `{revision}` 返回一次性的完整 `payment_url`。公开查询、付款和同步复用 `/api/commerce/orders/<订单号>`、其 `/pay` 和 `/sync` 子路由，专属链接访问需携带 `X-Order-Token`；原会员订单仍仅允许所属会员访问。
 
 旧支付接口的读订单、退款保持兼容；旧交付状态接口不允许处理实物或已有发货单的订单，也不允许重开已完成订单。旧服务订单的状态更新仍保留兼容。
 

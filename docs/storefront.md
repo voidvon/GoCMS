@@ -248,6 +248,6 @@ Go 在同一事务重新读取可售状态和单价，计算总额并保存各�
 
 结算提交 `currency`、`expected_amount` 和 `pricing_revision`。服务端在创建订单的事务中重新读取价格、汇率版本及渠道能力；配置版本或金额变化返回 `price_changed`，前台刷新报价并要求重新确认。币种切换重新加载价格时保留已填写表单，暂时禁止提交。订单保存成交单价、总额、币种及独立 `pricing_json` 快照（来源金额、定价方式、汇率和版本），以后更换基准或更新汇率不改历史成交金额；退款继续使用原交易币种及金额。
 
-后台 `GET/PUT /api/admin/payments/pricing` 需要 `payments` 和 `payments.configure` 权限；修改还需后台登录会话及同源校验。保存包含配置版本检查，防止旧页面覆盖新设置。支持 JSON 导入／导出备份，导入先形成可编辑草稿，保存后才生效。`GET /api/admin/payments/pricing-options` 仅提供内容编辑所需的默认计价币种，使用现有销售管理权限及后台站点作用域。
+后台 `GET/PUT /api/admin/payments/pricing` 需要 `payments` 和 `payments.configure` 权限；接口支持后台会话或 API Key，修改保留同源校验。保存包含配置版本检查，防止旧页面覆盖新设置。支持 JSON 导入／导出备份，导入先形成可编辑草稿，保存后才生效。`GET /api/admin/payments/pricing-options` 仅提供内容编辑所需的默认计价币种，使用现有销售管理权限及后台站点作用域。
 
 升级新增站点报价配置表、规格固定币种售价字段和订单报价快照字段，服务启动时兼容迁移。现有商品、历史订单、支付记录及退款不重算。按用户要求，本次未运行测试、构建或浏览器验收。

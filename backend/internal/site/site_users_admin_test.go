@@ -17,7 +17,6 @@ import (
 	"gocms/internal/db"
 )
 
-
 func TestSiteUserManagementBoundaryAndRevocation(t *testing.T) {
 	s, database, root := newCategoryTestServer(t)
 	result, err := database.Exec("INSERT INTO gocms_user(username,password_hash) VALUES('member','unused')")
@@ -58,13 +57,18 @@ func TestSiteUserManagementBoundaryAndRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, method := range []string{"GET", "PATCH", "DELETE"} {
-		r := httptest.NewRequest(method, "/api/admin/site-users", strings.NewReader(fmt.Sprintf(`{"id":%d,"status":"disabled"}`, id)))
-		r.Header.Set("X-API-Key", key.Key)
-		w := httptest.NewRecorder()
-		s.Handler().ServeHTTP(w, r)
-		if w.Code != 403 {
-			t.Fatalf("API key %s: %d", method, w.Code)
+	for _, tc := range []struct {
+		method, body string
+		want         int
+	}{
+		{"GET", "", 200},
+		{"PATCH", fmt.Sprintf(`{"id":%d,"status":"disabled"}`, id), 200},
+		{"PATCH", fmt.Sprintf(`{"id":%d,"status":"active"}`, id), 200},
+		{"DELETE", `{"id":999999}`, 404},
+	} {
+		w := apiKeyRequest(t, s, key.Key, tc.method, "/api/admin/site-users", tc.body)
+		if w.Code != tc.want {
+			t.Fatalf("API key %s: %d %s", tc.method, w.Code, w.Body.String())
 		}
 	}
 	// A member cookie cannot authenticate an administrator request.
@@ -548,7 +552,6 @@ func TestMultiSiteRound2AuditFixes(t *testing.T) {
 	u3ID, _ := resU3.LastInsertId()
 	_, _ = database.Exec(`INSERT INTO gocms_user_session(token_hash, user_id, expires_at) VALUES('token3', ?, 9999999999)`, u3ID)
 
-
 	// Delete Site 3
 	wDelSite := categoryRequest(t, s, superToken, "DELETE", fmt.Sprintf("/api/admin/sites/%d", site3ID), "")
 	if wDelSite.Code != 200 {
@@ -734,7 +737,7 @@ func TestMultiSiteRound3AuditFixes(t *testing.T) {
 	// 3. Feedback Class Item Count Site Scope
 	_ = db.EnsureMessages(context.Background(), database)
 	var classID int64
-	_ = database.QueryRow(`SELECT id FROM "`+db.FeedbackClassTable+`" LIMIT 1`).Scan(&classID)
+	_ = database.QueryRow(`SELECT id FROM "` + db.FeedbackClassTable + `" LIMIT 1`).Scan(&classID)
 	if classID > 0 {
 		_, _ = database.Exec(`INSERT INTO "gocms_message"(site_id, class_id, title, content) VALUES(1, ?, 'S1 msg', 'test')`, classID)
 		_, _ = database.Exec(`INSERT INTO "gocms_message"(site_id, class_id, title, content) VALUES(?, ?, 'S2 msg 1', 'test')`, site2ID, classID)
@@ -1007,8 +1010,3 @@ func TestSiteUserResetPassword(t *testing.T) {
 		t.Fatalf("expected 1 audit event, got %d", eventCount)
 	}
 }
-
-
-
-
-

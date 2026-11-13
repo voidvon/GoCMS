@@ -1,6 +1,6 @@
 # 平台共享 Facebook 会员登录
 
-入口：**平台管理 → 第三方登录 → Facebook**（`/admin/member-login?provider=facebook`）。仅超级管理员后台会话可配置。Google 和 Facebook 使用独立 Tabs，各自保存总开关、凭据和自动注册策略；同一家提供商的配置由全部站点共享，不随当前站点选择改变。
+入口：**平台管理 → 第三方登录 → Facebook**（`/admin/member-login?provider=facebook`）。仅超级管理员可配置，配置接口支持后台会话或 API Key；交互式授权测试仍需浏览器登录会话。Google 和 Facebook 使用独立 Tabs，各自保存总开关、凭据和自动注册策略；同一家提供商的配置由全部站点共享，不随当前站点选择改变。
 
 ## 配置
 

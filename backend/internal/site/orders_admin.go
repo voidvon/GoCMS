@@ -8,11 +8,7 @@ import (
 	"gocms/internal/commerce"
 )
 
-func (s *Server) authorizeOrders(w http.ResponseWriter, r *http.Request, u *AdminUser, session bool) bool {
-	if !session {
-		writeJSON(w, 403, map[string]string{"error": "订单管理需要后台登录会话"})
-		return false
-	}
+func (s *Server) authorizeOrders(w http.ResponseWriter, r *http.Request, u *AdminUser) bool {
 	if r.Method != http.MethodGet && !memberRequest(w, r) {
 		return false
 	}
