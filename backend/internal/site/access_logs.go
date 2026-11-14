@@ -332,9 +332,9 @@ func normalizeAccessLogHost(value string) string {
 		trimmed = host
 		_ = port
 	}
-	if strings.HasPrefix(trimmed, "www.") {
-		trimmed = strings.TrimPrefix(trimmed, "www.")
-	}
+	// Keep the configured hostname intact, just as public routing does.
+	// Stripping www can miss a site's domain and assign its traffic to the
+	// default site, or merge two distinct hosts in the ownership caches.
 	return trimmed
 }
 
@@ -366,8 +366,8 @@ func refererHostName(referer string) string {
 	return normalizeAccessLogHost(parsed.Host)
 }
 
-// accessLogRequestHost is the display form of the requested domain. Unlike
-// normalizeAccessLogHost it keeps the www prefix and the actual alias, because
+// accessLogRequestHost is the display form of the requested domain. It keeps
+// the www prefix and the actual alias, because
 // the dashboard must distinguish www.example.com, example.com and a standalone
 // language domain that all belong to the same site.
 func accessLogRequestHost(request *http.Request) string {

@@ -88,6 +88,10 @@ X-Robots-Tag: noindex, follow
 - 升级前的历史记录：`host=''`，后台回退显示当前站点主域名，保留期结束后自然淘汰。
 - 因此同一个 `/missing-page` 在 `www.example.com` 和 `cn.example.com` 上会显示为两条独立记录，不再混在一起。
 
+域名归属查询与缓存也必须保留 `www.`，与前台路由使用相同的完整主机名。若在查询前去掉 `www.`，数据库中配置为 `www.example.com` 的站点会匹配失败，其访问与错误便回落到默认站点；独立语言域名还可能使用错误的输出目录校验 Referer。根域名与 `www` 域名需要共享站点时，应通过站点别名配置，不能在统计层隐式合并。
+
+修复只影响升级后的新记录，不修改历史日志的站点归属。已记错的记录会按配置的保留期自然淘汰。
+
 ### 5. 错误响应不再继承长缓存
 
 Go 侧统一为 4xx/5xx 设置 `Cache-Control: no-store`；Nginx 侧移除 `uploads/images`、`css/js/assets` 和 HTML location 上的 `add_header ... always`，只对成功响应设置长缓存/协商缓存。

@@ -69,6 +69,71 @@ func TestSummarizeUserAgent(t *testing.T) {
 	}
 }
 
+func TestAccessLogPreservesConfiguredHosts(t *testing.T) {
+	server, database, _, siteDir := newSiteAdminTestServer(t)
+	if _, err := database.Exec(`UPDATE gocms_site SET domain = 'example.test' WHERE is_default = 1`); err != nil {
+		t.Fatal(err)
+	}
+	result, err := database.Exec(`INSERT INTO gocms_site (name, code, domain, aliases, output_dir)
+		VALUES ('Another site', 'another', 'www.example.test', '["www.alias.test"]', 'another-output')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO gocms_language (site_id, code, name, is_enabled, site_mode, domain, output_dir)
+		VALUES (?, 'fr', 'Français', 1, 'standalone', 'www.locale.test', 'language-output')`, otherID); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"index.html", "another-output/index.html", "language-output/guide/index.html"} {
+		file := filepath.Join(siteDir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte("<html>page</html>"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cases := []struct {
+		host    string
+		referer string
+		siteID  int64
+		kind    string
+	}{
+		{"example.test", "https://example.test/", 1, "internal"},
+		{"www.example.test", "https://www.example.test/", otherID, "internal"},
+		{"www.alias.test", "https://www.example.test/", otherID, "internal"},
+		{"www.locale.test", "https://www.locale.test/guide/", otherID, "internal"},
+		{"www.example.test", "https://example.test/", otherID, "external"},
+		{"example.test", "https://www.example.test/", 1, "external"},
+		// A bare host must not reuse a cached www host's ownership or output.
+		{"locale.test", "https://locale.test/", 1, "internal"},
+		{"www.locale.test", "https://www.locale.test/guide/", otherID, "internal"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.host+" from "+tc.referer, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/missing", nil)
+			request.Host = tc.host
+			request.Header.Set("Referer", tc.referer)
+			response := httptest.NewRecorder()
+			server.Handler().ServeHTTP(response, request)
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404", response.Code)
+			}
+			var siteID int64
+			var host, refererKind string
+			if err := database.QueryRow(`SELECT site_id, host, referer_kind FROM gocms_access_log ORDER BY id DESC LIMIT 1`).Scan(&siteID, &host, &refererKind); err != nil {
+				t.Fatal(err)
+			}
+			if siteID != tc.siteID || host != tc.host || refererKind != tc.kind {
+				t.Fatalf("log = (site %d, %s, %s), want (site %d, %s, %s)", siteID, host, refererKind, tc.siteID, tc.host, tc.kind)
+			}
+		})
+	}
+}
+
 func TestAccessLogRecordsPublicTraffic(t *testing.T) {
 	server, database, _, siteDir := newSiteAdminTestServer(t)
 	if err := os.WriteFile(filepath.Join(siteDir, "index.html"), []byte("<html><body>home</body></html>"), 0o644); err != nil {
@@ -77,7 +142,7 @@ func TestAccessLogRecordsPublicTraffic(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(siteDir, "logo.png"), []byte{0x89, 'P', 'N', 'G'}, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`UPDATE "gocms_site" SET "domain" = 'example.test' WHERE "is_default" = 1`); err != nil {
+	if _, err := database.Exec(`UPDATE "gocms_site" SET "domain" = 'example.test', "aliases" = '["www.example.test"]' WHERE "is_default" = 1`); err != nil {
 		t.Fatal(err)
 	}
 	// A standalone language domain owned by the same site must count as internal.
@@ -590,7 +655,7 @@ func TestAccessLogRefererSiteResolution(t *testing.T) {
 	}
 	visit("https://cn.example.test/")
 	visit("https://other.test/")
-	visit("https://www.spiraxsteam.com/")
+	visit("https://www.external.test/")
 
 	kindFor := func(refererHost string) string {
 		t.Helper()
@@ -606,7 +671,7 @@ func TestAccessLogRefererSiteResolution(t *testing.T) {
 	if kind := kindFor("other.test"); kind != "external" {
 		t.Errorf("其他站点 referer = %q, want external", kind)
 	}
-	if kind := kindFor("spiraxsteam.com"); kind != "external" {
+	if kind := kindFor("www.external.test"); kind != "external" {
 		t.Errorf("外部域名 referer = %q, want external", kind)
 	}
 }
