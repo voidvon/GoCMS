@@ -22,6 +22,29 @@
 
 ---
 
+### 站点旧路径重定向
+
+按 `X-Site-Id` 选择站点，在后台「重定向」或以下接口维护规则。需要 `redirects` 查看权限；新增、更新、删除和导入还需 `redirects.manage`。API Key 与后台会话遵循相同权限，变更写入操作日志。
+
+- `GET /api/admin/redirects`：返回 `{"items":[...],"site_id":站点ID}`。
+- `POST /api/admin/redirects`：新增规则；`PUT /api/admin/redirects/{id}`：替换规则；`DELETE /api/admin/redirects/{id}`：删除当前站点内规则。
+- `POST /api/admin/redirects/import`：原子批量新增，传入 `{"items":[规则,...]}`。每次 1–1000 条，JSON 最大 2 MiB。重复来源或循环返回 409，整批不写入；成功返回 201 和 `{"imported":条数}`。导出的 JSON 可用同一格式导入其他站点，不根据 `id` 覆盖记录。
+
+```json
+{
+  "source_path": "/old-section/article",
+  "target_url": "/new-section/article",
+  "status_code": 301,
+  "enabled": true,
+  "preserve_query": true,
+  "note": "历史链接迁移"
+}
+```
+
+`status_code`、`enabled`、`preserve_query` 的默认值为 `301`、`true`、`true`，备注可省略。来源为完整站内路径，不含查询串/锚点；区分大小写，忽略末尾斜杠，不匹配子路径。目标可为站内绝对路径或完整 HTTP(S) URL；保留参数时目标的同名参数优先。只处理公开页面 GET/HEAD，不允许将后台、接口、购物前台或私有目录作为来源。规则覆盖当前站点的所有域名，子目录语言须逐条配置前缀。保存会检查配置规则中的循环，外部网站的跳转需另行验证。
+
+**规则保存后即时生效，不调用发布接口。** 优先于静态文件，晚于域名别名跳转；绕过 GoCMS 服务的静态托管/CDN 请求不执行规则。处理旧站 404 时先确认目标内容对应且可访问，仅为有明确替代页面的旧 URL 添加规则。
+
 ## 2. 核心架构约束与工作流（AI 必须遵守）
 
 > [!IMPORTANT]

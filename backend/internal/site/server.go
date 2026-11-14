@@ -105,6 +105,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		if err := db.EnsureAccessLog(context.Background(), database); err != nil {
 			return nil, err
 		}
+		if err := db.EnsureRedirects(context.Background(), database); err != nil {
+			return nil, err
+		}
 		if err := db.EnsureApiKeys(context.Background(), database); err != nil {
 			return nil, err
 		}
@@ -184,6 +187,9 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		if s.checkAliasRedirect(response, request) {
 			return
 		}
+		if s.serveConfiguredRedirect(response, request) {
+			return
+		}
 	}
 	if (s.frontendDevProxy != nil || s.frontendRoot != "" || s.frontendFS != nil) && (cleanPath == "/admin" || strings.HasPrefix(cleanPath, "/admin/")) {
 		s.serveAdminApp(response, request)
@@ -222,6 +228,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 	}
 	if strings.HasPrefix(lowerAdminPath, "/api/admin/member-login") {
 		s.adminMemberLogin(response, request)
+		return
+	}
+	if lowerAdminPath == "/api/admin/redirects" || strings.HasPrefix(lowerAdminPath, "/api/admin/redirects/") {
+		s.adminRedirects(response, request)
 		return
 	}
 	switch lowerAdminPath {

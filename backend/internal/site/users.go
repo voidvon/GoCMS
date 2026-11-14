@@ -34,6 +34,7 @@ var adminPermissions = []struct {
 	{"login_logs", "查看登录日志"},
 	{"traffic", "访问统计"},
 	{"traffic.clear", "清空访问日志"},
+	{"redirects", "查看重定向规则"}, {"redirects.manage", "管理重定向规则"},
 }
 
 func (u *AdminUser) hasPermission(key string) bool {
@@ -201,6 +202,14 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 			}
 		}
 		switch module {
+		case "redirects":
+			if r.Method != http.MethodGet {
+				if hasPerm("redirects") && hasPerm("redirects.manage") {
+					return true
+				}
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有重定向规则的管理权限"})
+				return false
+			}
 		case "template", "templates":
 			module = "theme"
 		case "model-fields", "model-tables":

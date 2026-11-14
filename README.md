@@ -149,6 +149,18 @@ API Key 与后台登录会话使用相同的管理员权限：可调用所属管
 - 保留策略：默认保留 3 天，服务启动时及之后每 30 分钟清理过期记录；用 `-access-log-days` 调整保留天数。自然日边界默认跟随系统时区，可用 `-timezone Asia/Shanghai` 指定 IANA 时区；时间戳按 UTC 存储与传输，界面统一按浏览器所在时区显示。
 - 接口：`GET /api/admin/access-logs`（分页明细，`page`、`page_size`，过滤参数同页面）、`GET /api/admin/access-logs/errors`（按域名、路径与状态归并，支持 `limit`、`offset`、`sort=hits|recent`）、`GET /api/admin/access-logs/pages`（热门页面，支持 `limit`、`offset`）、`GET/POST/DELETE /api/admin/access-logs/ignores`（查看、添加、取消路径忽略；POST 传 `{"path":"..."}`，DELETE 传 `?path=...`）、`DELETE /api/admin/access-logs`（按同一组过滤参数清理）；`GET /api/admin/stats` 的 `access` 字段提供仪表盘指标。
 
+## 站点重定向
+
+后台「重定向」按当前站点管理旧路径，可新增、编辑、停用、删除及导入/导出 JSON。默认 301 永久重定向，也支持 302 临时跳转。升级启动时自动建表，保存后即时生效，无需重新生成页面；规则保存在数据库中，与主题无关。
+
+- 来源必须是以 `/` 开头的完整路径，不含域名、查询串或锚点。匹配区分大小写，忽略末尾斜杠，`/old` 与 `/old/` 为同一来源，不匹配子路径。规则覆盖该站点主域名、别名及独立语言域名；子目录语言需分别添加含语言前缀的来源路径。
+- 目标支持站内绝对路径或完整 HTTP(S) 地址，可含查询串和锚点。默认保留原请求参数，目标中已指定的同名参数优先；可关闭保留。仅处理 GET/HEAD，后台、API、购物前台和私有目录不可作为来源。
+- 执行顺序：域名别名规范化 → 配置重定向 → 现有前台路由/静态文件。因此规则可覆盖仍存在的旧页面。响应设 `Cache-Control: no-store`，便于后续修改或停用。静态页面必须经 GoCMS 服务访问；绕过服务直接由 CDN/文件服务器响应的请求不执行这些规则。
+- 来源路径在站点内唯一；保存会检查已启用规则之间的循环，包括指向其他已配置站点域名的循环。无法检查外部服务的重定向行为，配置外部目标时需自行确认。没有对应替代页面的地址应保留 404，不建议统一跳到首页。
+- JSON 格式为 `{"items":[{"source_path":"/old","target_url":"/new","status_code":301,"enabled":true,"preserve_query":true,"note":"迁移旧链接"}]}`。每次导入 1–1000 条，最大 2 MiB；省略类型/开关时采用默认值。导入只新增，重复来源或循环会整批回滚，不覆盖已有配置。
+- 权限：`redirects` 查看，修改另需 `redirects.manage`；操作记录进入操作日志。API Key 继承所属管理员权限，通过 `X-Site-Id` 选择站点。
+- 接口：`GET/POST /api/admin/redirects`、`PUT/DELETE /api/admin/redirects/{id}`、`POST /api/admin/redirects/import`。GET 返回 `items` 与 `site_id`；POST/PUT 参数为单条规则，PUT 替换全部可编辑字段；导入参数为上述 JSON 对象，成功返回 201 和 `{"imported":条数}`。
+
 ## 留言通知
 
 前台通过 `/api/messages`、`/api/feedback` 提交的留言，可以按站点推送到飞书（Feishu）或国际版 Lark 的群自定义机器人。

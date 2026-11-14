@@ -7,6 +7,7 @@ import { CommerceDimensionsPage } from "@/components/app/commerce-dimensions-pag
 import { useEffect, useState, type ComponentType } from "react"
 import {
   BarChart3,
+  ArrowRightLeft,
   Boxes,
   Building2,
   ChevronDown,
@@ -70,6 +71,7 @@ import { MediaPage } from "@/components/app/media-page"
 import { UsersPage } from "@/components/app/users-page"
 import { LogsPage } from "@/components/app/logs-page"
 import { TrafficPage } from "@/components/app/traffic-page"
+import { RedirectsPage } from "@/components/app/redirects-page"
 import { SitesPage } from "@/components/app/sites-page"
 
 import { PublishPage } from "@/components/app/publish-page"
@@ -106,6 +108,7 @@ const mainNavItems: NavigationItem[] = [
   { id: "languages", label: "多语言", icon: Languages },
   { id: "messages", label: "信息反馈", icon: MessageSquareText },
   { id: "traffic", label: "访问统计", icon: BarChart3 },
+  { id: "redirects", label: "重定向", icon: ArrowRightLeft },
   { id: "members", label: "会员管理", icon: UserCheck },
   { id: "orders", label: "订单管理", icon: Truck },
   { id: "payments", label: "支付管理", icon: CreditCard },
@@ -385,6 +388,8 @@ function viewMeta(view: AdminView): { parent?: string; title: string; descriptio
       return { parent: "平台管理", title: "操作日志", description: "查看后台操作记录" }
     case "traffic":
       return { title: "访问统计", description: "查看站点访问量、404 错误与访问明细" }
+    case "redirects":
+      return { title: "重定向", description: "将旧地址的访问引导到当前页面，规则仅对当前站点生效" }
     case "members":
       return { title: "会员管理", description: "管理前台会员、会员组和 VIP 有效期" }
     case "users":
@@ -434,6 +439,8 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
       return <LogsPage user={user} />
     case "traffic":
       return <TrafficPage user={user} />
+    case "redirects":
+      return <RedirectsPage user={user} key={activeSite?.id} />
     case "members":
       return <MembersPage />
     case "users":

@@ -104,6 +104,21 @@ export const saveSite = (input: Partial<Site> & { id?: number }) =>
     body: JSON.stringify(input),
   })
 export const deleteSite = (id: number) => request(`/api/admin/sites/${id}`, { method: "DELETE" })
+
+export type RedirectRule = {
+  id: number
+  source_path: string
+  target_url: string
+  status_code: 301 | 302
+  enabled: boolean
+  preserve_query: boolean
+  note: string
+}
+export const getRedirects = () => request<{ items: RedirectRule[]; site_id: number }>("/api/admin/redirects")
+export const saveRedirect = (input: RedirectRule) => request(input.id ? `/api/admin/redirects/${input.id}` : "/api/admin/redirects", { method: input.id ? "PUT" : "POST", body: JSON.stringify(input) })
+export const deleteRedirect = (id: number) => request(`/api/admin/redirects/${id}`, { method: "DELETE" })
+export const importRedirects = (items: unknown[]) => request<{ imported: number }>("/api/admin/redirects/import", { method: "POST", body: JSON.stringify({ items }) })
+
 export const getSiteSettings = (siteId?: number) =>
   request<Record<string, string>>(`/api/admin/site-settings${siteId ? `?site_id=${siteId}` : ""}`)
 export const saveSiteSettings = (settings: Record<string, string>, siteId?: number) =>

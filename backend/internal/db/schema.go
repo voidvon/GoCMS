@@ -24,6 +24,7 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 		{name: "site users", fn: EnsureSiteUsers},
 		{name: "operation logs", fn: EnsureAuditLog},
 		{name: "access logs", fn: EnsureAccessLog},
+		{name: "redirects", fn: EnsureRedirects},
 		{name: "categories", fn: EnsureUnifiedCategories},
 		{name: "models", fn: EnsureModels},
 		{name: "content", fn: EnsureContent},
