@@ -441,8 +441,7 @@ export function DashboardPage() {
                   <TableHeader className="sticky top-0 z-20 bg-card">
                     <TableRow>
                       <TableHead className="w-[64px]">状态</TableHead>
-                      <TableHead className="w-[150px]">域名</TableHead>
-                      <TableHead>请求路径</TableHead>
+                      <TableHead>请求地址</TableHead>
                       <TableHead className="w-[64px] text-right">命中</TableHead>
                       <TableHead className="w-[64px] text-right">站内</TableHead>
                       <TableHead className="w-[140px]">最近出现</TableHead>
@@ -450,47 +449,57 @@ export function DashboardPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {errorRows.map((item) => (
-                      <TableRow key={`${item.host}-${item.status}-${item.path}`} className="group">
-                        <TableCell>
-                          <span className={`inline-flex rounded px-1.5 py-0.5 font-mono text-xs font-medium ${statusTone(item.status)}`}>
-                            {item.status}
-                          </span>
-                        </TableCell>
-                        <TableCell className="max-w-[150px] truncate text-xs" title={item.host || activeSite?.domain || ""}>
-                          {item.host || activeSite?.domain || "—"}
-                        </TableCell>
-                        <TableCell className="max-w-[280px] truncate font-mono text-xs" title={item.path}>
-                          {item.path}
-                        </TableCell>
-                        <TableCell className="text-right font-medium">{formatNumber(item.hits)}</TableCell>
-                        <TableCell className="text-right text-muted-foreground">{formatNumber(item.internal_hits)}</TableCell>
-                        <TableCell className="text-xs text-muted-foreground"><TimeText value={item.last_visited_at} /></TableCell>
-                        <TableCell className="w-[40px] text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            className="opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 focus-visible:opacity-100"
-                            title="忽略此路径（全域名）"
-                            aria-label={`忽略 ${item.path}`}
-                            disabled={ignoreBusyPath === item.path}
-                            onClick={() => void handleIgnore(item.path)}
-                          >
-                            {ignoreBusyPath === item.path ? <LoaderCircle className="animate-spin" /> : <EyeOff />}
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {errorRows.map((item) => {
+                      const requestHost = item.host || activeSite?.domain || window.location.host
+                      const requestAddress = `${requestHost}${item.path}`
+                      const requestURL = `${window.location.protocol}//${requestHost}${item.path.split("/").map(encodeURIComponent).join("/")}`
+                      return (
+                        <TableRow key={`${item.host}-${item.status}-${item.path}`} className="group">
+                          <TableCell>
+                            <span className={`inline-flex rounded px-1.5 py-0.5 font-mono text-xs font-medium ${statusTone(item.status)}`}>
+                              {item.status}
+                            </span>
+                          </TableCell>
+                          <TableCell className="min-w-[240px] max-w-[440px] whitespace-normal break-all font-mono text-xs leading-5" title={requestAddress}>
+                            <a
+                              href={requestURL}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded-sm underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              aria-label={`${requestAddress}（在新标签页打开）`}
+                            >
+                              {requestAddress}
+                            </a>
+                          </TableCell>
+                          <TableCell className="text-right font-medium">{formatNumber(item.hits)}</TableCell>
+                          <TableCell className="text-right text-muted-foreground">{formatNumber(item.internal_hits)}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground"><TimeText value={item.last_visited_at} /></TableCell>
+                          <TableCell className="w-[40px] text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              className="opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 focus-visible:opacity-100"
+                              title="忽略此路径（全域名）"
+                              aria-label={`忽略 ${item.path}`}
+                              disabled={ignoreBusyPath === item.path}
+                              onClick={() => void handleIgnore(item.path)}
+                            >
+                              {ignoreBusyPath === item.path ? <LoaderCircle className="animate-spin" /> : <EyeOff />}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
                     {errorLoadingMore ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="py-4 text-center text-xs text-muted-foreground">
+                        <TableCell colSpan={6} className="py-4 text-center text-xs text-muted-foreground">
                           <LoaderCircle className="mr-1.5 inline size-3.5 animate-spin" />加载更多…
                         </TableCell>
                       </TableRow>
                     ) : null}
                     {!errorLoadingMore && !errorHasMore && errorRows.length > PAGE_SIZE ? (
                       <TableRow>
-                        <TableCell colSpan={7} className="py-4 text-center text-xs text-muted-foreground">
+                        <TableCell colSpan={6} className="py-4 text-center text-xs text-muted-foreground">
                           已加载全部
                         </TableCell>
                       </TableRow>
