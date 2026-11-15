@@ -90,7 +90,8 @@ func TestPasswordRecoveryHTTPAndMailAdmin(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, session, e := svc.Login(context.Background(), p.Username, "password123", "", "", "", 1)
+	login, e := svc.Login(context.Background(), member.LoginInput{Identifier: p.Username, Password: "password123", IP: "", UserAgent: "", CurrentToken: "", SiteID: 1})
+	session := login.Session.Token
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -137,7 +138,18 @@ func TestPasswordRecoveryHTTPAndMailAdmin(t *testing.T) {
 	if _, e = svc.Authenticate(context.Background(), session, 1); e == nil {
 		t.Fatal("old session survived reset")
 	}
-	_, session, e = svc.Login(context.Background(), p.Username, "newpassword123", "", "", "", 1)
+	// A reset performed by a native client revokes sessions without writing a
+	// browser cookie, including when its old session token is still supplied.
+	nativeReset, _, e := svc.IssuePasswordReset(context.Background(), 1, p.Email, c.Revision)
+	if e != nil || nativeReset == "" {
+		t.Fatal("could not issue native reset", e)
+	}
+	nativeResetResponse := memberTokenRequest(t, s, "POST", "https://example.com/api/v1/auth/reset-password", fmt.Sprintf(`{"token":%q,"password":"newpassword123"}`, nativeReset), session, nil, 200)
+	if len(nativeResetResponse.Result().Cookies()) != 0 {
+		t.Fatal("native password reset changed browser cookies")
+	}
+	login, e = svc.Login(context.Background(), member.LoginInput{Identifier: p.Username, Password: "newpassword123", IP: "", UserAgent: "", CurrentToken: "", SiteID: 1})
+	session = login.Session.Token
 	if e != nil {
 		t.Fatal(e)
 	}

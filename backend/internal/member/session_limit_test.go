@@ -30,8 +30,8 @@ func TestSessionLimitRotationAndIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	login := func(name, token string) (string, error) {
-		_, v, e := s.Login(ctx, name, "password123", "127.0.0.1", "test", token)
-		return v, e
+		result, e := s.Login(ctx, LoginInput{Identifier: name, Password: "password123", IP: "127.0.0.1", UserAgent: "test", CurrentToken: token})
+		return result.Session.Token, e
 	}
 	first, err := login("alice", "")
 	if err != nil {
@@ -112,7 +112,7 @@ func TestConcurrentLoginLimit(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _, err := s.Login(ctx, "alice", "password123", "127.0.0.1", "test", "")
+			_, err := s.Login(ctx, LoginInput{Identifier: "alice", Password: "password123", IP: "127.0.0.1", UserAgent: "test", CurrentToken: ""})
 			results <- err
 		}()
 	}

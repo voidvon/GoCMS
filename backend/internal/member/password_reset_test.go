@@ -31,7 +31,8 @@ func TestPasswordRecoveryLifecycle(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, session, e := svc.Login(ctx, "recover", "password123", "127.0.0.1", "test", "", 1)
+	login, e := svc.Login(ctx, LoginInput{Identifier: "recover", Password: "password123", IP: "127.0.0.1", UserAgent: "test", CurrentToken: "", SiteID: 1})
+	session := login.Session.Token
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -73,10 +74,10 @@ func TestPasswordRecoveryLifecycle(t *testing.T) {
 	if _, e = svc.Authenticate(ctx, session, 1); e == nil {
 		t.Fatal("old session survived")
 	}
-	if _, _, e = svc.Login(ctx, "recover", "password123", "", "", "", 1); e == nil {
+	if _, e = svc.Login(ctx, LoginInput{Identifier: "recover", Password: "password123", IP: "", UserAgent: "", CurrentToken: "", SiteID: 1}); e == nil {
 		t.Fatal("old password survived")
 	}
-	if _, _, e = svc.Login(ctx, "recover", "newpassword123", "", "", "", 1); e != nil {
+	if _, e = svc.Login(ctx, LoginInput{Identifier: "recover", Password: "newpassword123", IP: "", UserAgent: "", CurrentToken: "", SiteID: 1}); e != nil {
 		t.Fatal(e)
 	}
 	for _, scenario := range []string{"expired", "disabled-user", "email-change", "password-change", "mail-change"} {
@@ -153,7 +154,7 @@ func TestLinkedProviderPasswordRecovery(t *testing.T) {
 			if e := svc.ResetPassword(ctx, 1, token, "fromthirdparty"); e != nil {
 				t.Fatal("recovery needs no email", e)
 			}
-			if _, _, e := svc.Login(ctx, "linked", "fromthirdparty", "", "", "", 1); e != nil {
+			if _, e := svc.Login(ctx, LoginInput{Identifier: "linked", Password: "fromthirdparty", IP: "", UserAgent: "", CurrentToken: "", SiteID: 1}); e != nil {
 				t.Fatal(e)
 			}
 			token = issue()

@@ -1,7 +1,6 @@
 package site
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -82,34 +81,36 @@ func (s *Server) memberAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p := strings.TrimSuffix(r.URL.Path, "/")
-	// Authentication endpoints retain their existing response during migration.
+	// Public authentication operations share the application service with legacy routes.
 	switch p {
 	case "/api/v1/auth/password-options", "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password":
 		s.memberPasswordRecovery(w, r)
 		return
 	case "/api/v1/auth/register":
-		s.memberAuthAdapter(w, r, s.userRegister)
+		s.memberRegister(w, r, memberV1Response)
 		return
 	case "/api/v1/auth/login":
-		s.memberAuthAdapter(w, r, s.userLogin)
+		s.memberLogin(w, r, memberCookieTransport, memberV1Response)
+		return
+	case "/api/v1/auth/token":
+		s.memberLogin(w, r, memberBearerTransport, memberV1Response)
 		return
 	case "/api/v1/auth/logout":
-		s.memberAuthAdapter(w, r, s.userLogout)
+		s.memberLogout(w, r, memberV1Response)
 		return
 	}
-	u, ok := s.currentSiteUser(r)
-	if !ok {
-		memberError(w, 401, "authentication_required", "Sign in required")
+	authentication, err := s.authenticateMember(r)
+	if err != nil {
+		memberAuthenticationError(w, authentication.credential, err)
 		return
 	}
 	service := member.Service{DB: s.database}
-	cookie, _ := r.Cookie("gocms_user")
+	u := authentication.identity
 	switch {
 	case p == "/api/v1/me/identities/google" || p == "/api/v1/me/identities/facebook" || p == "/api/v1/me/identities/microsoft":
-		s.memberGoogleIdentity(w, r, u)
+		s.memberGoogleIdentity(w, r, authentication)
 	case p == "/api/v1/me" && r.Method == http.MethodGet:
-		data, err := service.Profile(r.Context(), u.ID)
-		memberResult(w, data, err)
+		memberResult(w, u.Profile, nil)
 	case p == "/api/v1/me" && r.Method == http.MethodPatch:
 		var in struct {
 			DisplayName *string `json:"display_name"`
@@ -139,21 +140,20 @@ func (s *Server) memberAPI(w http.ResponseWriter, r *http.Request) {
 		}
 		err := service.ChangePassword(r.Context(), u.ID, in.Old, in.New)
 		if err == nil {
-			http.SetCookie(w, userCookie("", -1, requestScheme(r) == "https"))
+			authentication.credential.clearCookie(w, r)
 		}
 		memberResult(w, map[string]bool{"reauthenticate": true}, err)
 	case p == "/api/v1/me/memberships" && r.Method == http.MethodGet:
-		siteID, _ := s.resolvePublicSiteID(r)
-		data, err := service.Memberships(r.Context(), u.ID, siteID)
+		data, err := service.Memberships(r.Context(), u.ID, authentication.siteID)
 		memberResult(w, data, err)
 	case p == "/api/v1/me/sessions" && r.Method == http.MethodGet:
-		data, err := service.Sessions(r.Context(), u.ID, hashToken(cookie.Value))
+		data, err := service.Sessions(r.Context(), u.ID, u.SessionID)
 		memberResult(w, data, err)
 	case strings.HasPrefix(p, "/api/v1/me/sessions/") && r.Method == http.MethodDelete:
 		id := strings.TrimPrefix(p, "/api/v1/me/sessions/")
 		err := service.Revoke(r.Context(), u.ID, id)
-		if err == nil && id == member.SessionID(hashToken(cookie.Value)) {
-			http.SetCookie(w, userCookie("", -1, requestScheme(r) == "https"))
+		if err == nil && id == u.SessionID {
+			authentication.credential.clearCookie(w, r)
 		}
 		memberResult(w, map[string]bool{"ok": true}, err)
 	default:
@@ -161,51 +161,6 @@ func (s *Server) memberAPI(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Adapter preserves legacy authentication payloads while v1 uses one envelope.
-func (s *Server) memberAuthAdapter(w http.ResponseWriter, r *http.Request, handler http.HandlerFunc) {
-	recorder := &memberResponse{header: make(http.Header), Code: 200}
-	handler(recorder, r)
-	if retry := recorder.header.Get("Retry-After"); retry != "" {
-		w.Header().Set("Retry-After", retry)
-	}
-	for _, cookie := range (&http.Response{Header: recorder.header}).Cookies() {
-		http.SetCookie(w, cookie)
-	}
-	if recorder.Code >= 400 {
-		var payload struct {
-			Error struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if json.Unmarshal(recorder.Body.Bytes(), &payload) == nil && payload.Error.Code != "" {
-			memberError(w, recorder.Code, payload.Error.Code, payload.Error.Message)
-			return
-		}
-
-		code := "invalid_input"
-		switch recorder.Code {
-		case 401:
-			code = "invalid_credentials"
-		case 409:
-			code = "account_conflict"
-		case 429:
-			code = "rate_limited"
-		case 405:
-			code = "method_not_allowed"
-		case 500:
-			code = "internal_error"
-		}
-		memberError(w, recorder.Code, code, http.StatusText(recorder.Code))
-		return
-	}
-	var data any
-	if err := json.Unmarshal(recorder.Body.Bytes(), &data); err != nil {
-		memberResult(w, nil, err)
-		return
-	}
-	writeJSON(w, recorder.Code, map[string]any{"data": data})
-}
 func (s *Server) memberAttempt(w http.ResponseWriter, r *http.Request, action, identifier string, limit int) bool {
 	for _, key := range []string{"ip:" + clientIP(r), "account:" + strings.ToLower(identifier)} {
 		allowed, err := (member.Service{DB: s.database}).Admit(r.Context(), "rate:"+action+":"+hashToken(key), limit)
@@ -221,13 +176,3 @@ func (s *Server) memberAttempt(w http.ResponseWriter, r *http.Request, action, i
 	}
 	return true
 }
-
-type memberResponse struct {
-	header http.Header
-	Body   bytes.Buffer
-	Code   int
-}
-
-func (w *memberResponse) Header() http.Header         { return w.header }
-func (w *memberResponse) WriteHeader(code int)        { w.Code = code }
-func (w *memberResponse) Write(b []byte) (int, error) { return w.Body.Write(b) }

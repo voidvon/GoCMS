@@ -269,7 +269,8 @@ func TestPlatformGoogleLegacyIdentityMigration(t *testing.T) {
 	if _, err = database.Exec(`INSERT INTO gocms_member_identity(site_id,user_id,provider,issuer,subject) VALUES(1,?,'google',?,'legacy-subject')`, p.ID, memberoauth.Issuer); err != nil {
 		t.Fatal(err)
 	}
-	got, token, err := svc.ExternalLogin(ctx, 2, "revision", "legacy-subject", "changed@example.test", "Name", true, 0, "", "ip", "agent", "")
+	login, err := svc.ExternalProviderLogin(ctx, member.ExternalLoginInput{Provider: "google", SiteID: 2, Revision: "revision", Subject: "legacy-subject", Email: "changed@example.test", DisplayName: "Name", EmailVerified: true, BindUserID: 0, BindingSessionHash: "", IP: "ip", UserAgent: "agent", CurrentToken: ""})
+	got, token := login.User, login.Session.Token
 	if err != nil || got.ID != p.ID {
 		t.Fatalf("legacy promotion: %v", err)
 	}
@@ -297,7 +298,7 @@ func TestPlatformGoogleLegacyIdentityMigration(t *testing.T) {
 	if _, err = database.Exec(`INSERT INTO gocms_member_identity(site_id,user_id,provider,issuer,subject) VALUES(1,?,'google',?,'conflicting'),(2,?,'google',?,'conflicting')`, p.ID, memberoauth.Issuer, other.ID, memberoauth.Issuer); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = svc.ExternalLogin(ctx, 2, "revision", "conflicting", "legacy@example.test", "Name", true, 0, "", "ip", "agent", ""); err != member.ErrConflict {
+	if _, err = svc.ExternalProviderLogin(ctx, member.ExternalLoginInput{Provider: "google", SiteID: 2, Revision: "revision", Subject: "conflicting", Email: "legacy@example.test", DisplayName: "Name", EmailVerified: true, BindUserID: 0, BindingSessionHash: "", IP: "ip", UserAgent: "agent", CurrentToken: ""}); err != member.ErrConflict {
 		t.Fatal("conflicting legacy accounts merged")
 	}
 	// Deleting a site must not delete shared platform settings or identity tables.

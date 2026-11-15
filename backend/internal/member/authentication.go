@@ -2,22 +2,15 @@ package member
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/mail"
 	"regexp"
 	"strings"
-	"time"
 
 	"gocms/internal/auth"
 )
-
-var ErrSessionLimit = errors.New("session limit reached")
 
 var ErrConflict = errors.New("account conflict")
 
@@ -34,10 +27,6 @@ func IsValidUsername(username string) bool {
 	return usernamePattern.MatchString(username) && !digitsPattern.MatchString(username)
 }
 
-func TokenHash(token string) string {
-	v := sha256.Sum256([]byte(token))
-	return base64.RawURLEncoding.EncodeToString(v[:])
-}
 func (s Service) Register(ctx context.Context, username, email, password string, siteID ...int64) (Profile, error) {
 	username = strings.TrimSpace(username)
 	email = strings.ToLower(strings.TrimSpace(email))
@@ -77,186 +66,80 @@ func (s Service) Register(ctx context.Context, username, email, password string,
 	}
 	return s.Profile(ctx, id)
 }
-func (s Service) Login(ctx context.Context, identifier, password, ip, agent string, currentToken string, siteIDOpt ...int64) (Profile, string, error) {
+
+type LoginInput struct {
+	Identifier   string
+	Password     string
+	SiteID       int64
+	IP           string
+	UserAgent    string
+	CurrentToken string
+}
+
+// LoginResult is an application result, never an HTTP response. In particular,
+// transports must explicitly opt in to exposing Session.Token.
+type LoginResult struct {
+	User         Profile      `json:"-"`
+	Session      SessionGrant `json:"-"`
+	ActiveGroups []string     `json:"-"`
+}
+
+// Login verifies a password and issues a session independently of HTTP transport.
+func (s Service) Login(ctx context.Context, in LoginInput) (LoginResult, error) {
+	identifier, password := strings.TrimSpace(in.Identifier), in.Password
+	ip, agent, currentToken := in.IP, in.UserAgent, in.CurrentToken
 	if len(identifier) > 254 || len(password) > 1024 {
-		return Profile{}, "", ErrInvalid
+		return LoginResult{}, ErrInvalid
 	}
-	var id, originSiteID int64
-	var encoded, status, rawSiteIDs string
-	query := "SELECT u.id, u.site_id, u.password_hash, u.status, COALESCE(u.site_ids, '[]') FROM gocms_user u WHERE (u.username=? OR (u.email<>'' AND u.email=?))"
+	var id int64
+	var encoded, status string
+	query := "SELECT u.id, u.password_hash, u.status FROM gocms_user u WHERE (u.username=? OR (u.email<>'' AND u.email=?))"
 	args := []any{identifier, strings.ToLower(identifier)}
-	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&id, &originSiteID, &encoded, &status, &rawSiteIDs)
+	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&id, &encoded, &status)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return Profile{}, "", err
+		return LoginResult{}, err
 	}
 	if err != nil || status != "active" || !auth.ComparePassword(password, encoded) {
 		if _, e := s.DB.ExecContext(ctx, "INSERT INTO gocms_user_login(identifier,success,ip) VALUES(?,0,?)", identifier, ip); e != nil {
-			return Profile{}, "", e
+			return LoginResult{}, e
 		}
-		return Profile{}, "", ErrUnauthorized
+		return LoginResult{}, ErrUnauthorized
 	}
 
-	// Auto-join site on login
-	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
-		targetSiteID := siteIDOpt[0]
-		var sids []int64
-		_ = json.Unmarshal([]byte(rawSiteIDs), &sids)
-		hasOrigin := false
-		hasTarget := false
-		for _, sid := range sids {
-			if sid == originSiteID {
-				hasOrigin = true
-			}
-			if sid == targetSiteID {
-				hasTarget = true
-			}
-		}
-		needsUpdate := false
-		if !hasOrigin && originSiteID > 0 {
-			sids = append(sids, originSiteID)
-			needsUpdate = true
-		}
-		if !hasTarget {
-			sids = append(sids, targetSiteID)
-			needsUpdate = true
-			var defaultGroupID int64
-			if err := s.DB.QueryRowContext(ctx, "SELECT id FROM gocms_user_group WHERE site_id=? AND is_default=1 AND status='active' LIMIT 1", targetSiteID).Scan(&defaultGroupID); err == nil && defaultGroupID > 0 {
-				_, _ = s.DB.ExecContext(ctx, "INSERT OR IGNORE INTO gocms_user_group_member(user_id,group_id,status) VALUES(?,?,'active')", id, defaultGroupID)
-			}
-		}
-		if needsUpdate {
-			newJSON, _ := json.Marshal(sids)
-			_, _ = s.DB.ExecContext(ctx, "UPDATE gocms_user SET site_ids=? WHERE id=?", string(newJSON), id)
-		}
-	}
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return Profile{}, "", err
+		return LoginResult{}, err
 	}
 	defer tx.Rollback()
-	token, err := createSession(ctx, tx, id, encoded, identifier, ip, agent, currentToken)
+	session, err := createSession(ctx, tx, id, encoded, identifier, ip, agent, currentToken)
 	if err != nil {
-		return Profile{}, "", err
+		return LoginResult{}, err
+	}
+	if in.SiteID > 0 {
+		if err = joinMemberSite(ctx, tx, id, in.SiteID, false); err != nil {
+			return LoginResult{}, err
+		}
+	}
+	result, err := prepareLoginResult(ctx, tx, id, in.SiteID, session)
+	if err != nil {
+		return LoginResult{}, err
 	}
 	if err = tx.Commit(); err != nil {
-		return Profile{}, "", err
+		return LoginResult{}, err
 	}
-	profile, err := s.Profile(ctx, id)
-	return profile, token, err
+	return result, nil
 }
 
-// createSession is shared by password and verified external identity logins.
-// The caller holds a transaction; status, credential snapshot and limits are rechecked.
-func createSession(ctx context.Context, tx *sql.Tx, id int64, encoded, identifier, ip, agent, currentToken string) (string, error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	token := base64.RawURLEncoding.EncodeToString(b)
-	var err error
-	// Acquire the SQLite write lock before counting to serialize concurrent logins.
-	if _, err = tx.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE expires_at<=?", time.Now().Unix()); err != nil {
-		return "", err
-	}
-	var limit int
-	if err = tx.QueryRowContext(ctx, "SELECT max_sessions FROM gocms_user WHERE id=? AND status='active' AND password_hash=?", id, encoded).Scan(&limit); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrUnauthorized
-		}
-		return "", err
-	}
-	// Only the supplied live session belonging to this account can be replaced.
-	if currentToken != "" {
-		if _, err = tx.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE user_id=? AND token_hash=?", id, TokenHash(currentToken)); err != nil {
-			return "", err
-		}
-	}
-	var count int
-	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM gocms_user_session WHERE user_id=?", id).Scan(&count); err != nil {
-		return "", err
-	}
-	if count >= limit {
-		return "", ErrSessionLimit
-	}
-	// Recheck the hash/status so concurrent disable or password change cannot create
-	// a session after revocation.
-	result, err := tx.ExecContext(ctx, "INSERT INTO gocms_user_session(token_hash,user_id,expires_at,ip,user_agent) SELECT ?,id,?,?,? FROM gocms_user WHERE id=? AND status='active' AND password_hash=?", TokenHash(token), time.Now().Add(30*24*time.Hour).Unix(), ip, agent, id, encoded)
+// Prepare public account data before commit: failure must roll back issuance or
+// rotation instead of consuming a login slot without delivering its credential.
+func prepareLoginResult(ctx context.Context, reader memberReader, id, siteID int64, session SessionGrant) (LoginResult, error) {
+	profile, err := loadProfile(ctx, reader, id)
 	if err != nil {
-		return "", err
+		return LoginResult{}, err
 	}
-	n, err := result.RowsAffected()
+	memberships, err := loadMemberships(ctx, reader, id, siteID)
 	if err != nil {
-		return "", err
+		return LoginResult{}, err
 	}
-	if n != 1 {
-		return "", ErrUnauthorized
-	}
-	if _, err = tx.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE expires_at<=?", time.Now().Unix()); err != nil {
-		return "", err
-	}
-	if _, err = tx.ExecContext(ctx, "UPDATE gocms_user SET last_login_at=CURRENT_TIMESTAMP,last_login_ip=? WHERE id=?", ip, id); err != nil {
-		return "", err
-	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO gocms_user_login(user_id,identifier,success,ip) VALUES(?,?,1,?)", id, identifier, ip); err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
-func (s Service) Authenticate(ctx context.Context, token string, siteIDOpt ...int64) (Profile, error) {
-	var p Profile
-	var originSiteID int64
-	var status, rawSiteIDs string
-	query := `SELECT u.id, u.site_id, u.username, u.email, u.display_name, u.avatar_url, u.status, COALESCE(u.site_ids, '[]')
-	          FROM gocms_user u
-	          JOIN gocms_user_session s ON s.user_id=u.id
-	          WHERE s.token_hash=? AND s.expires_at>?`
-	args := []any{TokenHash(token), time.Now().Unix()}
-
-	err := s.DB.QueryRowContext(ctx, query, args...).Scan(&p.ID, &originSiteID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL, &status, &rawSiteIDs)
-	if errors.Is(err, sql.ErrNoRows) {
-		return p, ErrUnauthorized
-	}
-	if err != nil {
-		return p, err
-	}
-	if status != "active" {
-		return p, ErrUnauthorized
-	}
-
-	// Auto-join site on authenticate
-	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
-		targetSiteID := siteIDOpt[0]
-		var sids []int64
-		_ = json.Unmarshal([]byte(rawSiteIDs), &sids)
-		hasOrigin := false
-		hasTarget := false
-		for _, sid := range sids {
-			if sid == originSiteID {
-				hasOrigin = true
-			}
-			if sid == targetSiteID {
-				hasTarget = true
-			}
-		}
-		needsUpdate := false
-		if !hasOrigin && originSiteID > 0 {
-			sids = append(sids, originSiteID)
-			needsUpdate = true
-		}
-		if !hasTarget {
-			sids = append(sids, targetSiteID)
-			needsUpdate = true
-		}
-		if needsUpdate {
-			newJSON, _ := json.Marshal(sids)
-			_, _ = s.DB.ExecContext(ctx, "UPDATE gocms_user SET site_ids=? WHERE id=?", string(newJSON), p.ID)
-		}
-	}
-
-	return p, nil
-}
-func (s Service) Logout(ctx context.Context, token string) error {
-	_, err := s.DB.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE token_hash=?", TokenHash(token))
-	return err
+	return LoginResult{User: profile, Session: session, ActiveGroups: activeGroupSlugs(memberships)}, nil
 }

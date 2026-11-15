@@ -3,9 +3,7 @@ package member
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"net/url"
 	"strings"
@@ -19,6 +17,13 @@ var ErrUnauthorized = errors.New("authentication required")
 var ErrNotFound = errors.New("not found")
 
 type Service struct{ DB *sql.DB }
+
+// Both DB and Tx implement these reads, so login response preparation can share
+// the transaction that commits the session and site membership.
+type memberReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
 type Profile struct {
 	HasPassword bool   `json:"has_password"`
 	ID          int64  `json:"id"`
@@ -45,9 +50,13 @@ func ParseTime(value string) (time.Time, error) {
 	return time.Time{}, ErrInvalid
 }
 func (s Service) Profile(ctx context.Context, id int64) (Profile, error) {
+	return loadProfile(ctx, s.DB, id)
+}
+
+func loadProfile(ctx context.Context, reader memberReader, id int64) (Profile, error) {
 	var p Profile
 	query := "SELECT id,username,email,display_name,avatar_url,password_hash<>'' FROM gocms_user WHERE id=? AND status='active'"
-	err := s.DB.QueryRowContext(ctx, query, id).Scan(&p.ID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL, &p.HasPassword)
+	err := reader.QueryRowContext(ctx, query, id).Scan(&p.ID, &p.Username, &p.Email, &p.DisplayName, &p.AvatarURL, &p.HasPassword)
 	return p, err
 }
 func (s Service) UpdateProfile(ctx context.Context, id int64, name, avatar *string) error {
@@ -106,6 +115,10 @@ func (s Service) ChangePassword(ctx context.Context, id int64, old, next string)
 	return tx.Commit()
 }
 func (s Service) Memberships(ctx context.Context, id int64, siteIDOpt ...int64) ([]Membership, error) {
+	return loadMemberships(ctx, s.DB, id, siteIDOpt...)
+}
+
+func loadMemberships(ctx context.Context, reader memberReader, id int64, siteIDOpt ...int64) ([]Membership, error) {
 	query := "SELECT g.id,g.name,g.slug,m.started_at,m.expires_at,m.status,g.status FROM gocms_user_group_member m JOIN gocms_user_group g ON g.id=m.group_id WHERE m.user_id=?"
 	args := []any{id}
 	if len(siteIDOpt) > 0 && siteIDOpt[0] > 0 {
@@ -113,7 +126,7 @@ func (s Service) Memberships(ctx context.Context, id int64, siteIDOpt ...int64) 
 		args = append(args, siteIDOpt[0])
 	}
 	query += " ORDER BY g.sort_order,g.id"
-	rows, err := s.DB.QueryContext(ctx, query, args...)
+	rows, err := reader.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +141,7 @@ func (s Service) Memberships(ctx context.Context, id int64, siteIDOpt ...int64) 
 		}
 		start, e := ParseTime(m.StartsAt)
 		if e != nil {
-			return nil, e
+			return nil, errors.New("invalid stored membership start time")
 		}
 		m.StartsAt = start.Format(time.RFC3339)
 		if m.Status != "active" || gs != "active" {
@@ -139,7 +152,7 @@ func (s Service) Memberships(ctx context.Context, id int64, siteIDOpt ...int64) 
 		if m.ExpiresAt != nil && *m.ExpiresAt != "" {
 			end, e := ParseTime(*m.ExpiresAt)
 			if e != nil {
-				return nil, e
+				return nil, errors.New("invalid stored membership expiry time")
 			}
 			v := end.Format(time.RFC3339)
 			m.ExpiresAt = &v
@@ -152,74 +165,6 @@ func (s Service) Memberships(ctx context.Context, id int64, siteIDOpt ...int64) 
 		out = append(out, m)
 	}
 	return out, rows.Err()
-}
-
-type Session struct {
-	ID        string `json:"id"`
-	ExpiresAt string `json:"expires_at"`
-	CreatedAt string `json:"created_at"`
-	IP        string `json:"ip"`
-	UserAgent string `json:"user_agent"`
-	Current   bool   `json:"current"`
-}
-
-// SessionID is a non-authenticating public reference; token hashes are never exposed.
-func SessionID(hash string) string {
-	v := sha256.Sum256([]byte("session-id:" + hash))
-	return hex.EncodeToString(v[:])
-}
-func (s Service) Sessions(ctx context.Context, id int64, current string) ([]Session, error) {
-	rows, err := s.DB.QueryContext(ctx, "SELECT token_hash,expires_at,created_at,ip,user_agent FROM gocms_user_session WHERE user_id=? AND expires_at>? ORDER BY created_at DESC", id, time.Now().Unix())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []Session{}
-	for rows.Next() {
-		var v Session
-		var hash, created string
-		var exp int64
-		if err := rows.Scan(&hash, &exp, &created, &v.IP, &v.UserAgent); err != nil {
-			return nil, err
-		}
-		t, err := ParseTime(created)
-		if err != nil {
-			return nil, err
-		}
-		v.ID = SessionID(hash)
-		v.Current = hash == current
-		v.ExpiresAt = time.Unix(exp, 0).UTC().Format(time.RFC3339)
-		v.CreatedAt = t.Format(time.RFC3339)
-		out = append(out, v)
-	}
-	return out, rows.Err()
-}
-func (s Service) Revoke(ctx context.Context, id int64, reference string) error {
-	rows, err := s.DB.QueryContext(ctx, "SELECT token_hash FROM gocms_user_session WHERE user_id=?", id)
-	if err != nil {
-		return err
-	}
-	found := ""
-	for rows.Next() {
-		var hash string
-		if err := rows.Scan(&hash); err != nil {
-			rows.Close()
-			return err
-		}
-		if SessionID(hash) == reference {
-			found = hash
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	if found == "" {
-		return ErrNotFound
-	}
-	_, err = s.DB.ExecContext(ctx, "DELETE FROM gocms_user_session WHERE user_id=? AND token_hash=?", id, found)
-	return err
 }
 
 // Admit reserves an attempt before expensive password work, including successful
@@ -241,4 +186,23 @@ func (s Service) Admit(ctx context.Context, key string, limit int) (bool, error)
 		return false, err
 	}
 	return true, tx.Commit()
+}
+
+// ActiveGroupSlugs uses the same validity rules as the membership detail API.
+func (s Service) ActiveGroupSlugs(ctx context.Context, id int64, siteID int64) ([]string, error) {
+	memberships, err := s.Memberships(ctx, id, siteID)
+	if err != nil {
+		return nil, err
+	}
+	return activeGroupSlugs(memberships), nil
+}
+
+func activeGroupSlugs(memberships []Membership) []string {
+	var groups []string
+	for _, membership := range memberships {
+		if membership.Status == "active" {
+			groups = append(groups, membership.Slug)
+		}
+	}
+	return groups
 }

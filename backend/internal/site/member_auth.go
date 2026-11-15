@@ -13,6 +13,7 @@ type siteUserCredentials struct {
 	Email      string `json:"email"`
 	Password   string `json:"password"`
 }
+
 type siteUser struct {
 	ID          int64    `json:"id"`
 	Username    string   `json:"username"`
@@ -22,140 +23,164 @@ type siteUser struct {
 	Groups      []string `json:"groups,omitempty"`
 }
 
+type memberResponseFormat uint8
+
+const (
+	memberLegacyResponse memberResponseFormat = iota
+	memberV1Response
+)
+
+// Legacy compatibility ends at response encoding. v1 handlers invoke the same
+// application operations directly, without capturing and reparsing HTTP output.
+func writeMemberAuthResponse(w http.ResponseWriter, status int, format memberResponseFormat, data any) {
+	if format == memberV1Response {
+		data = map[string]any{"data": data}
+	}
+	writeJSON(w, status, data)
+}
+
+func memberAuthMethod(w http.ResponseWriter, r *http.Request, method string) bool {
+	if r.Method == method {
+		return true
+	}
+	w.Header().Set("Allow", method)
+	memberError(w, 405, "method_not_allowed", "Unsupported method")
+	return false
+}
+
 func (s *Server) userRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w)
+	s.memberRegister(w, r, memberLegacyResponse)
+}
+
+func (s *Server) memberRegister(w http.ResponseWriter, r *http.Request, format memberResponseFormat) {
+	if !memberAuthMethod(w, r, http.MethodPost) {
 		return
 	}
 	var in siteUserCredentials
 	if memberDecode(r, &in) != nil {
-		http.Error(w, "invalid payload", 400)
+		memberResult(w, nil, member.ErrInvalid)
 		return
 	}
 	if !s.memberAttempt(w, r, "register", in.Username, 10) {
 		return
 	}
-	siteID, err := s.resolveSiteID(r, nil)
+	siteID, err := s.resolvePublicSiteID(r)
 	if err != nil {
 		memberResult(w, nil, err)
 		return
 	}
-	p, err := (member.Service{DB: s.database}).Register(r.Context(), in.Username, in.Email, in.Password, siteID)
+	profile, err := (member.Service{DB: s.database}).Register(r.Context(), in.Username, in.Email, in.Password, siteID)
 	if err != nil {
 		memberResult(w, nil, err)
 		return
 	}
-	u := siteUser{ID: p.ID, Username: p.Username, Email: p.Email, DisplayName: p.DisplayName, AvatarURL: p.AvatarURL}
-	s.attachMemberGroups(r, &u)
-	writeJSON(w, 201, map[string]any{"user": u})
-
+	user, err := s.memberUser(r, profile, siteID)
+	if err != nil {
+		memberResult(w, nil, err)
+		return
+	}
+	writeMemberAuthResponse(w, http.StatusCreated, format, map[string]any{"user": user})
 }
 
 func (s *Server) userLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w)
+	s.memberLogin(w, r, memberCookieTransport, memberLegacyResponse)
+}
+
+func (s *Server) memberLogin(w http.ResponseWriter, r *http.Request, transport memberTransport, format memberResponseFormat) {
+	if !memberAuthMethod(w, r, http.MethodPost) {
 		return
 	}
 	var in siteUserCredentials
 	if memberDecode(r, &in) != nil {
-		http.Error(w, "invalid payload", 400)
+		memberResult(w, nil, member.ErrInvalid)
 		return
 	}
-	idf := strings.TrimSpace(in.Identifier)
-	if idf == "" {
-		idf = strings.TrimSpace(in.Username)
+	identifier := strings.TrimSpace(in.Identifier)
+	if identifier == "" {
+		identifier = strings.TrimSpace(in.Username)
 	}
-	if !s.memberAttempt(w, r, "login", idf, 20) {
+	if !s.memberAttempt(w, r, "login", identifier, 20) {
 		return
 	}
-	currentToken := ""
-	if cookie, err := r.Cookie("gocms_user"); err == nil {
-		currentToken = cookie.Value
+	credential, err := transport.loginCredential(r)
+	if err != nil {
+		memberAuthenticationError(w, credential, err)
+		return
 	}
-	siteID, err := s.resolveSiteID(r, nil)
+	siteID, err := s.resolvePublicSiteID(r)
 	if err != nil {
 		memberResult(w, nil, err)
 		return
 	}
-	p, token, err := (member.Service{DB: s.database}).Login(r.Context(), idf, in.Password, clientIP(r), r.UserAgent(), currentToken, siteID)
+	result, err := (member.Service{DB: s.database}).Login(r.Context(), member.LoginInput{
+		Identifier: identifier, Password: in.Password, SiteID: siteID,
+		IP: clientIP(r), UserAgent: r.UserAgent(), CurrentToken: credential.token,
+	})
 	if err != nil {
 		memberResult(w, nil, err)
 		return
 	}
-	u := siteUser{ID: p.ID, Username: p.Username, Email: p.Email, DisplayName: p.DisplayName, AvatarURL: p.AvatarURL}
-	s.attachMemberGroups(r, &u)
-	http.SetCookie(w, userCookie(token, 30*24*60*60, requestScheme(r) == "https"))
-	writeJSON(w, 200, map[string]any{"user": u})
-
+	user := memberUserResponse(result.User, result.ActiveGroups)
+	response := transport.deliverSession(w, r, user, result.Session)
+	writeMemberAuthResponse(w, http.StatusOK, format, response)
 }
 
 func (s *Server) userSession(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		methodNotAllowed(w)
+	if !memberAuthMethod(w, r, http.MethodGet) {
 		return
 	}
-	u, ok := s.currentSiteUser(r)
+	user, ok := s.currentSiteUser(r)
 	if !ok {
 		writeJSON(w, 200, map[string]any{"user": nil})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"user": u})
+	writeJSON(w, 200, map[string]any{"user": user})
 }
 
-func (s *Server) attachMemberGroups(r *http.Request, u *siteUser) {
-	siteID, _ := s.resolveSiteID(r, nil)
-	if s.database == nil {
-		return
-	}
-	query := `SELECT g.slug FROM gocms_user_group_member m JOIN gocms_user_group g ON m.group_id=g.id WHERE m.user_id=? AND m.status='active' AND g.status='active'`
-	args := []any{u.ID}
-	if siteID > 0 {
-		query += ` AND g.site_id=?`
-		args = append(args, siteID)
-	}
-	rows, err := s.database.QueryContext(r.Context(), query, args...)
+// Group validity belongs to the member service. Authentication responses and
+// membership endpoints must agree about expired, scheduled and disabled groups.
+func (s *Server) memberUser(r *http.Request, profile member.Profile, siteID int64) (siteUser, error) {
+	groups, err := (member.Service{DB: s.database}).ActiveGroupSlugs(r.Context(), profile.ID, siteID)
 	if err != nil {
-		return
+		return siteUser{}, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var slug string
-		if err := rows.Scan(&slug); err == nil {
-			u.Groups = append(u.Groups, slug)
-		}
-	}
+	return memberUserResponse(profile, groups), nil
+}
+
+func memberUserResponse(profile member.Profile, groups []string) siteUser {
+	return siteUser{ID: profile.ID, Username: profile.Username, Email: profile.Email, DisplayName: profile.DisplayName, AvatarURL: profile.AvatarURL, Groups: groups}
 }
 
 func (s *Server) userLogout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		methodNotAllowed(w)
+	s.memberLogout(w, r, memberLegacyResponse)
+}
+
+func (s *Server) memberLogout(w http.ResponseWriter, r *http.Request, format memberResponseFormat) {
+	if !memberAuthMethod(w, r, http.MethodPost) {
 		return
 	}
-	if c, e := r.Cookie("gocms_user"); e == nil {
-		if err := (member.Service{DB: s.database}).Logout(r.Context(), c.Value); err != nil {
+	credential, err := requestMemberCredential(r)
+	if err != nil {
+		memberAuthenticationError(w, credential, err)
+		return
+	}
+	if credential.token != "" {
+		if err := (member.Service{DB: s.database}).Logout(r.Context(), credential.token); err != nil {
 			memberResult(w, nil, err)
 			return
 		}
 	}
-	http.SetCookie(w, userCookie("", -1, requestScheme(r) == "https"))
-	writeJSON(w, 200, map[string]any{"ok": true})
+	credential.clearCookie(w, r)
+	writeMemberAuthResponse(w, http.StatusOK, format, map[string]bool{"ok": true})
 }
 
 func (s *Server) currentSiteUser(r *http.Request) (siteUser, bool) {
-	c, e := r.Cookie("gocms_user")
-	if e != nil {
-		return siteUser{}, false
-	}
-	siteID, _ := s.resolveSiteID(r, nil)
-	p, err := (member.Service{DB: s.database}).Authenticate(r.Context(), c.Value, siteID)
+	authentication, err := s.authenticateMember(r)
 	if err != nil {
 		return siteUser{}, false
 	}
-	u := siteUser{ID: p.ID, Username: p.Username, Email: p.Email, DisplayName: p.DisplayName, AvatarURL: p.AvatarURL}
-	s.attachMemberGroups(r, &u)
-	return u, true
+	user, err := s.memberUser(r, authentication.identity.Profile, authentication.siteID)
+	return user, err == nil
 }
+
 func hashToken(v string) string { return member.TokenHash(v) }
-func userCookie(v string, age int, secure bool) *http.Cookie {
-	return &http.Cookie{Name: "gocms_user", Value: v, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: age, Secure: secure}
-}

@@ -67,7 +67,8 @@ func TestAuthenticateMultiSiteScoping(t *testing.T) {
 		t.Fatalf("register failed: %v", err)
 	}
 
-	_, token, err := svc.Login(ctx, "alice", "password123", "127.0.0.1", "agent", "", 1)
+	login, err := svc.Login(ctx, LoginInput{Identifier: "alice", Password: "password123", IP: "127.0.0.1", UserAgent: "agent", CurrentToken: "", SiteID: 1})
+	token := login.Session.Token
 	if err != nil {
 		t.Fatalf("login failed: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestRegisterWithDefaultGroup(t *testing.T) {
 	}
 
 	// 2. Login specifying site 2 -> auto-joins site 2 and joins site 2 default group
-	_, _, err = svc.Login(ctx, "member1", "password123", "127.0.0.1", "test-agent", "", 2)
+	_, err = svc.Login(ctx, LoginInput{Identifier: "member1", Password: "password123", IP: "127.0.0.1", UserAgent: "test-agent", CurrentToken: "", SiteID: 2})
 	if err != nil {
 		t.Fatalf("login on site 2 failed: %v", err)
 	}

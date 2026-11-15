@@ -196,18 +196,22 @@ func (s *Server) startGoogle(w http.ResponseWriter, r *http.Request, test bool) 
 		user = -u.ID
 		session = memberoauth.Hash(adminSessionToken(r))
 	} else if in.Bind {
-		u, ok := s.currentSiteUser(r)
-		cookie, e := r.Cookie("gocms_user")
-		if !ok || e != nil {
-			memberResult(w, nil, member.ErrUnauthorized)
+		authentication, e := s.authenticateMember(r)
+		// OAuth redirects complete in a browser and must be bound to its Cookie
+		// session, never to a Bearer identity sent alongside another Cookie.
+		if e != nil || authentication.credential.transport != memberCookieTransport {
+			if e == nil {
+				e = member.ErrUnauthorized
+			}
+			memberAuthenticationError(w, authentication.credential, e)
 			return
 		}
-		if e = (member.Service{DB: s.database}).ConfirmExternalChange(r.Context(), u.ID, cookie.Value, in.Password); e != nil {
+		if e = (member.Service{DB: s.database}).ConfirmExternalChange(r.Context(), authentication.identity.ID, authentication.credential.token, in.Password); e != nil {
 			memberResult(w, nil, e)
 			return
 		}
-		user = u.ID
-		session = member.TokenHash(cookie.Value)
+		user = authentication.identity.ID
+		session = member.TokenHash(authentication.credential.token)
 	}
 	state, e := memberoauth.Random()
 	if e != nil {
@@ -365,14 +369,19 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	current := ""
-	if ck, e := r.Cookie("gocms_user"); e == nil {
+	if ck, e := r.Cookie(memberCookieName); e == nil {
 		current = ck.Value
 	}
 	if user > 0 && member.TokenHash(current) != session {
 		fail("google_failed")
 		return
 	}
-	_, token, err := (member.Service{DB: s.database}).ExternalProviderLogin(r.Context(), site, c.ProviderName(), revision, claims.Subject, claims.Email, claims.Name, claims.Verified, user, session, clientIP(r), r.UserAgent(), current)
+	result, err := (member.Service{DB: s.database}).ExternalProviderLogin(r.Context(), member.ExternalLoginInput{
+		SiteID: site, Provider: c.ProviderName(), Revision: revision,
+		Subject: claims.Subject, Email: claims.Email, DisplayName: claims.Name, EmailVerified: claims.Verified,
+		BindUserID: user, BindingSessionHash: session,
+		IP: clientIP(r), UserAgent: r.UserAgent(), CurrentToken: current,
+	})
 	if err != nil {
 		switch {
 		case errors.Is(err, member.ErrConflict):
@@ -384,13 +393,14 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if token != "" {
-		http.SetCookie(w, userCookie(token, 30*24*60*60, requestScheme(r) == "https"))
+	if result.Session.Token != "" {
+		setMemberSessionCookie(w, r, result.Session)
 	}
 	http.Redirect(w, r, safeOAuthNext(next), http.StatusSeeOther)
 }
 
-func (s *Server) memberGoogleIdentity(w http.ResponseWriter, r *http.Request, u siteUser) {
+func (s *Server) memberGoogleIdentity(w http.ResponseWriter, r *http.Request, authentication memberAuthentication) {
+	u := authentication.identity
 	svc := member.Service{DB: s.database}
 	if r.Method == http.MethodGet {
 		bound, password, e := svc.ExternalProviderStatus(r.Context(), u.ID, loginIdentityProvider(r))
@@ -408,15 +418,10 @@ func (s *Server) memberGoogleIdentity(w http.ResponseWriter, r *http.Request, u 
 		memberResult(w, nil, member.ErrInvalid)
 		return
 	}
-	cookie, e := r.Cookie("gocms_user")
-	if e != nil {
-		memberResult(w, nil, member.ErrUnauthorized)
-		return
-	}
 	if !s.memberAttempt(w, r, loginIdentityProvider(r)+"-unbind", "", 10) {
 		return
 	}
-	e = svc.UnbindProvider(r.Context(), u.ID, loginIdentityProvider(r), cookie.Value, in.Password)
+	e := svc.UnbindProvider(r.Context(), u.ID, loginIdentityProvider(r), authentication.credential.token, in.Password)
 	memberResult(w, map[string]bool{"ok": e == nil}, e)
 }
 

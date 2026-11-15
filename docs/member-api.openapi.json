@@ -3,7 +3,7 @@
   "info": {
     "title": "GoCMS Member API",
     "version": "1.0.0",
-    "description": "Cookie sessions via same-origin proxy. Password change revokes every session. See member-api.md for limits and deployment."
+    "description": "Browser Cookie sessions and native Authorization: Bearer sessions. Both use the same server-side expiry, session limits and revocation. Password change revokes every session. See member-api.md for deployment and usage."
   },
   "servers": [
     {
@@ -239,10 +239,195 @@
         "description": "同账号有效 Cookie 可替换当前会话，Token 轮换。默认最多2个有效会话，达到账号上限返回409 session_limit_reached。"
       }
     },
+    "/auth/token": {
+      "post": {
+        "operationId": "post_auth_token",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "description": "Token login succeeded. Cache-Control: no-store; no browser Cookie is set.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "user": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "integer"
+                            },
+                            "username": {
+                              "type": "string"
+                            },
+                            "email": {
+                              "type": "string"
+                            },
+                            "display_name": {
+                              "type": "string"
+                            },
+                            "avatar_url": {
+                              "type": "string"
+                            },
+                            "groups": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "username",
+                            "display_name"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "access_token": {
+                          "type": "string",
+                          "description": "Opaque secret member session credential. Store securely; never include in URLs or logs."
+                        },
+                        "token_type": {
+                          "type": "string",
+                          "const": "Bearer"
+                        },
+                        "expires_in": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 2592000,
+                          "description": "Remaining whole seconds until the persisted session expiry."
+                        }
+                      },
+                      "required": [
+                        "user",
+                        "access_token",
+                        "token_type",
+                        "expires_in"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "有效会话已达上限，error.code=session_limit_reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "identifier": {
+                    "type": "string"
+                  },
+                  "username": {
+                    "type": "string"
+                  },
+                  "password": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "password"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "description": "Returns a 30-day opaque member token without Set-Cookie. Shares login rate and session limits with Cookie login. A valid same-account Authorization: Bearer token rotates that session; Cookie is ignored. Save the new access_token after rotation. No refresh token is issued."
+      }
+    },
     "/auth/logout": {
       "post": {
         "operationId": "post_auth_logout",
-        "security": [],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          },
+          {}
+        ],
         "responses": {
           "200": {
             "description": "Success",
@@ -315,7 +500,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Revokes the selected session. Authorization takes precedence over Cookie; malformed Authorization returns 401 without Cookie fallback. Bearer logout does not modify browser cookies. Logout is idempotent for absent or already-revoked sessions."
       }
     },
     "/me": {
@@ -324,6 +510,9 @@
         "security": [
           {
             "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
           }
         ],
         "responses": {
@@ -404,6 +593,9 @@
         "security": [
           {
             "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
           }
         ],
         "responses": {
@@ -506,6 +698,9 @@
         "security": [
           {
             "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
           }
         ],
         "responses": {
@@ -599,6 +794,9 @@
         "security": [
           {
             "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
           }
         ],
         "responses": {
@@ -698,6 +896,9 @@
         "security": [
           {
             "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
           }
         ],
         "responses": {
@@ -788,6 +989,9 @@
         "security": [
           {
             "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
           }
         ],
         "responses": {
@@ -869,6 +1073,11 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "gocms_user"
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Opaque member session token returned by POST /auth/token; not a JWT or administrator API key."
       }
     }
   }

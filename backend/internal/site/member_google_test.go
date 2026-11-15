@@ -108,6 +108,15 @@ func TestGoogleLoginLifecycle(t *testing.T) {
 		t.Fatal("Google account should have no password")
 	}
 	expect(request("GET", "/api/v1/me", "", memberCookie), 200)
+	// Interactive binding must remain tied to the browser session, even if a
+	// valid Bearer credential is supplied alongside a browser cookie.
+	bearerBind := httptest.NewRequest("POST", "https://example.com/api/auth/google/start", strings.NewReader(`{"bind":true}`))
+	bearerBind.Header.Set("Content-Type", "application/json")
+	bearerBind.Header.Set("Authorization", "Bearer "+memberCookie.Value)
+	bearerBind.AddCookie(memberCookie)
+	bearerBindResponse := httptest.NewRecorder()
+	s.Handler().ServeHTTP(bearerBindResponse, bearerBind)
+	expect(bearerBindResponse, 401)
 	w = callback(state, cookie)
 	if !strings.Contains(w.Header().Get("Location"), "google_failed") {
 		t.Fatal("state replay accepted")
@@ -250,7 +259,8 @@ func TestGoogleBindingAndPermissions(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, token, e := svc.Login(ctx, "existing", "password123", "ip", "agent", "", 1)
+	login, e := svc.Login(ctx, member.LoginInput{Identifier: "existing", Password: "password123", IP: "ip", UserAgent: "agent", CurrentToken: "", SiteID: 1})
+	token := login.Session.Token
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -260,16 +270,16 @@ func TestGoogleBindingAndPermissions(t *testing.T) {
 	if e = svc.ConfirmExternalChange(ctx, p.ID, token, "password123"); e != nil {
 		t.Fatal(e)
 	}
-	if _, _, e = svc.ExternalLogin(ctx, 1, c.Revision, "subject", "old@example.com", "Name", true, 0, "", "ip", "agent", ""); e == nil {
+	if _, e = svc.ExternalProviderLogin(ctx, member.ExternalLoginInput{Provider: "google", SiteID: 1, Revision: c.Revision, Subject: "subject", Email: "old@example.com", DisplayName: "Name", EmailVerified: true, BindUserID: 0, BindingSessionHash: "", IP: "ip", UserAgent: "agent", CurrentToken: ""}); e == nil {
 		t.Fatal("registration allowed while off")
 	}
-	if _, _, e = svc.ExternalLogin(ctx, 1, c.Revision, "subject", "old@example.com", "Name", true, p.ID, member.TokenHash(token), "ip", "agent", ""); e != nil {
+	if _, e = svc.ExternalProviderLogin(ctx, member.ExternalLoginInput{Provider: "google", SiteID: 1, Revision: c.Revision, Subject: "subject", Email: "old@example.com", DisplayName: "Name", EmailVerified: true, BindUserID: p.ID, BindingSessionHash: member.TokenHash(token), IP: "ip", UserAgent: "agent", CurrentToken: ""}); e != nil {
 		t.Fatal(e)
 	}
-	if _, _, e = svc.ExternalLogin(ctx, 1, c.Revision, "subject", "old@example.com", "Name", true, 0, "", "ip", "agent", token); e != nil {
+	if _, e = svc.ExternalProviderLogin(ctx, member.ExternalLoginInput{Provider: "google", SiteID: 1, Revision: c.Revision, Subject: "subject", Email: "old@example.com", DisplayName: "Name", EmailVerified: true, BindUserID: 0, BindingSessionHash: "", IP: "ip", UserAgent: "agent", CurrentToken: token}); e != nil {
 		t.Fatal(e)
 	}
-	if shared, _, e := svc.ExternalLogin(ctx, 2, c.Revision, "subject", "old@example.com", "Name", true, 0, "", "ip", "agent", ""); e != nil || shared.ID != p.ID {
+	if shared, e := svc.ExternalProviderLogin(ctx, member.ExternalLoginInput{Provider: "google", SiteID: 2, Revision: c.Revision, Subject: "subject", Email: "old@example.com", DisplayName: "Name", EmailVerified: true, BindUserID: 0, BindingSessionHash: "", IP: "ip", UserAgent: "agent", CurrentToken: ""}); e != nil || shared.User.ID != p.ID {
 		t.Fatalf("shared identity: %v", e)
 	}
 
@@ -281,7 +291,8 @@ func TestGoogleBindingAndPermissions(t *testing.T) {
 		t.Fatal(e)
 	}
 	// Login above rotated the original token; use the current session to unbind.
-	_, token, e = svc.Login(ctx, "existing", "password123", "ip", "agent", "", 1)
+	login, e = svc.Login(ctx, member.LoginInput{Identifier: "existing", Password: "password123", IP: "ip", UserAgent: "agent", CurrentToken: "", SiteID: 1})
+	token = login.Session.Token
 	if e != nil {
 		t.Fatal(e)
 	}

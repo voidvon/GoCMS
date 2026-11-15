@@ -49,6 +49,11 @@ func (s *Server) memberPasswordRecovery(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if strings.TrimSuffix(r.URL.Path, "/") == "/api/v1/auth/reset-password" {
+		credential, err := requestMemberCredential(r)
+		if err != nil {
+			memberAuthenticationError(w, credential, err)
+			return
+		}
 		var in struct {
 			Token    string `json:"token"`
 			Password string `json:"password"`
@@ -66,7 +71,7 @@ func (s *Server) memberPasswordRecovery(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if e == nil {
-			http.SetCookie(w, userCookie("", -1, requestScheme(r) == "https"))
+			credential.clearCookie(w, r)
 		}
 		memberResult(w, map[string]bool{"reauthenticate": true}, e)
 		return
