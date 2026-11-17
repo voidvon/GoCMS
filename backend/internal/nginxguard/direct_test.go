@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func directFixture(t *testing.T) *Direct {
@@ -27,11 +28,8 @@ func directFixture(t *testing.T) *Direct {
 		}
 	}
 	d := NewDirect(c)
-	d.engine.httpPath = filepath.Join(dir, "state", "http.conf")
-	d.engine.serverPath = filepath.Join(dir, "state", "server.conf")
 	d.engine.statePath = filepath.Join(dir, "state", "snapshot.json")
 	d.engine.logPath = filepath.Join(dir, "logs", "probes.log")
-	d.rotation = ""
 	return d
 }
 
@@ -45,19 +43,24 @@ func TestDirectManageConfigAndRules(t *testing.T) {
 	if err != nil || result.Digest != Digest(s) {
 		t.Fatalf("apply: %+v %v", result, err)
 	}
-	for _, item := range []struct{ path, include string }{{c.NginxConfig, d.engine.httpPath}, {c.ServerConfig, d.engine.serverPath}} {
-		text, err := os.ReadFile(item.path)
-		if err != nil || strings.Count(string(text), "include "+item.include+";") != 1 {
-			t.Fatalf("missing dedicated include: %s %v", text, err)
-		}
+	main, err := os.ReadFile(c.NginxConfig)
+	if err != nil || !bytes.Equal(main, originalMain) {
+		t.Fatalf("main configuration changed: %s %v", main, err)
 	}
-	for name, original := range map[string][]byte{"nginx.conf.before": originalMain, "server.conf.before": originalServer} {
-		backup, err := os.ReadFile(filepath.Join(filepath.Dir(d.engine.statePath), name))
-		if err != nil || !bytes.Equal(backup, original) {
-			t.Fatalf("original backup %s: %v", name, err)
-		}
+	backup, err := os.ReadFile(filepath.Join(filepath.Dir(d.engine.statePath), "server.conf.before"))
+	if err != nil || !bytes.Equal(backup, originalServer) {
+		t.Fatalf("original backup: %v", err)
+	}
+	files, err := os.ReadDir(filepath.Dir(d.engine.statePath))
+	if err != nil || len(files) != 1 || files[0].Name() != "server.conf.before" {
+		t.Fatalf("unexpected extra configuration or state file: %+v %v", files, err)
 	}
 	server, _ := os.ReadFile(c.ServerConfig)
+	for _, marker := range []string{httpBegin, httpEnd, serverBegin, serverEnd} {
+		if strings.Count(string(server), marker) != 1 {
+			t.Fatalf("missing single-file managed block: %s", marker)
+		}
+	}
 	if !bytes.Contains(server, []byte("# Existing panel and TLS settings stay in place.")) {
 		t.Fatal("existing configuration lost")
 	}
@@ -69,14 +72,19 @@ func TestDirectManageConfigAndRules(t *testing.T) {
 	if !bytes.Equal(before, after) {
 		t.Fatal("unchanged direct sync reloaded Nginx")
 	}
+	// Panel changes outside the managed blocks survive subsequent rule updates.
+	server = bytes.ReplaceAll(server, []byte("# Existing panel and TLS settings stay in place."), []byte("# Changed in the panel after synchronization."))
+	if err := os.WriteFile(c.ServerConfig, server, 0700); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Lstat(c.SocketPath); !os.IsNotExist(err) {
 		t.Fatalf("direct mode created an agent socket: %v", err)
 	}
 	if _, err := d.Apply(Snapshot{}); err != nil {
 		t.Fatal(err)
 	}
-	http, _ := os.ReadFile(d.engine.httpPath)
-	if bytes.Contains(http, []byte("203.0.113.")) {
+	cleared, _ := os.ReadFile(c.ServerConfig)
+	if bytes.Contains(cleared, []byte("203.0.113.")) || !bytes.Contains(cleared, []byte("# Changed in the panel after synchronization.")) {
 		t.Fatal("disable did not clear Nginx rules")
 	}
 	line := `{"time":"2026-11-17T10:00:00+08:00","host":"alpha.example.test","ip":"203.0.113.1","path":"/server.key","status":404}` + "\n"
@@ -109,7 +117,7 @@ func TestDirectInitialFailureRestoresPanelConfiguration(t *testing.T) {
 					t.Fatalf("panel file not restored: %s %v", path, err)
 				}
 			}
-			for _, path := range []string{d.engine.httpPath, d.engine.serverPath, d.engine.statePath} {
+			for _, path := range []string{filepath.Join(filepath.Dir(d.engine.statePath), "http.conf"), filepath.Join(filepath.Dir(d.engine.statePath), "server.conf"), d.engine.statePath} {
 				if _, err := os.Lstat(path); !os.IsNotExist(err) {
 					t.Fatalf("partial installation retained: %s %v", path, err)
 				}
@@ -136,7 +144,7 @@ func TestDirectRejectsConcurrentAgent(t *testing.T) {
 	}
 }
 
-func TestDirectIncludesPassRealNginxValidation(t *testing.T) {
+func TestDirectSingleFilePassesRealNginxValidation(t *testing.T) {
 	binary, err := exec.LookPath("nginx")
 	if err != nil {
 		t.Skip("nginx unavailable")
@@ -149,6 +157,83 @@ func TestDirectIncludesPassRealNginxValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := d.Apply(exampleSnapshot()); err != nil {
-		t.Fatalf("direct include configuration rejected by Nginx: %v", err)
+		t.Fatalf("single site configuration rejected by Nginx: %v", err)
+	}
+}
+
+func TestDirectMigratesLegacySiteIncludeWithoutChangingMain(t *testing.T) {
+	binary, err := exec.LookPath("nginx")
+	if err != nil {
+		t.Skip("nginx unavailable")
+	}
+	d := directFixture(t)
+	c := d.engine.config
+	// Load the old http declarations alongside the new file to detect variable
+	// or log-format collisions left by v0.1.61's main-config include.
+	h, _, err := Render(exampleSnapshot(), time.Now(), d.engine.logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	main, _ := os.ReadFile(c.NginxConfig)
+	main = bytes.Replace(main, []byte("http {"), []byte("http {\n"+h), 1)
+	if err := os.WriteFile(c.NginxConfig, main, 0400); err != nil {
+		t.Fatal(err)
+	}
+	site, _ := os.ReadFile(c.ServerConfig)
+	site, err = IncludeInBlock(site, "server", serverFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(c.ServerConfig, site, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Skip only the pre-change check; the generated result uses real nginx -t.
+	quoted := "'" + strings.ReplaceAll(binary, "'", "'\\''") + "'"
+	script := "#!/bin/sh\nif [ \"$1\" = '-s' ]; then exit 0; fi\nif [ ! -f \"$0.initial\" ]; then touch \"$0.initial\"; exit 0; fi\nexec " + quoted + " \"$@\"\n"
+	if err := os.WriteFile(c.NginxBinary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Apply(exampleSnapshot()); err != nil {
+		t.Fatal(err)
+	}
+	updatedMain, _ := os.ReadFile(c.NginxConfig)
+	if !bytes.Equal(main, updatedMain) {
+		t.Fatal("legacy main config was changed")
+	}
+	updatedSite, _ := os.ReadFile(c.ServerConfig)
+	if bytes.Contains(updatedSite, []byte("include "+serverFile)) {
+		t.Fatal("legacy site include still active")
+	}
+}
+
+func TestSingleFileRejectsIncompleteMarkersAndAmbiguousServers(t *testing.T) {
+	for _, text := range []string{httpBegin + "server {}", "server {}" + serverEnd, "server {} server {}"} {
+		if _, err := RenderSingleFile([]byte(text), exampleSnapshot(), time.Now(), "/tmp/probes.log"); err == nil {
+			t.Fatalf("unsafe site file accepted: %q", text)
+		}
+	}
+}
+
+func TestDirectBoundsProbeLogWithoutLogrotateConfiguration(t *testing.T) {
+	d := directFixture(t)
+	if err := os.MkdirAll(filepath.Dir(d.engine.logPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(d.engine.logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(20 << 20); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	f.Close()
+	batch, err := d.Events("")
+	if err != nil || batch.Cursor != "" {
+		t.Fatalf("log trim: %+v %v", batch, err)
+	}
+	info, err := os.Stat(d.engine.logPath)
+	if err != nil || info.Size() != 0 {
+		t.Fatalf("log unbounded: %v %v", info, err)
 	}
 }

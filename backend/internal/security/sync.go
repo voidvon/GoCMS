@@ -174,9 +174,12 @@ func (s *Service) directController(p Platform) *nginxguard.Direct {
 }
 
 func (s *Service) Preview(ctx context.Context) (string, string, error) {
-	_, want, err := s.desired(ctx)
+	v, want, err := s.desired(ctx)
 	if err != nil {
 		return "", "", err
+	}
+	if v.platform.NginxMode == "direct" {
+		return nginxguard.SingleFileFragments(want, time.Now(), "/var/log/gocms-security/probes.log")
 	}
 	return nginxguard.Render(want, time.Now(), "/var/log/gocms-security/probes.log")
 }

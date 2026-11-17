@@ -19,6 +19,18 @@ func IncludeInBlock(data []byte, block, include string) ([]byte, error) {
 	if strings.Contains(string(data), "\n    "+line+" # GoCMS security\n") {
 		return data, nil
 	}
+	offset, err := blockOffset(data, block)
+	if err != nil {
+		return nil, err
+	}
+	insert := []byte("\n    " + line + " # GoCMS security\n")
+	result := append([]byte{}, data[:offset]...)
+	result = append(result, insert...)
+	result = append(result, data[offset:]...)
+	return result, nil
+}
+
+func blockOffset(data []byte, block string) (int, error) {
 	depth, count, offset := 0, 0, -1
 	previous := ""
 	for i := 0; i < len(data); {
@@ -59,7 +71,7 @@ func IncludeInBlock(data []byte, block, include string) ([]byte, error) {
 		if c == '}' {
 			depth--
 			if depth < 0 {
-				return nil, errors.New("unbalanced Nginx blocks")
+				return 0, errors.New("unbalanced Nginx blocks")
 			}
 			previous = ""
 			i++
@@ -87,13 +99,9 @@ func IncludeInBlock(data []byte, block, include string) ([]byte, error) {
 		previous = string(data[start:i])
 	}
 	if depth != 0 || count != 1 {
-		return nil, fmt.Errorf("expected exactly one top-level %s block, found %d", block, count)
+		return 0, fmt.Errorf("expected exactly one top-level %s block, found %d", block, count)
 	}
-	insert := []byte("\n    " + line + " # GoCMS security\n")
-	result := append([]byte{}, data[:offset]...)
-	result = append(result, insert...)
-	result = append(result, data[offset:]...)
-	return result, nil
+	return offset, nil
 }
 
 // Install is an explicit, one-time root operation from the downloaded bundle.
