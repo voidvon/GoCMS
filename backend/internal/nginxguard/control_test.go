@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -48,7 +49,7 @@ func TestRootInitializationAndSingleFileControl(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if loaded != installed {
+		if !reflect.DeepEqual(loaded, installed) {
 			return errors.New("installed policy differs")
 		}
 		response, err := l.execute(context.Background(), loaded, controlRequest{Protocol: controlProtocol, Action: "status", Config: c})

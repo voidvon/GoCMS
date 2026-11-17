@@ -288,6 +288,32 @@ func TestSecuritySyncNeedsRootInitialization(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), "init_command") || !strings.Contains(w.Body.String(), "nginx setup") || strings.Contains(w.Body.String(), "init-nginx") {
 		t.Fatalf("setup instructions: %d %s", w.Code, w.Body.String())
 	}
+	var instructions struct {
+		Command string `json:"init_command"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &instructions); err != nil || strings.HasPrefix(instructions.Command, "sudo ") {
+		t.Fatalf("root setup command depends on sudo before it can explain installation: %s %v", instructions.Command, err)
+	}
+}
+
+func TestSecurityNginxInitializationDiscoversDomainsWithoutEnablingRules(t *testing.T) {
+	s, database, token, _ := newSiteAdminTestServer(t)
+	if _, err := database.Exec(`UPDATE gocms_site SET domain='alpha.example.test',aliases='["alias.example.test"]' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if w := siteAdminRequest(s, token, "PUT", "/api/admin/security/policy", "1", `{"enabled":true,"window_seconds":300,"threshold":2,"ban_scope":"global","ban_seconds":0,"paths":["/server.key"]}`); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	if w := siteAdminRequest(s, token, "POST", "/api/admin/security/entries?scope=global", "1", `{"network":"203.0.113.25","kind":"deny","reason":"test"}`); w.Code != 201 {
+		t.Fatal(w.Body.String())
+	}
+	_, snapshot, err := security.NginxInitialization(context.Background(), database)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Tenants) != 1 || len(snapshot.Tenants[0].Hosts) != 2 || len(snapshot.Rules) != 0 || len(snapshot.Tenants[0].Paths) != 0 {
+		t.Fatalf("disabled setup lost domains or activated rules: %+v", snapshot)
+	}
 }
 
 type securityTestController struct {

@@ -17,14 +17,18 @@ func exampleSnapshot() Snapshot {
 }
 
 func TestNginxTenantRulesWithRealServer(t *testing.T) {
-	testNginxTenantRulesWithRealServer(t, false)
+	testNginxTenantRulesWithRealServer(t, "fragments")
 }
 
 func TestNginxSingleFileTenantRulesWithRealServer(t *testing.T) {
-	testNginxTenantRulesWithRealServer(t, true)
+	testNginxTenantRulesWithRealServer(t, "single")
 }
 
-func testNginxTenantRulesWithRealServer(t *testing.T, single bool) {
+func TestNginxDedicatedTenantRulesWithRealServer(t *testing.T) {
+	testNginxTenantRulesWithRealServer(t, "dedicated")
+}
+
+func testNginxTenantRulesWithRealServer(t *testing.T, mode string) {
 	binary, err := exec.LookPath("nginx")
 	if err != nil {
 		t.Skip("nginx unavailable")
@@ -42,13 +46,25 @@ func testNginxTenantRulesWithRealServer(t *testing.T, single bool) {
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 	config := fmt.Sprintf("daemon off; master_process off; pid %s/nginx.pid; error_log %s/error.log; events {} http { %s server { listen 127.0.0.1:%d; set_real_ip_from 127.0.0.1; real_ip_header X-Test-IP; %s location / { return 200 'ok'; } } }", dir, dir, h, port, s)
-	if single {
+	if mode == "single" {
 		site := fmt.Sprintf("server { listen 127.0.0.1:%d; set_real_ip_from 127.0.0.1; real_ip_header X-Test-IP; location / { return 200 'ok'; } }", port)
 		data, err := RenderSingleFile([]byte(site), exampleSnapshot(), time.Now(), logPath)
 		if err != nil {
 			t.Fatal(err)
 		}
 		config = fmt.Sprintf("daemon off; master_process off; pid %s/nginx.pid; error_log %s/error.log; events {} http { %s }", dir, dir, data)
+	}
+	if mode == "dedicated" {
+		rules, hook, format, err := dedicatedFragments(exampleSnapshot(), logPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "gocms.conf")
+		if err := os.WriteFile(path, rules, 0600); err != nil {
+			t.Fatal(err)
+		}
+		// Match a panel wildcard that loads the generated file after its server.
+		config = fmt.Sprintf("daemon off; master_process off; pid %s/nginx.pid; error_log %s/error.log; events {} http { %s server { listen 127.0.0.1:%d; set_real_ip_from 127.0.0.1; real_ip_header X-Test-IP; %s location / { return 200 'ok'; } } include %s; }", dir, dir, format, port, hook, path)
 	}
 	filename := filepath.Join(dir, "nginx.conf")
 	if err := os.WriteFile(filename, []byte(config), 0600); err != nil {

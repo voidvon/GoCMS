@@ -14,9 +14,10 @@ import (
 // Direct keeps security rules in the selected site file and adds a main-config
 // include only when Nginx does not already load that file.
 type Direct struct {
-	mu     sync.Mutex
-	engine *engine
-	ready  bool
+	mu      sync.Mutex
+	engine  *engine
+	ready   bool
+	targets []serverTarget
 }
 
 func NewDirect(c Config) *Direct {
@@ -98,6 +99,9 @@ func (d *Direct) initialize() error {
 func (d *Direct) apply(s Snapshot) error {
 	if err := Validate(s); err != nil {
 		return err
+	}
+	if len(d.targets) > 0 {
+		return d.applyDedicated(s)
 	}
 	if !d.ready {
 		if err := d.initialize(); err != nil {

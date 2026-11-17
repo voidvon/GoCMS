@@ -53,7 +53,7 @@ make release          # 更新版本、创建 tag 并发布 GitHub Release
 
 后台“支付管理”支持按站点配置 PingPong Checkout v4，提供商品或服务的一次性付款、多明细订单、订单查询、全额退款与人工交付记录。独立购物前台提供购物车、结算、订单和登录注册页面；商品展示继续复用生成的 HTML。超级管理员可在后台生成、文件导入及备份支付加密密钥，接管已有环境变量密钥；支持渠道 JSON 导入和购买模板安装；分类开启销售后，直接在内容编辑中配置多种规格及各自价格，复用内容封面，主题通过公开交易 API 接入，详见 [支付模块接入说明](docs/payments.md)。
 
-版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 首次发布 `v0.1.0`，之后每次递增 patch 版本；`0.1.99` 之后进入 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub，且已安装 `zip` 命令。Release 仅构建并上传 Linux amd64 的 `gocms-<tag>-linux-amd64.zip` 压缩包，包内包含对应平台的单文件可执行文件。更新器使用 Go 标准库解压 ZIP，不依赖 Linux 安装第三方工具。可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
+版本号保存在 `frontend/package.json`，从 `0.1.0` 开始。`make release` 每次递增补丁号，补丁号达到 `20` 后进位到次版本，次版本和补丁号均达到 `20` 后进位到主版本，例如 `0.1.19 → 0.1.20 → 0.2.0`、`0.20.20 → 1.0.0`。历史版本 `0.1.66` 的下一版本为 `0.2.0`。发布前需要保持 Git 工作区干净，并确保已通过 `gh auth login` 登录 GitHub，且已安装 `zip` 命令。Release 仅构建并上传 Linux amd64 的 `gocms-<tag>-linux-amd64.zip` 压缩包，包内包含对应平台的单文件可执行文件。更新器使用 Go 标准库解压 ZIP，不依赖 Linux 安装第三方工具。可以使用 `RELEASE_REMOTE=upstream make release` 指定其他 Git remote。
 
 后台“关于 GoCMS”中的“检查更新”会读取 GitHub 最新 Release。服务检测到对应平台的新版本后会下载 ZIP 压缩包、解压可执行文件、替换当前程序并自动重启；主题、模板、业务图片、数据库和已发布网站目录都不会被更新流程覆盖。`v0.1.1` 的旧更新器只支持裸可执行文件，升级到 ZIP 版本前需要手动替换一次程序。
 
@@ -138,7 +138,7 @@ API Key 与后台登录会话使用相同的管理员权限：可调用所属管
 
 ## 安全防护
 
-后台 **平台管理 → 安全防护** 支持扫描检测、自动封禁、IP/CIDR 黑白名单及安全记录。Nginx 接入采用同一 GoCMS 程序的一次性 root 初始化：后台保存路径和运行用户后，在服务器执行 `sudo ./gocms nginx setup`，日常由 `www` 等普通用户通过受限授权同步名单，无需接入包、Socket 或其他常驻服务。规则集中写入所选站点配置（如 `gocms.conf`），缺少主配置引用时自动备份并补上 include，支持检查、失败回滚和到期解封。首次接入与接口见 [安全防护与 Nginx 接入](docs/security-protection.md)。扫描检测与 Nginx 同步默认关闭，默认仅信任本机回环代理。
+后台 **平台管理 → 安全防护** 支持扫描检测、自动封禁、IP/CIDR 黑白名单及安全记录。Nginx 接入采用同一 GoCMS 程序的一次性 root 初始化：后台保存路径和运行用户后，在服务器以 root 执行 `./gocms nginx setup`，日常由 `www` 等普通用户通过受限授权同步名单，无需接入包、Socket 或其他常驻服务。初始化自动创建 `gocms.conf`，按已配置域名为宝塔现有站点添加拦截入口，缺少引用时自动补齐 include，保留原反向代理与证书配置，支持检查、失败回滚和到期解封。缺少 `visudo` 时直接提示安装 `sudo` 软件包的步骤。首次接入与接口见 [安全防护与 Nginx 接入](docs/security-protection.md)。扫描检测与 Nginx 同步默认关闭，默认仅信任本机回环代理。
 
 ## 访问统计
 

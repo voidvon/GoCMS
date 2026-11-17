@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { dirname, join, resolve } from "node:path"
+import { formatVersion, nextVersion, parseVersion } from "./release-version.mjs"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const packagePath = resolve(root, "frontend/package.json")
@@ -62,34 +63,6 @@ function readJson(path) {
 
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
-}
-
-function parseVersion(value) {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value)
-  if (!match) {
-    fail(`版本号 ${value} 不符合 X.Y.Z 格式`)
-  }
-
-  const version = match.slice(1).map(Number)
-  if (version[0] !== 0 || version[1] < 1 || version[2] > 99) {
-    fail(`版本号 ${value} 不符合 0.1.x 的发布规则`)
-  }
-  return { major: version[0], minor: version[1], patch: version[2] }
-}
-
-function formatVersion({ major, minor, patch }) {
-  return `${major}.${minor}.${patch}`
-}
-
-function nextVersion(value) {
-  const version = parseVersion(value)
-  if (version.patch < 99) {
-    version.patch += 1
-  } else {
-    version.minor += 1
-    version.patch = 0
-  }
-  return formatVersion(version)
 }
 
 function localTagExists(tag) {

@@ -34,6 +34,7 @@ build:
 generate:
 	cd backend && go run ./cmd/generate
 test:
+	node --test scripts/release-version.test.mjs
 	cd frontend && npm run build
 	cd storefront && npm run build
 	node scripts/sync-embedded.mjs

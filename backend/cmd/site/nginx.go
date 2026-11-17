@@ -55,7 +55,7 @@ func setupNginx(args []string) error {
 	if err != nil {
 		return fmt.Errorf("读取后台已保存的 Nginx 接入设置失败：%w", err)
 	}
-	fmt.Printf("配置 GoCMS 的 Nginx 接入：\n运行用户：%s\n可执行文件：%s\n主配置：%s\n站点配置：%s\n", config.RunUser, config.NginxBinary, config.NginxConfig, config.ServerConfig)
+	fmt.Printf("配置 GoCMS 的 Nginx 接入：\n运行用户：%s\n可执行文件：%s\n主配置：%s\n安全规则文件（不存在时自动创建）：%s\n", config.RunUser, config.NginxBinary, config.NginxConfig, config.ServerConfig)
 	if err := nginxguard.Initialize(ctx, config, snapshot); err != nil {
 		return err
 	}

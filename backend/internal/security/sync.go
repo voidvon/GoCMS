@@ -190,5 +190,13 @@ func NginxInitialization(ctx context.Context, database *sql.DB) (nginxguard.Conf
 	if err != nil {
 		return nginxguard.Config{}, nginxguard.Snapshot{}, err
 	}
+	// Root setup needs domain ownership even when synchronization is disabled.
+	// Keep discovery data but do not activate disabled rules or scan logging.
+	if !v.platform.NginxEnabled {
+		snapshot.Tenants = append([]nginxguard.Tenant{}, v.snapshot.Tenants...)
+		for i := range snapshot.Tenants {
+			snapshot.Tenants[i].Paths = nil
+		}
+	}
 	return v.platform.ControlConfig(), snapshot, nil
 }

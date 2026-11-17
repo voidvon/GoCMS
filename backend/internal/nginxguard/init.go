@@ -74,7 +74,7 @@ func validateSudoContents(binary, dir string, data []byte) error {
 
 // initializeWithLayout has no persistent service. Every installed executable,
 // policy and ancestor stays root-owned; failures restore only files we changed.
-func initializeWithLayout(ctx context.Context, l controlLayout, c Config, snapshot Snapshot, source, visudo string, uid int, verify func(installation) error) error {
+func initializeWithLayout(ctx context.Context, l controlLayout, c Config, snapshot Snapshot, source, visudo string, uid int, verify func(installation) error) (initErr error) {
 	if err := c.Validate(); err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func initializeWithLayout(ctx context.Context, l controlLayout, c Config, snapsh
 	if err := Validate(snapshot); err != nil {
 		return err
 	}
-	for _, path := range []string{c.NginxBinary, c.NginxConfig, c.ServerConfig, l.sudoersMain} {
+	for _, path := range []string{c.NginxBinary, c.NginxConfig, l.sudoersMain} {
 		if err := checkTrustedPath(path, false, l.owner); err != nil {
 			return err
 		}
@@ -99,6 +99,38 @@ func initializeWithLayout(ctx context.Context, l controlLayout, c Config, snapsh
 		return err
 	}
 	defer unlock()
+	rules, err := rememberFile(c.ServerConfig)
+	if err != nil {
+		return err
+	}
+	trusted := c.ServerConfig
+	if !rules.exists {
+		trusted = filepath.Dir(trusted)
+	}
+	if err := checkTrustedPath(trusted, !rules.exists, l.owner); err != nil {
+		return err
+	}
+	var targets []serverTarget
+	if !rules.exists || len(bytes.TrimSpace(rules.data)) == 0 || bytes.HasPrefix(rules.data, []byte(dedicatedHeader)) {
+		if !rules.exists || len(bytes.TrimSpace(rules.data)) == 0 {
+			bootstrap, _, _, err := dedicatedFragments(Snapshot{}, l.log)
+			if err != nil {
+				return err
+			}
+			if err := atomicFile(c.ServerConfig, bootstrap, 0600); err != nil {
+				return err
+			}
+			defer func() {
+				if initErr != nil {
+					initErr = errors.Join(initErr, rules.restore())
+				}
+			}()
+		}
+		targets, err = discoverTargets(c, snapshot, l.owner)
+		if err != nil {
+			return err
+		}
+	}
 	paths := []string{l.binary, filepath.Join(l.state, "control.json"), l.sudoers, l.sudoersMain}
 	previous := make([]savedFile, len(paths))
 	for i, path := range paths {
@@ -112,7 +144,7 @@ func initializeWithLayout(ctx context.Context, l controlLayout, c Config, snapsh
 			}
 		}
 	}
-	installed := installation{Protocol: controlProtocol, InitializedAt: time.Now().UTC().Format(time.RFC3339), UID: uid, Config: c}
+	installed := installation{Protocol: controlProtocol, InitializedAt: time.Now().UTC().Format(time.RFC3339), UID: uid, Config: c, Targets: targets}
 	raw, err := json.MarshalIndent(installed, "", "  ")
 	if err != nil {
 		return err
@@ -166,6 +198,7 @@ func initializeWithLayout(ctx context.Context, l controlLayout, c Config, snapsh
 		return rollback(fmt.Errorf("无法以 %s 验证免密受限授权：%w", c.RunUser, err))
 	}
 	direct := NewDirect(c)
+	direct.targets = targets
 	direct.engine.backupDir, direct.engine.logPath = l.state, l.log
 	if _, err := direct.Apply(snapshot); err != nil {
 		return rollback(err)
@@ -191,9 +224,9 @@ func Initialize(ctx context.Context, c Config, snapshot Snapshot) error {
 	if err != nil {
 		return err
 	}
-	visudo, err := exec.LookPath("visudo")
+	visudo, err := findVisudo(exec.LookPath)
 	if err != nil {
-		return errors.New("服务器缺少 visudo，请先安装 sudo 后重新执行 nginx setup")
+		return err
 	}
 	for _, binary := range []string{visudo, "/usr/bin/sudo"} {
 		if err := checkTrustedPath(binary, false, 0); err != nil {
@@ -222,4 +255,20 @@ func Initialize(ctx context.Context, c Config, snapshot Snapshot) error {
 		}
 		return nil
 	})
+}
+
+func findVisudo(lookPath func(string) (string, error)) (string, error) {
+	// BaoTa terminals may omit sbin from PATH even in a root shell.
+	for _, candidate := range []string{"/usr/sbin/visudo", "/sbin/visudo", "/usr/local/sbin/visudo", "visudo"} {
+		if path, err := lookPath(candidate); err == nil {
+			return path, nil
+		}
+	}
+	return "", errors.New("未找到 visudo。visudo 随 sudo 软件包安装，用于检查 GoCMS 的受限授权配置。\n" +
+		"请在宝塔终端以 root 按服务器系统执行一种安装命令：\n" +
+		"  Ubuntu / Debian：apt update && apt install -y sudo\n" +
+		"  Rocky Linux / AlmaLinux / 新版 CentOS：dnf install -y sudo\n" +
+		"  旧版 CentOS：yum install -y sudo\n" +
+		"  Alpine Linux：apk add sudo\n" +
+		"安装后执行 /usr/sbin/visudo -V 验证，再重新执行后台提供的 nginx setup 命令；原命令中的 -db 参数请保留。")
 }

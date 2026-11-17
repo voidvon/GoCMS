@@ -29,10 +29,11 @@ type SetupStatus struct {
 }
 
 type installation struct {
-	Protocol      int    `json:"protocol"`
-	InitializedAt string `json:"initialized_at"`
-	UID           int    `json:"uid"`
-	Config        Config `json:"config"`
+	Protocol      int            `json:"protocol"`
+	InitializedAt string         `json:"initialized_at"`
+	UID           int            `json:"uid"`
+	Config        Config         `json:"config"`
+	Targets       []serverTarget `json:"targets,omitempty"`
 }
 
 type controlRequest struct {
@@ -194,12 +195,18 @@ func (l controlLayout) execute(ctx context.Context, installed installation, requ
 		return response, err
 	}
 	direct := NewDirect(installed.Config)
+	direct.targets = installed.Targets
 	direct.engine.backupDir = l.state
 	direct.engine.logPath = l.log
 	switch request.Action {
 	case "apply":
 		for _, path := range []string{installed.Config.NginxBinary, installed.Config.NginxConfig, installed.Config.ServerConfig} {
 			if err := checkTrustedPath(path, false, l.owner); err != nil {
+				return response, err
+			}
+		}
+		for _, target := range installed.Targets {
+			if err := checkTrustedPath(target.Path, false, l.owner); err != nil {
 				return response, err
 			}
 		}

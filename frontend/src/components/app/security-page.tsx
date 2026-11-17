@@ -213,7 +213,7 @@ export function SecurityPage({ user }: { user: AdminUser }) {
         </div>
         <div className="space-y-3 rounded-xl border p-4">
           <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-medium">一次性 root 初始化</h3><Badge variant={nginx?.setup.ready ? "secondary" : "outline"}>{nginx?.setup.ready ? "已授权" : "待初始化"}</Badge></div>
-          <p className="text-sm leading-6 text-muted-foreground">先保存下方接入设置，再在宝塔终端以 root 执行以下命令。初始化会备份配置、补齐 include 并授权同一 GoCMS 程序执行固定的 Nginx 管理操作。</p>
+          <p className="text-sm leading-6 text-muted-foreground">先保存下方接入设置，再在宝塔终端以 root 执行以下命令。初始化会自动创建安全规则文件、接入对应站点并补齐 include，备份配置后授权同一 GoCMS 程序执行固定的 Nginx 管理操作。</p>
           {nginx?.init_command && <div className="flex items-start gap-2"><ScrollArea orientation="horizontal" className="min-w-0 flex-1 rounded-lg bg-muted" contentClassName="p-3"><code className="whitespace-nowrap text-xs">{nginx.init_command}</code></ScrollArea><Button type="button" variant="outline" size="icon" aria-label="复制 Nginx 初始化命令" onClick={() => void act(() => navigator.clipboard.writeText(nginx.init_command), "初始化命令已复制")}><Copy className="size-4" /></Button></div>}
           {nginx?.setup.message && <p className="break-words text-xs leading-5 text-muted-foreground">{nginx.setup.message}</p>}
           {nginx?.setup.initialized_at && <p className="text-xs text-muted-foreground">上次初始化：<TimeText value={nginx.setup.initialized_at} /></p>}
@@ -222,8 +222,8 @@ export function SecurityPage({ user }: { user: AdminUser }) {
         {platform && <form onSubmit={savePlatform} className="space-y-5"><fieldset disabled={pending} className="space-y-5">
           <Field label="可信代理 IP / 网段" id="security-proxies" hint="每行一条，仅信任实际反向代理。GoCMS 与 Nginx 同机时通常填写 127.0.0.1/32 和 ::1/128；使用 CDN 时，还需在 Nginx 配置可信的真实 IP 来源。"><Textarea id="security-proxies" rows={3} placeholder={"127.0.0.1/32\n::1/128"} className="font-mono" value={proxyText} onChange={e => setProxyText(e.target.value)} /></Field>
           <div className="flex items-center justify-between gap-4 rounded-xl border p-4"><div><Label htmlFor="security-nginx-enabled">启用 Nginx 名单同步</Label><p className="mt-1 text-xs leading-5 text-muted-foreground">保存后自动同步；关闭后仍需完成一次同步以清除 Nginx 中的规则。</p></div><Switch id="security-nginx-enabled" checked={platform.nginx_enabled} onCheckedChange={nginx_enabled => setPlatform({ ...platform, nginx_enabled })} /></div>
-          <div className="rounded-xl border p-4"><h3 className="mb-2 text-sm font-medium">Nginx 配置路径</h3><p className="mb-4 text-xs leading-5 text-muted-foreground">安全规则集中保存在所选站点配置的 GoCMS 标记区。已有引用会沿用，缺少时自动备份主配置并补上 include。</p><div className="grid gap-4 sm:grid-cols-2">{([
-            ["nginx_binary", "Nginx 可执行文件"], ["nginx_config", "Nginx 主配置文件"], ["server_config", "宝塔站点配置文件"], ["run_user", "GoCMS 系统运行用户"],
+          <div className="rounded-xl border p-4"><h3 className="mb-2 text-sm font-medium">Nginx 配置路径</h3><p className="mb-4 text-xs leading-5 text-muted-foreground">安全规则集中写入 gocms.conf，不存在时由初始化命令自动创建，无需手工建文件或添加 include。初始化按后台配置的域名识别宝塔已有站点，自动添加拦截入口并保留反向代理与证书配置。</p><div className="grid gap-4 sm:grid-cols-2">{([
+            ["nginx_binary", "Nginx 可执行文件"], ["nginx_config", "Nginx 主配置文件"], ["server_config", "GoCMS 安全规则文件"], ["run_user", "GoCMS 系统运行用户"],
           ] as const).map(([key, label]) => <Field key={key} label={label} id={`security-${key}`}><Input id={`security-${key}`} required className="font-mono" value={platform[key]} onChange={e => setPlatform({ ...platform, [key]: e.target.value })} /></Field>)}</div></div>
         </fieldset><Button type="submit" disabled={pending}>保存平台设置</Button></form>}
         {nginx && <details className="rounded-xl border p-4"><summary className="cursor-pointer text-sm">查看待同步配置</summary><ScrollArea orientation="both" className="mt-3 max-h-80" contentClassName="p-1"><pre className="text-xs leading-5">{nginx.http_config}{"\n"}{nginx.server_config}</pre></ScrollArea></details>}
