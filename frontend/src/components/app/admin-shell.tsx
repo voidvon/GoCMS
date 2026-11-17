@@ -24,6 +24,7 @@ import {
   UserCheck,
   CreditCard,
   Truck,
+  ShieldCheck,
 } from "lucide-react"
 
 import { logout, type AdminUser } from "@/lib/api"
@@ -63,6 +64,7 @@ import { HeaderActionsProvider, HeaderActionsSlot } from "@/components/app/heade
 import { DashboardPage } from "@/components/app/dashboard-page"
 
 const MailSettings = lazy(() => import("@/components/app/mail-settings").then((module) => ({ default: module.MailSettings })))
+const SecurityPage = lazy(() => import("@/components/app/security-page").then((module) => ({ default: module.SecurityPage })))
 const GeographyPage = lazy(() => import("@/components/app/geography-page").then((module) => ({ default: module.GeographyPage })))
 const MembersPage = lazy(() => import("@/components/app/member-login-settings").then((module) => ({ default: module.MembersPage })))
 const MemberLoginSettings = lazy(() => import("@/components/app/member-login-settings").then((module) => ({ default: module.MemberLoginSettings })))
@@ -121,6 +123,7 @@ const mainNavItems: NavigationItem[] = [
 ]
 
 const platformNavItems: NavigationItem[] = [
+  { id: "security", label: "安全防护", icon: ShieldCheck },
   { id: "mail", label: "邮件设置", icon: Mail },
   { id: "member-login", label: "第三方登录", icon: KeyRound },
   { id: "geography", label: "地址数据", icon: Globe },
@@ -374,6 +377,8 @@ function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarP
 
 function viewMeta(view: AdminView): { parent?: string; title: string; description: string } {
   switch (view) {
+    case "security":
+      return { parent: "平台管理", title: "安全防护", description: "管理站点扫描防护、IP 黑白名单与 Nginx 同步" }
     case "commerce-dimensions":
       return { title: "规格维度", description: "统一维护当前站点的规格名称、类型、单位和候选值，供内容选用" }
     case "mail":
@@ -425,6 +430,8 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
   const { activeSite } = useSite()
   if (!canView(user, view, activeSite?.id)) return <p className="text-sm text-muted-foreground">当前用户组没有此模块的管理权限。</p>
   switch (view) {
+    case "security":
+      return <SecurityPage user={user} key={activeSite?.id} />
     case "commerce-dimensions":
       return <CommerceDimensionsPage user={user} key={activeSite?.id} />
     case "mail":

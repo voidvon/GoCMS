@@ -4,13 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"gocms/internal/db"
+	"gocms/internal/security"
 	"gocms/internal/timestamps"
 )
 
@@ -204,14 +204,7 @@ func (s *Server) feedbackSubmit(response http.ResponseWriter, request *http.Requ
 }
 
 func clientIP(request *http.Request) string {
-	if xff := request.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		return strings.TrimSpace(parts[0])
-	}
-	if host, _, err := net.SplitHostPort(request.RemoteAddr); err == nil {
-		return host
-	}
-	return request.RemoteAddr
+	return security.ClientIP(request)
 }
 
 // Admin Feedbacks

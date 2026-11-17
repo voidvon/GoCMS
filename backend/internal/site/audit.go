@@ -46,6 +46,9 @@ func (s *Server) recordOperation(username string, r *http.Request, result *opera
 	if siteID <= 0 {
 		siteID = 1
 	}
+	if route := strings.ToLower(r.URL.Path); strings.HasPrefix(route, "/api/admin/security/") && (strings.HasPrefix(route, "/api/admin/security/platform") || strings.HasPrefix(route, "/api/admin/security/nginx") || r.URL.Query().Get("scope") == "global") {
+		siteID = 0
+	}
 	// Never persist passwords, API keys, request bodies, or query strings.
 	_, err := s.database.ExecContext(ctx, `INSERT INTO gocms_admin_operation
 		(site_id, username, method, path, status, ip) VALUES (?, ?, ?, ?, ?, ?)`, siteID, username, r.Method, r.URL.Path, status, clientIP(r))

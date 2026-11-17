@@ -17,11 +17,18 @@ import (
 	"gocms/internal/db"
 	"gocms/internal/embedded"
 	"gocms/internal/imageopt"
+	"gocms/internal/nginxguard"
 	"gocms/internal/site"
 	"gocms/internal/theme"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "security-agent" {
+		if err := nginxguard.Run(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if imageopt.RunWorker() {
 		return
 	}
@@ -129,6 +136,7 @@ func main() {
 
 	server.StartAccessLogMaintenance(shutdownCtx)
 	server.StartPaymentMaintenance(shutdownCtx)
+	server.StartSecurityMaintenance(shutdownCtx)
 
 	go func() {
 		<-shutdownCtx.Done()

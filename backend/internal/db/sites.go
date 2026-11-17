@@ -619,6 +619,8 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 		"gocms_admin_operation",
 		"gocms_access_log",
 		"gocms_redirect",
+		"gocms_security_entry",
+		"gocms_security_event",
 	}
 	for _, t := range tables {
 		var count int
@@ -627,6 +629,13 @@ func DeleteSite(ctx context.Context, database *sql.DB, id int64) error {
 			if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM "%s" WHERE "site_id" = ?`, t), id); err != nil {
 				return fmt.Errorf("delete site records from %s: %w", t, err)
 			}
+		}
+	}
+	var securityConfigExists int
+	_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='gocms_security_config'`).Scan(&securityConfigExists)
+	if securityConfigExists > 0 {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM gocms_security_config WHERE scope_id=?`, id); err != nil {
+			return err
 		}
 	}
 

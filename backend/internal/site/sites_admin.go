@@ -12,6 +12,7 @@ import (
 	"gocms/internal/consent"
 	"gocms/internal/db"
 	"gocms/internal/imageopt"
+	"gocms/internal/security"
 )
 
 func (s *Server) currentAdmin(r *http.Request) *AdminUser {
@@ -29,16 +30,7 @@ func requestHost(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
-	if host != "" {
-		if comma := strings.Index(host, ","); comma != -1 {
-			host = strings.TrimSpace(host[:comma])
-		}
-	}
-	if host == "" {
-		host = r.Host
-	}
-	return host
+	return security.RequestHost(r)
 }
 
 func requestScheme(r *http.Request) string {

@@ -22,12 +22,14 @@ import (
 	"gocms/internal/membermail"
 	"gocms/internal/memberoauth"
 	"gocms/internal/routing"
+	"gocms/internal/security"
 	"gocms/internal/templateconfig"
 	"gocms/internal/templatelabel"
 	"gocms/internal/theme"
 )
 
 type Server struct {
+	security       *security.Service
 	resetJobs      chan struct{}
 	mailSend       func(context.Context, membermail.Config, string, string, string, string) error
 	oauthMu        sync.RWMutex
@@ -138,11 +140,21 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 	if err := server.configurePayments(); err != nil {
 		return nil, err
 	}
+	if database != nil {
+		server.security, err = security.New(database)
+		if err != nil {
+			return nil, fmt.Errorf("initialize security: %w", err)
+		}
+	}
 	return server, nil
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.accessLogMiddleware(http.HandlerFunc(s.serveHTTP))
+	handler := s.accessLogMiddleware(http.HandlerFunc(s.serveHTTP))
+	if s.security != nil {
+		return s.security.Middleware(handler)
+	}
+	return handler
 }
 
 func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) {
@@ -213,6 +225,10 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 				defer s.recordOperation(user.Username, request, capture)
 			}
 		}
+	}
+	if lowerAdminPath == "/api/admin/security" || strings.HasPrefix(lowerAdminPath, "/api/admin/security/") {
+		s.adminSecurity(response, request)
+		return
 	}
 	if lowerAdminPath == "/api/admin/geography" || strings.HasPrefix(lowerAdminPath, "/api/admin/geography/") {
 		s.adminGeography(response, request)

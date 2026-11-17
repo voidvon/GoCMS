@@ -136,6 +136,10 @@ API Key 与后台登录会话使用相同的管理员权限：可调用所属管
 
 模板与自定义 HTML 片段属于受信任的管理员内容。普通字段会 HTML 转义，富文本正文按 HTML 输出。图片统一使用 `/images/文件名`，服务先查找 `assets/images/`，再查找当前主题的 `images/` 目录；外部数据的资源路径只在导入阶段转换。
 
+## 安全防护
+
+后台 **平台管理 → 安全防护** 支持站点扫描检测、自动封禁、IP/CIDR 黑白名单及安全记录；超级管理员管理全局名单与宝塔 Nginx 接入。同步通过受限的本机服务执行，支持配置检查、失败回滚和到期解封，GoCMS 无需 root 或宝塔 API 密钥。首次接入、权限和接口见 [安全防护与 Nginx 接入](docs/security-protection.md)。升级后扫描检测与 Nginx 同步默认关闭，默认仅信任本机回环代理。
+
 ## 访问统计
 
 本地测试可用 `python3 scripts/seed-access-logs.py --reset` 生成多域名、多状态、多来源的访问与错误记录（默认站点 1，可用 `--site`、`--hosts` 指定）；`--ignore` 可预置忽略路径。脚本只写 `gocms_access_log` 与 `gocms_access_log_ignore`，不修改内容、分类、模板或站点设置。

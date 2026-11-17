@@ -34,6 +34,7 @@ var adminPermissions = []struct {
 	{"login_logs", "查看登录日志"},
 	{"traffic", "访问统计"},
 	{"traffic.clear", "清空访问日志"},
+	{"security", "查看站点安全防护"}, {"security.manage", "管理站点安全防护"},
 	{"redirects", "查看重定向规则"}, {"redirects.manage", "管理重定向规则"},
 }
 
@@ -158,6 +159,9 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 	}
 	if module == "member-login" || module == "mail" {
 		return s.authorizeMemberLogin(w, u)
+	}
+	if module == "security" {
+		return s.authorizeSecurity(w, r, u)
 	}
 	if module == "orders" {
 		return s.authorizeOrders(w, r, u)
