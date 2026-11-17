@@ -13,8 +13,8 @@ import (
 	"time"
 )
 
-// Direct updates only the selected Nginx site configuration. It runs within
-// GoCMS, using the process's existing operating-system permissions.
+// Direct keeps security rules in the selected site file and adds a main-config
+// include only when Nginx does not already load that file.
 type Direct struct {
 	mu     sync.Mutex
 	engine *agent
@@ -81,9 +81,6 @@ func (d *Direct) initialize() error {
 			return fmt.Errorf("无法确认旧版同步代理是否已停止：%w", err)
 		}
 	}
-	if err := command(a.config, "test"); err != nil {
-		return err
-	}
 	server, err := rememberFile(a.config.ServerConfig)
 	if err != nil {
 		return err
@@ -132,16 +129,69 @@ func (d *Direct) apply(s Snapshot) error {
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(previous.data, updated) {
-		if err := atomicFile(previous.path, updated, previous.mode); err != nil {
+	loaded, err := configurationLoadsSite(a.config)
+	if err != nil {
+		return err
+	}
+	var main *savedFile
+	var mainUpdated []byte
+	if !loaded {
+		file, err := rememberFile(a.config.NginxConfig)
+		if err != nil {
 			return err
 		}
-		if err = command(a.config, "test"); err == nil {
-			err = command(a.config, "reload")
+		if !file.exists {
+			return fmt.Errorf("Nginx 主配置不存在：%s", file.path)
 		}
+		mainUpdated, err = includeUnloadedSite(file.data, a.config.ServerConfig)
 		if err != nil {
-			return errors.Join(err, previous.restore())
+			return err
 		}
+		backup := filepath.Join(filepath.Dir(a.statePath), "nginx.conf.before")
+		if _, err := os.Lstat(backup); os.IsNotExist(err) {
+			if err := atomicFile(backup, file.data, 0600); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
+		main = &file
+	}
+	mainWritten, siteWritten := false, false
+	rollback := func(cause error) error {
+		if siteWritten {
+			cause = errors.Join(cause, previous.restore())
+		}
+		if mainWritten {
+			cause = errors.Join(cause, main.restore())
+		}
+		return cause
+	}
+	if main != nil && !bytes.Equal(main.data, mainUpdated) {
+		if err := atomicFile(main.path, mainUpdated, main.mode); err != nil {
+			return err
+		}
+		mainWritten = true
+	}
+	if !bytes.Equal(previous.data, updated) {
+		if err := atomicFile(previous.path, updated, previous.mode); err != nil {
+			return rollback(err)
+		}
+		siteWritten = true
+	}
+	if mainWritten || siteWritten {
+		loaded, err = configurationLoadsSite(a.config)
+		if err != nil {
+			return rollback(err)
+		}
+		if !loaded {
+			return rollback(errors.New("Nginx 检查后仍未加载所选站点配置，已恢复原文件"))
+		}
+		if err := command(a.config, "reload"); err != nil {
+			return rollback(err)
+		}
+	} else if !loaded {
+		return errors.New("Nginx 未加载所选站点配置，无法自动添加引用")
 	}
 	a.result = Result{Digest: Digest(s), AppliedAt: time.Now().UTC().Format(time.RFC3339)}
 	return nil

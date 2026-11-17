@@ -20,7 +20,7 @@ func directFixture(t *testing.T) *Direct {
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 	c := Config{SocketPath: filepath.Join(dir, "agent.sock"), NginxBinary: filepath.Join(dir, "nginx"), NginxConfig: filepath.Join(dir, "nginx.conf"), ServerConfig: filepath.Join(dir, "site.conf"), AgentUser: "www"}
-	script := "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$0.calls\"\nif [ -f \"$0.fail-test\" ] && [ -f \"$0.prepared\" ]; then exit 1; fi\ntouch \"$0.prepared\"\nif [ \"$1\" = '-s' ] && [ -f \"$0.fail-reload\" ]; then exit 1; fi\nexit 0\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$0.calls\"\nif [ -f \"$0.fail-test\" ] && [ -f \"$0.prepared\" ]; then exit 1; fi\ntouch \"$0.prepared\"\nif [ \"$1\" = '-s' ] && [ -f \"$0.fail-reload\" ]; then exit 1; fi\nif [ \"$1\" = '-T' ]; then\n  printf '# configuration file %s:\\n' \"$3\"\n  site=\"$(dirname \"$0\")/site.conf\"\n  if grep -F \"include $site;\" \"$3\" > /dev/null; then printf '# configuration file %s:\\n' \"$site\"; fi\nfi\nexit 0\n"
 	main := fmt.Sprintf("pid %s/nginx.pid;\nerror_log %s/error.log;\nevents {}\nhttp {\n include %s;\n}\n", dir, dir, c.ServerConfig)
 	for path, text := range map[string]string{c.NginxConfig: main, c.ServerConfig: "server {\n listen 8080;\n # Existing panel and TLS settings stay in place.\n location / { return 200 'ok'; }\n}\n", c.NginxBinary: script} {
 		if err := os.WriteFile(path, []byte(text), 0700); err != nil {
@@ -69,7 +69,7 @@ func TestDirectManageConfigAndRules(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(c.NginxBinary + ".calls")
-	if !bytes.Equal(before, after) {
+	if bytes.Count(before, []byte("-s\n")) != bytes.Count(after, []byte("-s\n")) {
 		t.Fatal("unchanged direct sync reloaded Nginx")
 	}
 	// Panel changes outside the managed blocks survive subsequent rule updates.
@@ -189,7 +189,7 @@ func TestDirectMigratesLegacySiteIncludeWithoutChangingMain(t *testing.T) {
 	}
 	// Skip only the pre-change check; the generated result uses real nginx -t.
 	quoted := "'" + strings.ReplaceAll(binary, "'", "'\\''") + "'"
-	script := "#!/bin/sh\nif [ \"$1\" = '-s' ]; then exit 0; fi\nif [ ! -f \"$0.initial\" ]; then touch \"$0.initial\"; exit 0; fi\nexec " + quoted + " \"$@\"\n"
+	script := "#!/bin/sh\nif [ \"$1\" = '-s' ]; then exit 0; fi\nif [ ! -f \"$0.initial\" ]; then touch \"$0.initial\"; printf '# configuration file %s:\\n# configuration file %s:\\n' \"$3\" \"$(dirname \"$0\")/site.conf\"; exit 0; fi\nexec " + quoted + " \"$@\"\n"
 	if err := os.WriteFile(c.NginxBinary, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}

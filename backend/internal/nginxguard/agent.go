@@ -45,6 +45,9 @@ func (c Config) Validate() error {
 	if c.NginxConfig == c.ServerConfig || len(c.SocketPath) > 100 || c.AgentUser == "" || strings.Trim(c.AgentUser, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != "" {
 		return errors.New("invalid agent configuration")
 	}
+	if strings.ContainsAny(c.ServerConfig, "#*?[]") {
+		return errors.New("站点配置路径不能包含注释或通配符字符")
+	}
 	return nil
 }
 
