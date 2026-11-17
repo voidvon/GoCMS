@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -291,8 +292,8 @@ func (s *Server) adminSession(response http.ResponseWriter, request *http.Reques
 		methodNotAllowed(response)
 		return
 	}
-	user, ok, _ := s.authenticateRequest(request)
-	if !ok || user == nil {
+	user := s.currentAdmin(request)
+	if user == nil {
 		writeJSON(response, http.StatusUnauthorized, map[string]string{"error": "未登录"})
 		return
 	}
@@ -301,6 +302,12 @@ func (s *Server) adminSession(response http.ResponseWriter, request *http.Reques
 
 func (s *Server) adminStats(response http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet || !s.requireAdmin(response, request) {
+		return
+	}
+	started := time.Now()
+	window := strings.TrimSpace(request.URL.Query().Get("window"))
+	if window != "" && window != "24h" && window != "today" && window != "yesterday" {
+		writeJSON(response, http.StatusBadRequest, map[string]string{"error": "不支持的统计时间范围"})
 		return
 	}
 	user := s.currentAdmin(request)
@@ -325,17 +332,25 @@ func (s *Server) adminStats(response http.ResponseWriter, request *http.Request)
 			return
 		}
 	}
-	summary, err := s.accessLogSummary(request.Context(), siteID)
+	var summary AccessLogSummary
+	if boolQuery(request.URL.Query().Get("refresh")) {
+		s.dashboardStats.invalidate(siteID)
+	}
+	if request.URL.Query().Get("include_top") == "false" {
+		summary, err = s.dashboardAccessSummaryForWindow(request.Context(), siteID, window)
+	} else {
+		// Keep the existing API's full, fresh snapshot for integrations.
+		summary, err = s.accessLogSummaryForWindow(request.Context(), siteID, true, window)
+	}
 	if err != nil {
-		summary = AccessLogSummary{
-			TopPages:        []AccessLogPageStat{},
-			TopErrors:       []AccessLogErrorStat{},
-			StatusBreakdown: []AccessLogStatusStat{},
-		}
+		writeJSON(response, http.StatusInternalServerError, map[string]string{"error": "访问统计加载失败，请重试"})
+		return
 	}
 	summary.Metrics.RetentionDays = s.accessLogs.retention()
 	summary.Metrics.DayKey = s.accessLogs.dayKey(time.Now())
 	stats.Access = summary
+	response.Header().Set("Cache-Control", "private, no-store")
+	response.Header().Set("Server-Timing", fmt.Sprintf("stats;dur=%.1f", float64(time.Since(started))/float64(time.Millisecond)))
 	writeJSON(response, http.StatusOK, stats)
 }
 
@@ -983,45 +998,59 @@ func (s *Server) resolveApiKeyToken(request *http.Request) string {
 	return ""
 }
 
-func (s *Server) adminSessionUser(request *http.Request) (*AdminUser, bool) {
+func (s *Server) adminSessionUser(request *http.Request) (*AdminUser, error) {
 	cookie, err := request.Cookie("gocms_admin")
 	if err != nil || cookie.Value == "" || s.database == nil {
-		return nil, false
+		return nil, nil
 	}
 	var username string
 	err = s.database.QueryRowContext(request.Context(), `
 		SELECT "username" FROM "gocms_admin_session"
 		WHERE "token" = ? AND "expires_at" > ? AND "absolute_expires_at" > ?`, cookie.Value, time.Now().Unix(), time.Now().Unix()).
 		Scan(&username)
-	if err != nil || username == "" {
-		return nil, false
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
 	}
-	user, err := s.loadAdmin(request.Context(), username)
-	return user, err == nil
+	if err != nil {
+		return nil, err
+	}
+	return s.loadAuthenticatedAdmin(request.Context(), username)
+}
+
+func (s *Server) loadAuthenticatedAdmin(ctx context.Context, username string) (*AdminUser, error) {
+	user, err := s.loadAdmin(ctx, username)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return user, err
 }
 
 // authenticateRequest resolves the administrator behind either credential type.
 // Authorization uses that administrator's permissions; the session flag is only
 // for browser session behavior, not an additional permission requirement.
 func (s *Server) authenticateRequest(request *http.Request) (*AdminUser, bool, bool) {
+	user, isSession, err := s.authenticateAdminRequest(request)
+	return user, user != nil && err == nil, isSession
+}
+
+// A storage failure cannot establish whether a session is valid. Keep it
+// distinct from missing/revoked credentials so clients can retry without login.
+func (s *Server) authenticateAdminRequest(request *http.Request) (*AdminUser, bool, error) {
 	if s.database == nil {
-		return nil, false, false
+		return nil, false, fmt.Errorf("database is unavailable")
 	}
 	if token := s.resolveApiKeyToken(request); token != "" {
 		ident, err := apikey.Authenticate(request.Context(), s.database, token)
-		if err == nil && ident != nil {
-			go apikey.TouchUsage(context.Background(), s.database, ident.ApiKeyID, clientIP(request))
-			user, err := s.loadAdmin(request.Context(), ident.Username)
-			return user, err == nil, false
+		if err != nil || ident == nil {
+			return nil, false, err
 		}
-		return nil, false, false
+		go apikey.TouchUsage(context.Background(), s.database, ident.ApiKeyID, clientIP(request))
+		user, err := s.loadAuthenticatedAdmin(request.Context(), ident.Username)
+		return user, false, err
 	}
 
-	user, ok := s.adminSessionUser(request)
-	if ok {
-		return user, true, true
-	}
-	return nil, false, false
+	user, err := s.adminSessionUser(request)
+	return user, user != nil && err == nil, err
 }
 
 func (s *Server) requireAdmin(response http.ResponseWriter, request *http.Request) bool {

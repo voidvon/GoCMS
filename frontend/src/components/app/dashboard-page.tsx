@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type UIEvent } from "react"
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Ban,
   Bug,
   Eye,
@@ -10,6 +13,7 @@ import {
   LoaderCircle,
   MonitorSmartphone,
   MousePointerClick,
+  RefreshCw,
   FileText,
   UsersRound,
 } from "lucide-react"
@@ -26,13 +30,18 @@ import {
   type AccessLogMetrics,
   type AccessLogPageStat,
   type AdminStats,
+  type DashboardWindow,
 } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
+import { getErrorMessage } from "@/lib/errors"
+import { showError, showSuccess } from "@/components/app/admin-notifications"
+import { Skeleton } from "@/components/ui/skeleton"
 import { TimeText } from "@/components/app/time-text"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Card,
   CardAction,
@@ -52,6 +61,12 @@ import {
 import { InlineAlert } from "@/components/app/app-ui"
 
 const PAGE_SIZE = 20
+type ErrorSort = "recent" | "hits" | "hits_asc"
+const windowOptions: { value: DashboardWindow; label: string }[] = [
+  { value: "24h", label: "24小时" },
+  { value: "today", label: "今天" },
+  { value: "yesterday", label: "昨天" },
+]
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("zh-CN").format(value)
@@ -65,7 +80,10 @@ function statusTone(status: number) {
 
 export function DashboardPage() {
   const { activeSite } = useSite()
-  const [payload, setPayload] = useState<{ siteId?: number; stats: AdminStats } | null>(null)
+  const [timeWindow, setTimeWindow] = useState<DashboardWindow>("24h")
+  const [errorSort, setErrorSort] = useState<ErrorSort>("recent")
+  const [loading, setLoading] = useState(true)
+  const [payload, setPayload] = useState<{ siteId: number; window: DashboardWindow; stats: AdminStats } | null>(null)
   const [error, setError] = useState("")
   const [errorRows, setErrorRows] = useState<AccessLogErrorStat[]>([])
   const [errorTotal, setErrorTotal] = useState(0)
@@ -82,94 +100,113 @@ export function DashboardPage() {
   const [revision, setRevision] = useState(0)
   const errorMoreRef = useRef(false)
   const pageMoreRef = useRef(false)
-  const siteIdRef = useRef(activeSite?.id)
+  const requestsRef = useRef<AbortController | null>(null)
+  const errorRequestsRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    siteIdRef.current = activeSite?.id
-    errorMoreRef.current = false
-    pageMoreRef.current = false
-    setIgnoredPaths([])
-    setIgnoreBusyPath("")
-  }, [activeSite?.id])
-
-  useEffect(() => {
-    let active = true
-    getStats()
-      .then((response) => {
-        if (!active) return
-        setPayload({ siteId: activeSite?.id, stats: response })
-        setError("")
-      })
-      .catch((loadError) => {
-        if (active) setError(loadError instanceof Error ? loadError.message : "统计加载失败")
-      })
-    return () => {
-      active = false
-    }
-  }, [activeSite?.id, revision])
-
-  // The dashboard cards are independently paginated so users can scroll for
-  // more than the fixed top-N snapshot returned by /api/admin/stats. The stats
-  // request still supplies the headline cards and status breakdown.
   useEffect(() => {
     if (!activeSite?.id) return
-    let active = true
-    setErrorRows([])
-    setErrorTotal(0)
-    setErrorLoading(true)
-    setErrorLoadingMore(false)
+    const siteId = activeSite.id
+    const controller = new AbortController()
+    requestsRef.current = controller
+    const init = { signal: controller.signal, headers: { "X-Site-Id": String(siteId) } }
+    pageMoreRef.current = false
+    setLoading(true)
+    setPayload(null)
+    setError("")
     setPageRows([])
     setPageTotal(0)
     setPageLoading(true)
     setPageLoadingMore(false)
-    setErrorLoadError("")
     setPageLoadError("")
-    Promise.allSettled([
-      getAccessLogErrors({ status_mode: "errors", sort: "recent", limit: PAGE_SIZE, offset: 0 }),
-      getAccessLogPages({ limit: PAGE_SIZE, offset: 0 }),
-      getAccessLogIgnores(),
-    ])
-      .then(([errorResult, pageResult, ignoreResult]) => {
-        if (!active) return
-        if (errorResult.status === "fulfilled") {
-          setErrorRows(errorResult.value.items)
-          setErrorTotal(errorResult.value.total)
-        } else {
-          setErrorLoadError(errorResult.reason instanceof Error ? errorResult.reason.message : "错误列表加载失败")
-        }
-        if (pageResult.status === "fulfilled") {
-          setPageRows(pageResult.value.items)
-          setPageTotal(pageResult.value.total)
-        } else {
-          setPageLoadError(pageResult.reason instanceof Error ? pageResult.reason.message : "热门页面加载失败")
-        }
-        if (ignoreResult.status === "fulfilled") {
-          setIgnoredPaths(ignoreResult.value.items)
-        } else {
-          setErrorLoadError(ignoreResult.reason instanceof Error ? ignoreResult.reason.message : "忽略列表加载失败")
-        }
+
+    // Each block settles independently. Changing the site, range or revision
+    // also cancels pending pagination.
+    const requests = [
+      getStats({ includeTop: false, window: timeWindow, refresh: revision > 0 }, init)
+        .then((response) => {
+          if (!controller.signal.aborted) setPayload({ siteId, window: timeWindow, stats: response })
+        })
+        .catch((loadError: unknown) => {
+          if (!controller.signal.aborted) setError(getErrorMessage(loadError, "统计加载失败"))
+        }),
+      getAccessLogPages({ window: timeWindow, limit: PAGE_SIZE, offset: 0 }, init)
+        .then((response) => {
+          if (controller.signal.aborted) return
+          setPageRows(response.items)
+          setPageTotal(response.total)
+        })
+        .catch((loadError: unknown) => {
+          if (!controller.signal.aborted) setPageLoadError(getErrorMessage(loadError, "热门页面加载失败"))
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setPageLoading(false)
+        }),
+      getAccessLogIgnores(init)
+        .then((response) => {
+          if (!controller.signal.aborted) setIgnoredPaths(response.items)
+        })
+        .catch((loadError: unknown) => {
+          if (!controller.signal.aborted) setErrorLoadError(getErrorMessage(loadError, "忽略列表加载失败"))
+        }),
+    ]
+    void Promise.allSettled(requests).then(() => {
+      if (!controller.signal.aborted) setLoading(false)
+    })
+    return () => {
+      controller.abort()
+      requestsRef.current = null
+    }
+  }, [activeSite?.id, revision, timeWindow])
+
+  useEffect(() => {
+    if (!activeSite?.id) return
+    const controller = new AbortController()
+    errorRequestsRef.current = controller
+    errorMoreRef.current = false
+    setErrorRows([])
+    setErrorTotal(0)
+    setErrorLoading(true)
+    setErrorLoadingMore(false)
+    setErrorLoadError("")
+    getAccessLogErrors(
+      { window: timeWindow, status_mode: "errors", sort: errorSort, limit: PAGE_SIZE, offset: 0 },
+      { signal: controller.signal, headers: { "X-Site-Id": String(activeSite.id) } },
+    )
+      .then((response) => {
+        if (controller.signal.aborted) return
+        setErrorRows(response.items)
+        setErrorTotal(response.total)
+      })
+      .catch((loadError: unknown) => {
+        if (!controller.signal.aborted) setErrorLoadError(getErrorMessage(loadError, "错误列表加载失败"))
       })
       .finally(() => {
-        if (!active) return
-        setErrorLoading(false)
-        setPageLoading(false)
+        if (!controller.signal.aborted) setErrorLoading(false)
       })
     return () => {
-      active = false
+      controller.abort()
+      errorRequestsRef.current = null
     }
-  }, [activeSite?.id, revision])
+  }, [activeSite?.id, revision, timeWindow, errorSort])
 
   const errorHasMore = errorRows.length < errorTotal
   const pageHasMore = pageRows.length < pageTotal
 
+  function toggleErrorSort() {
+    errorRequestsRef.current?.abort()
+    setErrorLoading(true)
+    setErrorSort((previous) => previous === "hits" ? "hits_asc" : "hits")
+  }
+
   function loadMoreErrors() {
     if (errorMoreRef.current || errorLoading || !errorHasMore) return
-    const siteId = activeSite?.id
+    const controller = errorRequestsRef.current
+    if (!controller || controller.signal.aborted || !activeSite?.id) return
     errorMoreRef.current = true
     setErrorLoadingMore(true)
-    getAccessLogErrors({ status_mode: "errors", sort: "recent", limit: PAGE_SIZE, offset: errorRows.length })
+    getAccessLogErrors({ window: timeWindow, status_mode: "errors", sort: errorSort, limit: PAGE_SIZE, offset: errorRows.length }, { signal: controller.signal, headers: { "X-Site-Id": String(activeSite.id) } })
       .then((data) => {
-        if (siteIdRef.current !== siteId) return
+        if (controller.signal.aborted) return
         setErrorRows((previous) => {
           const seen = new Set(previous.map((item) => `${item.host}\u0000${item.status}\u0000${item.path}`))
           return [
@@ -179,147 +216,147 @@ export function DashboardPage() {
         })
         setErrorTotal(data.total)
       })
-      .catch((loadError: Error) => {
-        if (siteIdRef.current === siteId) setErrorLoadError(loadError.message)
+      .catch((loadError: unknown) => {
+        if (!controller.signal.aborted) setErrorLoadError(getErrorMessage(loadError, "错误列表加载失败"))
       })
       .finally(() => {
+        if (controller.signal.aborted) return
         errorMoreRef.current = false
-        if (siteIdRef.current === siteId) setErrorLoadingMore(false)
+        setErrorLoadingMore(false)
       })
   }
 
   function loadMorePages() {
     if (pageMoreRef.current || pageLoading || !pageHasMore) return
-    const siteId = activeSite?.id
+    const controller = requestsRef.current
+    if (!controller || controller.signal.aborted || !activeSite?.id) return
     pageMoreRef.current = true
     setPageLoadingMore(true)
-    getAccessLogPages({ limit: PAGE_SIZE, offset: pageRows.length })
+    getAccessLogPages({ window: timeWindow, limit: PAGE_SIZE, offset: pageRows.length }, { signal: controller.signal, headers: { "X-Site-Id": String(activeSite.id) } })
       .then((data) => {
-        if (siteIdRef.current !== siteId) return
+        if (controller.signal.aborted) return
         setPageRows((previous) => {
           const seen = new Set(previous.map((item) => item.path))
           return [...previous, ...data.items.filter((item) => !seen.has(item.path))]
         })
         setPageTotal(data.total)
       })
-      .catch((loadError: Error) => {
-        if (siteIdRef.current === siteId) setPageLoadError(loadError.message)
+      .catch((loadError: unknown) => {
+        if (!controller.signal.aborted) setPageLoadError(getErrorMessage(loadError, "热门页面加载失败"))
       })
       .finally(() => {
+        if (controller.signal.aborted) return
         pageMoreRef.current = false
-        if (siteIdRef.current === siteId) setPageLoadingMore(false)
+        setPageLoadingMore(false)
       })
   }
 
   function handleInfiniteScroll(event: UIEvent<HTMLDivElement>, loadMore: () => void, hasMore: boolean) {
     if (!hasMore) return
-    const element = event.currentTarget
+    // ScrollArea's viewport owns scrolling. Capture its non-bubbling event
+    // at the root and measure the viewport rather than the outer container.
+    const element = event.target
+    if (!(element instanceof HTMLDivElement) || element.dataset.slot !== "scroll-area-viewport") return
     if (element.scrollHeight - element.scrollTop - element.clientHeight < 80) {
       loadMore()
     }
   }
 
   async function handleIgnore(pathValue: string) {
-    if (!pathValue || ignoreBusyPath) return
+    if (!pathValue || ignoreBusyPath || !activeSite?.id) return
     setIgnoreBusyPath(pathValue)
     try {
-      const result = await addAccessLogIgnore(pathValue)
+      const result = await addAccessLogIgnore(pathValue, { headers: { "X-Site-Id": String(activeSite.id) } })
       setIgnoredPaths((previous) => [result.item, ...previous.filter((item) => item.path !== result.item.path)])
       const removed = errorRows.filter((item) => item.path === pathValue).length
       setErrorRows((previous) => previous.filter((item) => item.path !== pathValue))
       setErrorTotal((previous) => Math.max(0, previous - removed))
       setRevision((value) => value + 1)
+      showSuccess("已忽略该路径")
     } catch (ignoreError) {
-      setErrorLoadError(ignoreError instanceof Error ? ignoreError.message : "添加忽略失败")
+      showError(getErrorMessage(ignoreError, "添加忽略失败"))
     } finally {
       setIgnoreBusyPath("")
     }
   }
 
   async function handleUnignore(pathValue: string) {
-    if (!pathValue || ignoreBusyPath) return
+    if (!pathValue || ignoreBusyPath || !activeSite?.id) return
     setIgnoreBusyPath(pathValue)
     try {
-      await removeAccessLogIgnore(pathValue)
+      await removeAccessLogIgnore(pathValue, { headers: { "X-Site-Id": String(activeSite.id) } })
       setIgnoredPaths((previous) => previous.filter((item) => item.path !== pathValue))
       setRevision((value) => value + 1)
+      showSuccess("已取消忽略")
     } catch (ignoreError) {
-      setErrorLoadError(ignoreError instanceof Error ? ignoreError.message : "取消忽略失败")
+      showError(getErrorMessage(ignoreError, "取消忽略失败"))
     } finally {
       setIgnoreBusyPath("")
     }
   }
 
   // Statistics are per site, so a payload from another site must not be shown.
-  const stats = payload && payload.siteId === activeSite?.id ? payload.stats : null
+  const stats = payload && payload.siteId === activeSite?.id && payload.window === timeWindow ? payload.stats : null
+  const windowLabel = windowOptions.find((option) => option.value === timeWindow)!.label
+  const refreshing = loading || errorLoading
+  const sortAction = errorSort === "hits" ? "按命中次数从低到高排序" : "按命中次数从高到低排序"
+  const SortIcon = errorSort === "hits" ? ArrowDown : errorSort === "hits_asc" ? ArrowUp : ArrowUpDown
 
-  if (error) {
-    return <InlineAlert className="p-4">{error}</InlineAlert>
-  }
+  const metrics: AccessLogMetrics | undefined = stats?.access?.metrics
+  const statusBreakdown = stats?.access?.status_breakdown ?? []
 
-  if (!stats) {
-    return (
-      <div className="flex min-h-64 items-center justify-center text-muted-foreground">
-        <LoaderCircle className="size-5 animate-spin" />
-      </div>
-    )
-  }
-
-  const metrics: AccessLogMetrics | undefined = stats.access?.metrics
-  const statusBreakdown = stats.access?.status_breakdown ?? []
-
-  const contentCards = [
+  const contentCards = stats ? [
     { label: "内容总数", value: stats.contents, detail: `${formatNumber(stats.visible_contents)} 条公开展示`, icon: FileText },
     { label: "客户留言", value: stats.messages, detail: `${formatNumber(stats.pending_messages)} 条待处理`, icon: Inbox },
     { label: "公开内容率", value: `${stats.contents ? Math.round((stats.visible_contents / stats.contents) * 100) : 0}%`, detail: "当前可见内容占比", icon: UsersRound },
-  ]
+  ] : []
 
   const trafficCards = metrics
     ? [
         {
-          label: "今日访问",
-          value: metrics.today_visits,
-          detail: `今日错误 ${formatNumber(metrics.today_errors)} 次 · ${metrics.day_key}`,
+          label: "页面访问",
+          value: metrics.recent_visits,
+          detail: `${windowLabel}的页面访问次数`,
           icon: MousePointerClick,
         },
         {
-          label: "24 小时访问",
-          value: metrics.recent_visits,
-          detail: `24 小时错误 ${formatNumber(metrics.recent_errors)} 次`,
+          label: "访客",
+          value: metrics.recent_users,
+          detail: `${windowLabel}按 IP 去重（已排除爬虫）`,
           icon: Eye,
         },
         {
-          label: "24 小时访客",
-          value: metrics.recent_users,
-          detail: `其中新访客 ${formatNumber(metrics.recent_new_users)} 位（已排除爬虫）`,
+          label: "新访客",
+          value: metrics.recent_new_users,
+          detail: "保留记录中首次访问的访客（已排除爬虫）",
           icon: UsersRound,
         },
         {
           label: "404 错误",
           value: metrics.total_404_errors,
-          detail: `24 小时内 ${formatNumber(metrics.recent_404_errors)} 次 · 站内死链地址 ${formatNumber(metrics.internal_404_paths)} 个`,
+          detail: `站内死链地址 ${formatNumber(metrics.internal_404_paths)} 个`,
           icon: Bug,
         },
         {
           label: "错误总数",
           value: metrics.total_errors,
-          detail: `含 4xx / 5xx，保留 ${metrics.retention_days} 天`,
+          detail: `${windowLabel}的 4xx / 5xx 错误`,
           icon: AlertTriangle,
         },
         {
           label: "站内死链",
           value: metrics.internal_404_paths,
-          detail: `由有效站内页面触发的 404（累计 ${formatNumber(metrics.internal_404_errors)} 次命中），优先修复`,
+          detail: `由有效站内页面触发的 404（${formatNumber(metrics.internal_404_errors)} 次命中）`,
           icon: Link2Off,
         },
         {
-          label: "累计页面",
+          label: "访问页面",
           value: metrics.total_pages,
-          detail: `成功访问过的页面数（共 ${formatNumber(metrics.total_requests)} 条记录）`,
+          detail: `成功访问的不同页面（共 ${formatNumber(metrics.total_requests)} 条请求）`,
           icon: FileText,
         },
         {
-          label: "24 小时设备",
+          label: "访问设备",
           value: `${formatNumber(metrics.recent_pc_users)} / ${formatNumber(metrics.recent_mobile_users)}`,
           detail: "桌面端访客 / 移动端访客",
           icon: MonitorSmartphone,
@@ -329,17 +366,40 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      <div role="group" aria-label="仪表盘工具栏" className="flex flex-wrap items-center gap-2">
+        <Select items={windowOptions} value={timeWindow} onValueChange={(value) => {
+          if (value && value !== timeWindow) {
+            setLoading(true)
+            setTimeWindow(value)
+          }
+        }}>
+          <SelectTrigger size="sm" aria-label="时间范围">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {windowOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" disabled={refreshing || !activeSite?.id} aria-label="刷新仪表盘" onClick={() => {
+          setLoading(true)
+          setRevision((value) => value + 1)
+        }}>
+          <RefreshCw className={refreshing ? "animate-spin" : ""} />
+          {refreshing ? "刷新中…" : "刷新"}
+        </Button>
+      </div>
+      {error ? <InlineAlert>{error}</InlineAlert> : null}
+      {!stats && !error ? <StatCardsSkeleton count={8} /> : null}
       {metrics ? (
         <section className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-muted-foreground">访问与错误</h2>
-            {metrics.internal_404_paths > 0 ? (
+          {metrics.internal_404_paths > 0 ? (
+            <div className="flex justify-end">
               <Badge variant="outline" className="gap-1.5 border-amber-300 text-amber-700 dark:text-amber-300">
                 <AlertTriangle className="size-3.5" />
                 {formatNumber(metrics.internal_404_paths)} 个站内死链地址待处理
               </Badge>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             {trafficCards.map((card) => {
               const Icon = card.icon
@@ -365,7 +425,22 @@ export function DashboardPage() {
       <section className="grid gap-4 lg:grid-cols-3">
         <Card className="flex h-[480px] min-h-0 flex-col lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base">错误与死链</CardTitle>
+            <div className="flex min-w-0 items-center gap-3">
+              <CardTitle className="shrink-0 text-base">错误与死链</CardTitle>
+              {statusBreakdown.length > 0 ? (
+                <ScrollArea orientation="horizontal" className="min-w-0 flex-1" contentClassName="flex items-center gap-3 whitespace-nowrap">
+                  <span className="shrink-0 text-xs font-medium text-muted-foreground">错误类型</span>
+                  {statusBreakdown.map((item) => (
+                    <span key={item.status} className="inline-flex shrink-0 items-center gap-1.5">
+                      <span className={`inline-flex rounded px-1.5 py-0.5 font-mono text-xs font-medium ${statusTone(item.status)}`}>
+                        {item.status}
+                      </span>
+                      <span className="font-mono text-xs text-muted-foreground">{formatNumber(item.hits)}</span>
+                    </span>
+                  ))}
+                </ScrollArea>
+              ) : null}
+            </div>
             <CardAction>
               <Popover>
                 <PopoverTrigger
@@ -412,37 +487,29 @@ export function DashboardPage() {
             {errorLoadError ? (
               <p className="px-6 pb-3 text-xs text-destructive">{errorLoadError}</p>
             ) : null}
-            {statusBreakdown.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-6 pb-3">
-                <span className="text-xs font-medium text-muted-foreground">错误类型</span>
-                {statusBreakdown.map((item) => (
-                  <span key={item.status} className="inline-flex items-center gap-1.5">
-                    <span className={`inline-flex rounded px-1.5 py-0.5 font-mono text-xs font-medium ${statusTone(item.status)}`}>
-                      {item.status}
-                    </span>
-                    <span className="font-mono text-xs text-muted-foreground">{formatNumber(item.hits)}</span>
-                  </span>
-                ))}
-              </div>
-            ) : null}
             {errorLoading ? (
               <div className="flex h-40 items-center justify-center text-muted-foreground">
                 <LoaderCircle className="size-5 animate-spin" />
               </div>
             ) : errorRows.length === 0 ? (
-              <p className="px-6 py-6 text-sm text-muted-foreground">当前没有记录到任何 4xx / 5xx 错误。</p>
+              <p className="px-6 py-6 text-sm text-muted-foreground">所选时间范围内没有 4xx / 5xx 错误。</p>
             ) : (
               <ScrollArea
                 className="min-h-0 flex-1"
                 orientation="both"
-                onScroll={(event) => handleInfiniteScroll(event, loadMoreErrors, errorHasMore)}
+                onScrollCapture={(event) => handleInfiniteScroll(event, loadMoreErrors, errorHasMore)}
               >
                 <Table containerClassName="overflow-visible">
                   <TableHeader className="sticky top-0 z-20 bg-card">
                     <TableRow>
                       <TableHead className="w-[64px]">状态</TableHead>
                       <TableHead>请求地址</TableHead>
-                      <TableHead className="w-[64px] text-right">命中</TableHead>
+                      <TableHead className="w-[80px] text-right" aria-sort={errorSort === "hits" ? "descending" : errorSort === "hits_asc" ? "ascending" : "none"}>
+                        <Button variant="ghost" size="xs" className="-mr-2 gap-1" aria-label={sortAction} title={sortAction} onClick={toggleErrorSort}>
+                          命中
+                          <SortIcon className="size-3.5" />
+                        </Button>
+                      </TableHead>
                       <TableHead className="w-[64px] text-right">站内</TableHead>
                       <TableHead className="w-[140px]">最近出现</TableHead>
                       <TableHead className="w-[40px] text-right"><span className="sr-only">操作</span></TableHead>
@@ -490,31 +557,20 @@ export function DashboardPage() {
                         </TableRow>
                       )
                     })}
-                    {errorLoadingMore ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-4 text-center text-xs text-muted-foreground">
-                          <LoaderCircle className="mr-1.5 inline size-3.5 animate-spin" />加载更多…
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
-                    {!errorLoadingMore && !errorHasMore && errorRows.length > PAGE_SIZE ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-4 text-center text-xs text-muted-foreground">
-                          已加载全部
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
                   </TableBody>
                 </Table>
               </ScrollArea>
             )}
+            {!errorLoading && errorRows.length > 0 ? (
+              <ListLoadStatus count={errorRows.length} total={errorTotal} loading={errorLoadingMore} />
+            ) : null}
           </CardContent>
         </Card>
 
         <Card className="flex h-[480px] min-h-0 flex-col">
           <CardHeader>
             <CardTitle className="text-base">热门页面</CardTitle>
-            <CardDescription>访问量最高的页面（已排除爬虫），滚动加载更多</CardDescription>
+            <CardDescription>{windowLabel}访问量最高的页面（已排除爬虫）</CardDescription>
           </CardHeader>
           <CardContent className="flex min-h-0 flex-1 flex-col p-0">
             {pageLoadError ? (
@@ -525,12 +581,12 @@ export function DashboardPage() {
                 <LoaderCircle className="size-5 animate-spin" />
               </div>
             ) : pageRows.length === 0 ? (
-              <p className="px-6 py-4 text-sm text-muted-foreground">还没有页面访问记录。</p>
+              <p className="px-6 py-4 text-sm text-muted-foreground">所选时间范围内没有页面访问记录。</p>
             ) : (
               <ScrollArea
                 className="min-h-0 flex-1"
                 contentClassName="space-y-3 px-6 py-4"
-                onScroll={(event) => handleInfiniteScroll(event, loadMorePages, pageHasMore)}
+                onScrollCapture={(event) => handleInfiniteScroll(event, loadMorePages, pageHasMore)}
               >
                 {pageRows.map((item, index) => (
                   <div key={item.path} className="flex items-start justify-between gap-3">
@@ -545,21 +601,16 @@ export function DashboardPage() {
                     </div>
                   </div>
                 ))}
-                {pageLoadingMore ? (
-                  <p className="py-2 text-center text-xs text-muted-foreground">
-                    <LoaderCircle className="mr-1.5 inline size-3.5 animate-spin" />加载更多…
-                  </p>
-                ) : null}
-                {!pageLoadingMore && !pageHasMore && pageRows.length > PAGE_SIZE ? (
-                  <p className="py-2 text-center text-xs text-muted-foreground">已加载全部</p>
-                ) : null}
               </ScrollArea>
             )}
+            {!pageLoading && pageRows.length > 0 ? (
+              <ListLoadStatus count={pageRows.length} total={pageTotal} loading={pageLoadingMore} />
+            ) : null}
           </CardContent>
         </Card>
       </section>
 
-      <section className="space-y-3">
+      {stats ? <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">站点内容</h2>
         <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
           {contentCards.map((card) => {
@@ -602,7 +653,39 @@ export function DashboardPage() {
             </CardContent>
           </Card>
         </div>
-      </section>
+      </section> : !error ? <StatCardsSkeleton title="站点内容" count={4} /> : null}
     </div>
+  )
+}
+
+function ListLoadStatus({ count, total, loading }: { count: number; total: number; loading: boolean }) {
+  return (
+    <div role="status" className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-6 pt-3 text-xs text-muted-foreground">
+      <span>已加载 {formatNumber(count)} / {formatNumber(total)} 条</span>
+      <span className="inline-flex items-center gap-1.5">
+        {loading ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+        {loading ? "加载更多…" : count < total ? "下滑加载更多" : "已加载全部"}
+      </span>
+    </div>
+  )
+}
+
+
+function StatCardsSkeleton({ title, count }: { title?: string; count: number }) {
+  return (
+    <section className="space-y-3" aria-busy="true" aria-label={`${title ?? "统计"}加载中`}>
+      {title ? <h2 className="text-sm font-medium text-muted-foreground">{title}</h2> : null}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+        {Array.from({ length: count }, (_, index) => (
+          <Card key={index} size="sm">
+            <CardHeader><Skeleton className="h-4 w-20" /></CardHeader>
+            <CardContent className="space-y-2">
+              <Skeleton className="h-7 w-24" />
+              <Skeleton className="h-3 w-full" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
   )
 }

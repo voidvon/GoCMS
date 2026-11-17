@@ -99,7 +99,7 @@ func (s *Server) adminAccessLogPages(response http.ResponseWriter, request *http
 		limit = 200
 	}
 	offset := nonNegativeInt(request.URL.Query().Get("offset"), 0)
-	items, total, err := s.listAccessLogPages(request.Context(), siteID, limit, offset)
+	items, total, err := s.listAccessLogPages(request.Context(), siteID, parseAccessLogFilter(request.URL.Query()), limit, offset)
 	if err != nil {
 		accountError(response, err)
 		return

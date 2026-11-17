@@ -1,4 +1,4 @@
-import { getErrorMessage } from "@/lib/errors"
+import { APIError, getErrorMessage } from "@/lib/errors"
 
 export type AdminUser = {
   category_ids: number[] | null
@@ -257,21 +257,25 @@ export type AccessLogFilters = {
   page_size?: number
 }
 
+export type DashboardWindow = "24h" | "today" | "yesterday"
+
 export function getAccessLogs(filters: AccessLogFilters) {
   return request<{ items: AccessLogItem[]; total: number; page: number; page_size: number; site_id: number }>(
     `/api/admin/access-logs${query({ ...filters })}`,
   )
 }
 
-export function getAccessLogErrors(filters: AccessLogFilters) {
+export function getAccessLogErrors(filters: AccessLogFilters, init: RequestInit = {}) {
   return request<{ items: AccessLogErrorStat[]; total: number; offset: number; limit: number; site_id: number }>(
     `/api/admin/access-logs/errors${query({ ...filters })}`,
+    init,
   )
 }
 
-export function getAccessLogPages(filters: Pick<AccessLogFilters, "limit" | "offset">) {
+export function getAccessLogPages(filters: Pick<AccessLogFilters, "limit" | "offset" | "window">, init: RequestInit = {}) {
   return request<{ items: AccessLogPageStat[]; total: number; offset: number; limit: number; site_id: number }>(
     `/api/admin/access-logs/pages${query({ ...filters })}`,
+    init,
   )
 }
 
@@ -280,23 +284,25 @@ export type AccessLogIgnore = {
   created_at: string
 }
 
-export function getAccessLogIgnores() {
+export function getAccessLogIgnores(init: RequestInit = {}) {
   return request<{ items: AccessLogIgnore[]; total: number; site_id: number }>(
     "/api/admin/access-logs/ignores",
+    init,
   )
 }
 
-export function addAccessLogIgnore(path: string) {
+export function addAccessLogIgnore(path: string, init: RequestInit = {}) {
   return request<{ ok: boolean; item: AccessLogIgnore; site_id: number }>("/api/admin/access-logs/ignores", {
+    ...init,
     method: "POST",
     body: JSON.stringify({ path }),
   })
 }
 
-export function removeAccessLogIgnore(path: string) {
+export function removeAccessLogIgnore(path: string, init: RequestInit = {}) {
   return request<{ ok: boolean; removed: number; site_id: number }>(
     `/api/admin/access-logs/ignores${query({ path })}`,
-    { method: "DELETE" },
+    { ...init, method: "DELETE" },
   )
 }
 
@@ -715,6 +721,7 @@ async function request<T>(path: string, init: RequestInit = {}) {
   const response = await fetch(endpoint(path), {
     ...init,
     credentials: "include",
+    cache: "no-store",
     headers,
   })
   const contentType = response.headers.get("content-type") ?? ""
@@ -722,7 +729,7 @@ async function request<T>(path: string, init: RequestInit = {}) {
     ? await response.json()
     : await response.text()
   if (!response.ok) {
-    throw new Error(getErrorMessage(payload, `请求失败（${response.status}）`))
+    throw new APIError(response.status, getErrorMessage(payload, `请求失败（${response.status}）`))
   }
   return payload as T
 }
@@ -738,8 +745,12 @@ function query(params: Record<string, string | number | undefined>) {
   return encoded ? `?${encoded}` : ""
 }
 
-export function getSession() {
-  return request<SessionResponse>("/api/admin/session")
+export async function getSession() {
+  const response = await request<SessionResponse>("/api/admin/session")
+  if (!response?.user || typeof response.user.username !== "string" || !Array.isArray(response.user.permissions)) {
+    throw new Error("登录状态响应无效，请稍后重试")
+  }
+  return response
 }
 
 export function getSetupStatus() {
@@ -757,8 +768,8 @@ export function logout() {
   return request<{ ok: boolean }>("/api/admin/logout", { method: "POST" })
 }
 
-export function getStats() {
-  return request<AdminStats>("/api/admin/stats")
+export function getStats(options: { includeTop?: boolean; window?: DashboardWindow; refresh?: boolean } = {}, init: RequestInit = {}) {
+  return request<AdminStats>(`/api/admin/stats${query({ include_top: options.includeTop === false ? "false" : undefined, window: options.window, refresh: options.refresh ? "true" : undefined })}`, init)
 }
 
 export function getContent(page: number, pageSize: number, search: string, categoryID = 0, lang?: string, includeChildren = false) {

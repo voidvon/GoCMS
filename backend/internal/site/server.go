@@ -64,6 +64,7 @@ type Server struct {
 	updateActive               bool
 	captcha                    *captcha.Service
 	accessLogs                 *accessLogConfig
+	dashboardStats             dashboardStatsCache
 	legacyPrefixes             *legacyPrefixCache
 	// feishuClient overrides the HTTP client used for Feishu webhook pushes
 	// (tests point it at a local server); nil means the default client.
@@ -196,6 +197,9 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		return
 	}
 	lowerAdminPath := strings.ToLower(cleanPath)
+	if strings.HasPrefix(lowerAdminPath, "/api/admin/") {
+		response.Header().Set("Cache-Control", "private, no-store")
+	}
 	if strings.HasPrefix(lowerAdminPath, "/api/admin/") && lowerAdminPath != "/api/admin/login" && lowerAdminPath != "/api/admin/logout" && lowerAdminPath != "/api/admin/setup-status" {
 		if !s.authorizeAdminRoute(response, request, lowerAdminPath) {
 			return

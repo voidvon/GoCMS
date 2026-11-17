@@ -2,8 +2,10 @@ package site
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,6 +153,88 @@ func TestAdminSessionLegacyMigration(t *testing.T) {
 		}
 		if got != expiry || absolute != expiry+6*86400 {
 			t.Fatalf("migration changed original session lifetime: %d %d", got, absolute)
+		}
+	}
+}
+
+func TestAdminSessionIgnoresStaleSiteSelection(t *testing.T) {
+	s, database, _ := newCategoryTestServer(t)
+	if _, err := database.Exec(`
+		INSERT INTO gocms_site (id, name, code) VALUES (2, 'Editor site', 'editor-site');
+		INSERT INTO gocms_admin_group (name, permissions, site_ids) VALUES ('Editors', '["content"]', '[2]');
+		INSERT INTO gocms_admin_user (username, group_id) SELECT 'editor', id FROM gocms_admin_group WHERE name='Editors'`); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.createSession("editor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, selector := range []struct{ header, query string }{
+		{header: "1"},
+		{header: "999999"},
+		{query: "?site_id=1"},
+		{query: "?site_id=999999"},
+	} {
+		for _, endpoint := range []struct {
+			path string
+			want int
+		}{
+			{"/api/admin/session", http.StatusOK},
+			{"/api/admin/sites", http.StatusOK},
+			{"/api/admin/content", http.StatusForbidden},
+		} {
+			r := httptest.NewRequest(http.MethodGet, endpoint.path+selector.query, nil)
+			r.Header.Set("X-Site-Id", selector.header)
+			r.AddCookie(sessionCookie(token, 86400))
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			if w.Code != endpoint.want {
+				t.Fatalf("%s header=%q query=%q: got %d, want %d: %s", endpoint.path, selector.header, selector.query, w.Code, endpoint.want, w.Body.String())
+			}
+			if endpoint.path == "/api/admin/sites" {
+				var sites []struct{ ID int64 }
+				if err := json.Unmarshal(w.Body.Bytes(), &sites); err != nil || len(sites) != 1 || sites[0].ID != 2 {
+					t.Fatalf("site recovery returned inaccessible sites: %s", w.Body.String())
+				}
+			}
+		}
+	}
+}
+
+func TestAdminSessionStorageFailureIsUnavailable(t *testing.T) {
+	for _, table := range []string{"gocms_admin_session", "gocms_admin_user"} {
+		t.Run(table, func(t *testing.T) {
+			s, database, token := newCategoryTestServer(t)
+			if _, err := database.Exec(`ALTER TABLE ` + table + ` RENAME TO unavailable_admin_table`); err != nil {
+				t.Fatal(err)
+			}
+			w := categoryRequest(t, s, token, http.MethodGet, "/api/admin/session", "")
+			if w.Code != http.StatusServiceUnavailable || len(w.Result().Cookies()) != 0 {
+				t.Fatalf("storage failure treated as expired session: %d %s", w.Code, w.Body.String())
+			}
+			if _, err := database.Exec(`ALTER TABLE unavailable_admin_table RENAME TO ` + table); err != nil {
+				t.Fatal(err)
+			}
+			w = categoryRequest(t, s, token, http.MethodGet, "/api/admin/session", "")
+			if w.Code != http.StatusOK {
+				t.Fatalf("session did not recover: %d %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestAdminAuthResponsesAreNotCacheable(t *testing.T) {
+	s, _, token := newCategoryTestServer(t)
+	for _, tc := range []struct{ method, path, token, body string }{
+		{http.MethodGet, "/api/admin/session", token, ""},
+		{http.MethodGet, "/api/admin/session", "invalid", ""},
+		{http.MethodGet, "/api/admin/setup-status", "", ""},
+		{http.MethodPost, "/api/admin/login", "", `{"username":"missing","password":"incorrect"}`},
+		{http.MethodPost, "/api/admin/logout", token, ""},
+	} {
+		w := categoryRequest(t, s, tc.token, tc.method, tc.path, tc.body)
+		if !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
+			t.Fatalf("%s %s status %d may be cached", tc.method, tc.path, w.Code)
 		}
 	}
 }

@@ -1,3 +1,13 @@
+export class APIError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = "APIError"
+    this.status = status
+  }
+}
+
 // API errors may be plain text, { error: string }, or
 // { error: { code, message } }. Never stringify an unknown object for the UI.
 export function getErrorMessage(reason: unknown, fallback = "操作失败，请稍后重试"): string {

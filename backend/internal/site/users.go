@@ -130,8 +130,12 @@ func (u *AdminUser) canManageCategory(id int64) bool {
 }
 
 func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, route string) bool {
-	u, ok, _ := s.authenticateRequest(r)
-	if !ok || u == nil {
+	u, _, err := s.authenticateAdminRequest(r)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "暂时无法验证登录状态，请稍后重试"})
+		return false
+	}
+	if u == nil {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或账号已停用"})
 		return false
 	}
@@ -140,6 +144,11 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 		module = "login_logs"
 	}
 	*r = *r.WithContext(context.WithValue(r.Context(), contentScopeKey{}, u))
+	// Identity and the list of accessible sites are independent of the last
+	// selected site. The browser uses them to recover an obsolete selection.
+	if module == "session" || (module == "sites" && r.Method == http.MethodGet) {
+		return true
+	}
 	if module == "geography" {
 		if u.IsSuper {
 			return true
@@ -193,9 +202,9 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 			return false
 		}
 		switch module {
-		case "session", "stats", "site-settings", "notifications":
+		case "stats", "site-settings", "notifications":
 			return true
-		case "sites", "languages", "categories", "models", "model-fields", "model-tables":
+		case "languages", "categories", "models", "model-fields", "model-tables":
 			// Editor selectors require read-only site, model, language and category metadata.
 			if r.Method == http.MethodGet {
 				return true

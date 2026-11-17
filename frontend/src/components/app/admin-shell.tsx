@@ -1,10 +1,4 @@
-import { MailSettings } from "@/components/app/mail-settings"
-import { GeographyPage } from "@/components/app/geography-page"
-import { MembersPage, MemberLoginSettings } from "@/components/app/member-login-settings"
-import { OrdersPage } from "@/components/app/orders-page"
-import { PaymentsPage } from "@/components/app/payments-page"
-import { CommerceDimensionsPage } from "@/components/app/commerce-dimensions-page"
-import { useEffect, useState, type ComponentType } from "react"
+import { lazy, Suspense, useEffect, useState, type ComponentType } from "react"
 import {
   BarChart3,
   ArrowRightLeft,
@@ -14,6 +8,7 @@ import {
   ChevronsUpDown,
   FolderTree,
   LayoutDashboard,
+  LoaderCircle,
   LogOut,
   PanelLeft,
   MessageSquareText,
@@ -58,27 +53,36 @@ import { useAdminRoute, type AdminView } from "@/lib/admin-router"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
-import { DashboardPage } from "@/components/app/dashboard-page"
-import { CategoriesPage } from "@/components/app/categories-page"
-import { ModelsPage } from "@/components/app/models-page"
-import { LanguagesPage } from "@/components/app/languages-page"
-import { MessagesPage } from "@/components/app/messages-page"
-import { ContentPage } from "@/components/app/content-page"
-import { ThemePage } from "@/components/app/theme-page"
-import { ApiKeysPage } from "@/components/app/api-keys-page"
 
-import { MediaPage } from "@/components/app/media-page"
-import { UsersPage } from "@/components/app/users-page"
-import { LogsPage } from "@/components/app/logs-page"
-import { TrafficPage } from "@/components/app/traffic-page"
-import { RedirectsPage } from "@/components/app/redirects-page"
-import { SitesPage } from "@/components/app/sites-page"
 
-import { PublishPage } from "@/components/app/publish-page"
 import { SettingsDialog } from "@/components/app/settings-dialog"
 import { NotificationBell } from "@/components/app/notification-bell"
 import { ThemeToggle } from "@/components/app/theme-provider"
 import { HeaderActionsProvider, HeaderActionsSlot } from "@/components/app/header-actions"
+
+import { DashboardPage } from "@/components/app/dashboard-page"
+
+const MailSettings = lazy(() => import("@/components/app/mail-settings").then((module) => ({ default: module.MailSettings })))
+const GeographyPage = lazy(() => import("@/components/app/geography-page").then((module) => ({ default: module.GeographyPage })))
+const MembersPage = lazy(() => import("@/components/app/member-login-settings").then((module) => ({ default: module.MembersPage })))
+const MemberLoginSettings = lazy(() => import("@/components/app/member-login-settings").then((module) => ({ default: module.MemberLoginSettings })))
+const OrdersPage = lazy(() => import("@/components/app/orders-page").then((module) => ({ default: module.OrdersPage })))
+const PaymentsPage = lazy(() => import("@/components/app/payments-page").then((module) => ({ default: module.PaymentsPage })))
+const CommerceDimensionsPage = lazy(() => import("@/components/app/commerce-dimensions-page").then((module) => ({ default: module.CommerceDimensionsPage })))
+const CategoriesPage = lazy(() => import("@/components/app/categories-page").then((module) => ({ default: module.CategoriesPage })))
+const ModelsPage = lazy(() => import("@/components/app/models-page").then((module) => ({ default: module.ModelsPage })))
+const LanguagesPage = lazy(() => import("@/components/app/languages-page").then((module) => ({ default: module.LanguagesPage })))
+const MessagesPage = lazy(() => import("@/components/app/messages-page").then((module) => ({ default: module.MessagesPage })))
+const ContentPage = lazy(() => import("@/components/app/content-page").then((module) => ({ default: module.ContentPage })))
+const ThemePage = lazy(() => import("@/components/app/theme-page").then((module) => ({ default: module.ThemePage })))
+const ApiKeysPage = lazy(() => import("@/components/app/api-keys-page").then((module) => ({ default: module.ApiKeysPage })))
+const MediaPage = lazy(() => import("@/components/app/media-page").then((module) => ({ default: module.MediaPage })))
+const UsersPage = lazy(() => import("@/components/app/users-page").then((module) => ({ default: module.UsersPage })))
+const LogsPage = lazy(() => import("@/components/app/logs-page").then((module) => ({ default: module.LogsPage })))
+const TrafficPage = lazy(() => import("@/components/app/traffic-page").then((module) => ({ default: module.TrafficPage })))
+const RedirectsPage = lazy(() => import("@/components/app/redirects-page").then((module) => ({ default: module.RedirectsPage })))
+const SitesPage = lazy(() => import("@/components/app/sites-page").then((module) => ({ default: module.SitesPage })))
+const PublishPage = lazy(() => import("@/components/app/publish-page").then((module) => ({ default: module.PublishPage })))
 
 type AdminShellProps = {
   user: AdminUser
@@ -598,7 +602,13 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
         <main className="min-h-0 flex-1 overflow-hidden">
           <ScrollArea className="h-full" contentClassName="h-full p-4 sm:p-6">
           <div className="mx-auto h-full w-full max-w-screen-2xl min-h-0">
-            <ViewContent key={`${activeView}-${activeSiteId}`} view={activeView} user={user} />
+            <Suspense key={`${activeView}-${activeSiteId}`} fallback={
+              <div role="status" aria-label="页面加载中" className="flex min-h-64 items-center justify-center text-muted-foreground">
+                <LoaderCircle className="size-5 animate-spin" />
+              </div>
+            }>
+              <ViewContent view={activeView} user={user} />
+            </Suspense>
           </div>
           </ScrollArea>
         </main>
