@@ -4,12 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/user"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -17,12 +15,12 @@ import (
 // include only when Nginx does not already load that file.
 type Direct struct {
 	mu     sync.Mutex
-	engine *agent
+	engine *engine
 	ready  bool
 }
 
 func NewDirect(c Config) *Direct {
-	return &Direct{engine: &agent{config: c, statePath: agentDir + "/snapshot.json", logPath: logFile}}
+	return &Direct{engine: &engine{config: c, backupDir: stateDir, logPath: logFile}}
 }
 
 func ExecutionUser() string {
@@ -71,16 +69,6 @@ func (d *Direct) initialize() error {
 	if err := a.config.Validate(); err != nil {
 		return err
 	}
-	if info, err := os.Lstat(a.config.SocketPath); err == nil && info.Mode()&os.ModeSocket != 0 {
-		connection, err := net.DialTimeout("unix", a.config.SocketPath, time.Second)
-		if err == nil {
-			connection.Close()
-			return errors.New("检测到旧版 Nginx 同步代理，请先关闭代理同步并停止 gocms-security-agent 服务，再使用 GoCMS 直接管理")
-		}
-		if !errors.Is(err, syscall.ECONNREFUSED) && !os.IsNotExist(err) {
-			return fmt.Errorf("无法确认旧版同步代理是否已停止：%w", err)
-		}
-	}
 	server, err := rememberFile(a.config.ServerConfig)
 	if err != nil {
 		return err
@@ -91,7 +79,7 @@ func (d *Direct) initialize() error {
 	if _, err := RenderSingleFile(server.data, Snapshot{}, time.Now(), a.logPath); err != nil {
 		return err
 	}
-	for _, dir := range []string{filepath.Dir(a.statePath), filepath.Dir(a.logPath)} {
+	for _, dir := range []string{a.backupDir, filepath.Dir(a.logPath)} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return err
 		}
@@ -99,7 +87,7 @@ func (d *Direct) initialize() error {
 			return fmt.Errorf("安全配置和日志目录不能为符号链接或允许其他用户写入：%s", dir)
 		}
 	}
-	backup := filepath.Join(filepath.Dir(a.statePath), "server.conf.before")
+	backup := filepath.Join(a.backupDir, "server.conf.before")
 	if _, err := os.Lstat(backup); os.IsNotExist(err) {
 		return atomicFile(backup, server.data, 0600)
 	} else {
@@ -147,7 +135,7 @@ func (d *Direct) apply(s Snapshot) error {
 		if err != nil {
 			return err
 		}
-		backup := filepath.Join(filepath.Dir(a.statePath), "nginx.conf.before")
+		backup := filepath.Join(a.backupDir, "nginx.conf.before")
 		if _, err := os.Lstat(backup); os.IsNotExist(err) {
 			if err := atomicFile(backup, file.data, 0600); err != nil {
 				return err

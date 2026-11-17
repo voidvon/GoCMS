@@ -14,11 +14,11 @@ export type AdminUser = {
 
 export type CurrencyInfo = { code: string; exponent: number }
 export type SecurityPolicy = { enabled: boolean; window_seconds: number; threshold: number; ban_scope: "global" | "site"; ban_seconds: number; paths: string[] }
-export type SecurityPlatform = { trusted_proxies: string[]; nginx_enabled: boolean; nginx_mode: "direct" | "agent"; socket_path: string; nginx_binary: string; nginx_config: string; server_config: string; agent_user: string }
+export type SecurityPlatform = { trusted_proxies: string[]; nginx_enabled: boolean; nginx_binary: string; nginx_config: string; server_config: string; run_user: string }
 export type SecurityEntry = { id: number; site_id: number; network: string; kind: "allow" | "deny"; reason: string; source: string; created_at: string; expires_at: string; revoked_at: string }
 export type SecurityEvent = { id: number; site_id: number; ip: string; host: string; path: string; action: string; reason: string; created_at: string }
 export type SecuritySync = { state: "disabled" | "pending" | "applied" | "failed"; digest: string; applied_at: string; error: string }
-export type SecurityNginx = { status: SecuritySync; http_config: string; server_config: string; runtime_user: string }
+export type SecurityNginx = { status: SecuritySync; http_config: string; server_config: string; runtime_user: string; init_command: string; setup: { ready: boolean; initialized_at?: string; protocol?: number; message?: string } }
 export const getSecurityPolicy = () => request<SecurityPolicy>("/api/admin/security/policy")
 export const saveSecurityPolicy = (input: SecurityPolicy) => request("/api/admin/security/policy", { method: "PUT", body: JSON.stringify(input) })
 export const getSecurityPlatform = () => request<SecurityPlatform>("/api/admin/security/platform")
@@ -29,11 +29,6 @@ export const revokeSecurityEntry = (scope: string, id: number) => request(`/api/
 export const getSecurityEvents = (scope: string, page: number) => request<{ items: SecurityEvent[]; total: number }>(`/api/admin/security/events?scope=${scope}&page=${page}`)
 export const getSecurityNginx = () => request<SecurityNginx>("/api/admin/security/nginx")
 export const syncSecurityNginx = () => request<SecuritySync>("/api/admin/security/nginx/sync", { method: "POST", body: "{}" })
-export async function downloadSecurityInstaller() {
-  const response = await fetch(endpoint("/api/admin/security/nginx/install"), { method: "POST", credentials: "include", cache: "no-store", headers: { "Content-Type": "application/json" }, body: "{}" })
-  if (!response.ok) throw new Error(getErrorMessage(await response.json().catch(() => null), "接入包下载失败"))
-  return response.blob()
-}
 export type CurrencyRule = { currency: string; rate: string; enabled: boolean; countries: string[] }
 export type PricingSettings = { enabled: boolean; base_currency: string; currencies: CurrencyRule[]; max_age_hours: number; rates_updated_at: string; revision: number; country_header: string; trusted_proxies: string[]; refresh_rates?: boolean }
 export const getCommercePricing = () => request<{ settings: PricingSettings; supported: CurrencyInfo[] }>("/api/admin/payments/pricing")

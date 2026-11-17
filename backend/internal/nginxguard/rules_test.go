@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -106,72 +105,9 @@ func testNginxTenantRulesWithRealServer(t *testing.T, single bool) {
 	}
 }
 
-func TestAgentRollbackExpirationAndNoRedundantReload(t *testing.T) {
+func TestLogCursorAndRotation(t *testing.T) {
 	dir := t.TempDir()
-	binary := filepath.Join(dir, "nginx")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$0.calls\"\nexit 1\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	a := &agent{config: Config{NginxBinary: binary, NginxConfig: filepath.Join(dir, "nginx.conf")}, httpPath: filepath.Join(dir, "http.conf"), serverPath: filepath.Join(dir, "server.conf"), statePath: filepath.Join(dir, "state.json"), logPath: filepath.Join(dir, "probes.log")}
-	for _, p := range []string{a.httpPath, a.serverPath} {
-		if err := os.WriteFile(p, []byte("previous"), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	s := exampleSnapshot()
-	if err := a.apply(s); err == nil {
-		t.Fatal("failed nginx validation was accepted")
-	}
-	for _, p := range []string{a.httpPath, a.serverPath} {
-		b, _ := os.ReadFile(p)
-		if string(b) != "previous" {
-			t.Fatal("old configuration was not restored")
-		}
-	}
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$0.calls\"\nexit 0\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.apply(s); err != nil {
-		t.Fatal(err)
-	}
-	before, _ := os.ReadFile(binary + ".calls")
-	if err := a.apply(s); err != nil {
-		t.Fatal(err)
-	}
-	after, _ := os.ReadFile(binary + ".calls")
-	if string(before) != string(after) {
-		t.Fatal("unchanged configuration caused reload")
-	}
-	if a.result.Digest != Digest(s) {
-		t.Fatal("wrong applied snapshot")
-	}
-	s.Rules[0].ExpiresAt = time.Now().Add(-time.Second).UTC().Format(time.RFC3339)
-	if err := a.apply(s); err != nil {
-		t.Fatal(err)
-	}
-	b, _ := os.ReadFile(a.httpPath)
-	if strings.Contains(string(b), "203.0.113.0/24") {
-		t.Fatal("expired IP retained in nginx")
-	}
-	// A reload failure also restores both files and keeps the last acknowledgement.
-	old, _ := os.ReadFile(a.httpPath)
-	oldDigest := a.result.Digest
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nif [ \"$1\" = '-s' ]; then exit 1; fi\nexit 0\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	s.Rules = append(s.Rules, Rule{SiteID: 91, Kind: "deny", Network: "192.0.2.5/32"})
-	if err := a.apply(s); err == nil {
-		t.Fatal("reload failure accepted")
-	}
-	b, _ = os.ReadFile(a.httpPath)
-	if string(old) != string(b) || a.result.Digest != oldDigest {
-		t.Fatal("reload failure changed acknowledged state")
-	}
-}
-
-func TestAgentLogCursorAndRotation(t *testing.T) {
-	dir := t.TempDir()
-	a := &agent{logPath: filepath.Join(dir, "probes.log")}
+	a := &engine{logPath: filepath.Join(dir, "probes.log")}
 	line := `{"time":"2026-11-17T10:00:00+08:00","host":"alpha.example.test","ip":"203.0.113.1","path":"/server.key","status":404}` + "\n"
 	if err := os.WriteFile(a.logPath, []byte(line+`{"time":`), 0600); err != nil {
 		t.Fatal(err)
@@ -184,7 +120,7 @@ func TestAgentLogCursorAndRotation(t *testing.T) {
 	if err != nil || len(next.Items) != 0 || next.Cursor != b.Cursor {
 		t.Fatalf("partial line advanced cursor: %+v %v", next, err)
 	}
-	restarted := &agent{logPath: a.logPath}
+	restarted := &engine{logPath: a.logPath}
 	next, err = restarted.events(b.Cursor)
 	if err != nil || len(next.Items) != 0 {
 		t.Fatalf("restart replayed acknowledged probes: %+v %v", next, err)
@@ -201,22 +137,7 @@ func TestAgentLogCursorAndRotation(t *testing.T) {
 	}
 }
 
-func TestInstallIncludePreservesPanelConfiguration(t *testing.T) {
-	data := []byte("# http { ignored\nhttp\n{\n log_format x 'text { }';\n server { listen 80; }\n}\n")
-	updated, err := IncludeInBlock(data, "http", "/etc/gocms-security/http.conf")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(updated), "log_format x 'text { }';") || !strings.Contains(string(updated), "# GoCMS security") {
-		t.Fatal("panel configuration changed")
-	}
-	again, err := IncludeInBlock(updated, "http", "/etc/gocms-security/http.conf")
-	if err != nil || string(again) != string(updated) {
-		t.Fatal("installation is not idempotent")
-	}
-	if _, err := IncludeInBlock([]byte("server {} server {}"), "server", "/x"); err == nil {
-		t.Fatal("ambiguous server selection accepted")
-	}
+func TestRejectConfigurationInjection(t *testing.T) {
 	s := exampleSnapshot()
 	s.Tenants[0].Hosts = []string{"example.test;include /etc/passwd"}
 	if Validate(s) == nil {

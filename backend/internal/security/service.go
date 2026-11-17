@@ -35,22 +35,30 @@ type attempt struct {
 	touched time.Time
 }
 type Service struct {
-	database     *sql.DB
-	mu           sync.Mutex
-	loaded       time.Time
-	state        *state
-	attempts     map[string]attempt
-	syncMu       sync.Mutex
-	status       SyncStatus
-	direct       *nginxguard.Direct
-	directConfig nginxguard.Config
+	database   *sql.DB
+	mu         sync.Mutex
+	loaded     time.Time
+	state      *state
+	attempts   map[string]attempt
+	syncMu     sync.Mutex
+	status     SyncStatus
+	controller NginxController
 }
 
-func New(database *sql.DB) (*Service, error) {
+type NginxController interface {
+	Apply(context.Context, nginxguard.Config, nginxguard.Snapshot) (nginxguard.Result, error)
+	Events(context.Context, nginxguard.Config, string) (nginxguard.LogBatch, error)
+	Setup(context.Context, nginxguard.Config) nginxguard.SetupStatus
+}
+
+func New(database *sql.DB, controllers ...NginxController) (*Service, error) {
 	if err := Ensure(context.Background(), database); err != nil {
 		return nil, err
 	}
-	s := &Service{database: database, attempts: map[string]attempt{}}
+	s := &Service{database: database, attempts: map[string]attempt{}, controller: nginxguard.Client{}}
+	if len(controllers) > 0 {
+		s.controller = controllers[0]
+	}
 	var saved string
 	if err := database.QueryRow(`SELECT value FROM gocms_security_state WHERE key='nginx_status'`).Scan(&saved); err == nil {
 		if err := json.Unmarshal([]byte(saved), &s.status); err != nil {

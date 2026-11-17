@@ -11,8 +11,7 @@ const httpEnd = "# GOCMS-SECURITY-HTTP-END\n"
 const serverBegin = "\n# GOCMS-SECURITY-SERVER-BEGIN\n"
 const serverEnd = "# GOCMS-SECURITY-SERVER-END\n"
 
-// SingleFileFragments uses a separate variable namespace so an unused http
-// include left by v0.1.61 can coexist without editing the main Nginx config.
+// SingleFileFragments renders the two managed sections in the same site file.
 func SingleFileFragments(s Snapshot, now time.Time, logPath string) (string, string, error) {
 	h, server, err := Render(s, now, logPath)
 	if err != nil {
@@ -46,9 +45,6 @@ func RenderSingleFile(data []byte, s Snapshot, now time.Time, logPath string) ([
 	if err != nil {
 		return nil, err
 	}
-	// Remove only the exact server include installed by previous GoCMS versions.
-	// The old main-config include can remain; its variables are no longer used.
-	text = strings.ReplaceAll(text, "\n    include "+serverFile+"; # GoCMS security\n", "")
 	offset, err := blockOffset([]byte(text), "server")
 	if err != nil {
 		return nil, err

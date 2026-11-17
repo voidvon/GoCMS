@@ -1,14 +1,12 @@
 package site
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
+	"os"
 	"strconv"
 	"strings"
 
@@ -87,10 +85,10 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 				accountError(w, err)
 				return
 			}
-			changed := old.NginxMode != p.NginxMode || old.SocketPath != p.SocketPath || old.NginxBinary != p.NginxBinary || old.NginxConfig != p.NginxConfig || old.ServerConfig != p.ServerConfig
+			changed := old.NginxBinary != p.NginxBinary || old.NginxConfig != p.NginxConfig || old.ServerConfig != p.ServerConfig || old.RunUser != p.RunUser
 			status := s.security.Status(r.Context())
 			if changed && status.Digest != "" && status.State != "disabled" {
-				accountInputError(w, "请先关闭 Nginx 同步并确认清理成功，再更换管理方式或配置路径")
+				accountInputError(w, "请先关闭 Nginx 同步并确认清理成功，再更换配置路径或运行用户")
 				return
 			}
 			if err := security.SaveConfig(r.Context(), s.database, 0, p); err != nil {
@@ -114,7 +112,7 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 			accountError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"status": s.security.Status(r.Context()), "http_config": h, "server_config": server, "runtime_user": nginxguard.ExecutionUser()})
+		writeJSON(w, 200, map[string]any{"status": s.security.Status(r.Context()), "http_config": h, "server_config": server, "runtime_user": nginxguard.ExecutionUser(), "setup": s.security.NginxSetup(r.Context()), "init_command": s.nginxInitCommand(r.Context())})
 		return
 	}
 	if endpoint == "/nginx/sync" {
@@ -132,14 +130,6 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, s.security.Status(r.Context()))
-		return
-	}
-	if endpoint == "/nginx/install" {
-		if r.Method != http.MethodPost {
-			methodNotAllowed(w)
-			return
-		}
-		s.securityInstallBundle(w, r)
 		return
 	}
 	scope, err := s.securityScope(r)
@@ -277,45 +267,16 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) securityInstallBundle(w http.ResponseWriter, r *http.Request) {
-	p, err := security.LoadPlatform(r.Context(), s.database)
+func (s *Server) nginxInitCommand(ctx context.Context) string {
+	executable, err := os.Executable()
 	if err != nil {
-		accountError(w, err)
-		return
+		return "sudo ./gocms init-nginx"
 	}
-	if err := security.ValidatePlatform(&p); err != nil {
-		accountInputError(w, err.Error())
-		return
+	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
+	command := "sudo " + quote(executable) + " init-nginx"
+	var databasePath string
+	if err := s.database.QueryRowContext(ctx, `SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&databasePath); err == nil && databasePath != "" {
+		command += " -db " + quote(databasePath)
 	}
-	c := nginxguard.Config{SocketPath: p.SocketPath, NginxBinary: p.NginxBinary, NginxConfig: p.NginxConfig, ServerConfig: p.ServerConfig, AgentUser: p.AgentUser}
-	raw, err := json.MarshalIndent(c, "", "  ")
-	if err != nil {
-		accountError(w, err)
-		return
-	}
-	files := map[string][]byte{
-		"agent.json": raw,
-		"install.sh": []byte("#!/bin/sh\nset -eu\nif [ \"$#\" -ne 1 ]; then echo 'Usage: sudo sh install.sh /absolute/path/to/site'; exit 1; fi\ncd -- \"$(dirname -- \"$0\")\"\nexec \"$1\" security-agent install -config \"$(pwd)/agent.json\"\n"),
-		"README.txt": []byte("GoCMS Nginx 接入包\n\n1. 确认 agent.json 中的路径和 GoCMS 系统运行用户正确。\n2. 将解压后的文件放在服务器上，以 root 执行：sh install.sh /绝对路径/site\n3. 安装器会备份原 Nginx 主配置和站点配置，添加 include，检查并平滑重载，安装 systemd 同步服务。\n4. 返回后台开启 Nginx 同步，点击立即同步。\n\n日常规则、名单与解封均在后台管理；GoCMS 无需 root 或宝塔 API 密钥。\n仅支持 Linux/systemd；Nginx 主配置需包含一个顶层 http 块，所选站点配置需包含一个顶层 server 块。\n使用 CDN 时，需先在 Nginx 配置受信任的真实 IP 来源；本接入包不会自动信任代理头。\n回退：停止 gocms-security-agent 服务，从 /etc/gocms-security/ 中的 nginx.conf.before 和 server.conf.before 恢复对应配置，检查通过后重载。\n"),
-	}
-	var buf bytes.Buffer
-	archive := zip.NewWriter(&buf)
-	for _, name := range []string{"agent.json", "install.sh", "README.txt"} {
-		f, err := archive.Create(name)
-		if err != nil {
-			accountError(w, err)
-			return
-		}
-		if _, err = f.Write(files[name]); err != nil {
-			accountError(w, err)
-			return
-		}
-	}
-	if err := archive.Close(); err != nil {
-		accountError(w, err)
-		return
-	}
-	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="gocms-security-install.zip"`)
-	_, _ = w.Write(buf.Bytes())
+	return command
 }

@@ -1,4 +1,4 @@
-// Package nginxguard implements a small, local-only Nginx enforcement agent.
+// Package nginxguard manages Nginx through a restricted, one-shot root command.
 // Requests contain structured data, never configuration text or commands.
 package nginxguard
 

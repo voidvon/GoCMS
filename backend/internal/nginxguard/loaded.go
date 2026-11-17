@@ -55,6 +55,7 @@ func configurationLoadsSite(c Config) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, c.NginxBinary, "-T", "-c", c.NginxConfig)
+	cmd.Env = commandEnvironment()
 	var diagnostic diagnosticOutput
 	cmd.Stderr = &diagnostic
 	stdout, err := cmd.StdoutPipe()

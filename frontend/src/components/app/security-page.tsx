@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react"
-import { Download, Plus, RefreshCw, ShieldCheck, ShieldOff, Unplug } from "lucide-react"
+import { Copy, Plus, RefreshCw, ShieldCheck, ShieldOff, Unplug } from "lucide-react"
 import {
-  addSecurityEntry, downloadSecurityInstaller, getSecurityEntries, getSecurityEvents, getSecurityNginx,
+  addSecurityEntry, getSecurityEntries, getSecurityEvents, getSecurityNginx,
   getSecurityPlatform, getSecurityPolicy, revokeSecurityEntry, saveSecurityPlatform, saveSecurityPolicy, syncSecurityNginx,
   type AdminUser, type SecurityEntry, type SecurityEvent, type SecurityNginx, type SecurityPlatform, type SecurityPolicy,
 } from "@/lib/api"
@@ -138,14 +138,6 @@ export function SecurityPage({ user }: { user: AdminUser }) {
       await syncSecurityNginx()
     }, "Nginx 已确认当前配置")
   }
-  function switchToDirect() {
-    if (!platformInput) return
-    const input: SecurityPlatform = { ...platformInput, nginx_mode: "direct" }
-    void act(async () => {
-      await persistPlatform(input)
-      if (input.nginx_enabled) await syncSecurityNginx()
-    }, input.nginx_enabled ? "已切换为 GoCMS 直接管理并完成同步" : "已切换为 GoCMS 直接管理")
-  }
   function add(event: FormEvent) {
     event.preventDefault()
     void act(async () => {
@@ -212,22 +204,28 @@ export function SecurityPage({ user }: { user: AdminUser }) {
       </section>}
 
       {tab === "nginx" && user.is_super && <section className="max-w-4xl space-y-5" aria-label="Nginx 接入设置">
-        {platform?.nginx_mode === "agent" && !nginx?.status.applied_at && <div className="space-y-2 rounded-xl border bg-muted/30 p-4"><p className="text-sm font-medium">当前使用独立代理模式</p><p className="text-sm leading-6 text-muted-foreground">旧版配置会保留此模式。选择“GoCMS 直接管理”可直接使用当前程序读写配置并重载 Nginx，无需下载接入包。</p><Button type="button" variant="outline" size="sm" disabled={pending || !nginx} onClick={switchToDirect}>{platform.nginx_enabled ? "切换为直接管理并同步" : "切换为直接管理"}</Button></div>}
-        <div className="space-y-3 rounded-xl border bg-card p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><Unplug className="size-4" /><span className="font-medium">同步状态</span><Badge variant={nginx?.status.state === "failed" ? "destructive" : "outline"}>{nginx ? syncLabels[nginx.status.state] : "读取中"}</Badge></div><Button variant="outline" disabled={pending || !platform || (!platform.nginx_enabled && nginx?.status.state === "disabled")} onClick={syncNginx}><RefreshCw className="size-4" />{platformDirty ? "保存并同步" : "立即同步"}</Button></div>{platformDirty && <p className="text-xs leading-5 text-muted-foreground">接入设置已修改，点击“保存并同步”将先保存当前管理方式和配置，再执行同步。</p>}{nginx?.status.applied_at && <p className="text-xs text-muted-foreground">上次确认：<TimeText value={nginx.status.applied_at} /></p>}{nginx?.status.error && <p className="break-words text-sm text-muted-foreground">{nginx.status.error}</p>}<p className="text-xs leading-5 text-muted-foreground">Go 防护独立生效。接入后约每 15 秒同步一次；检查或重载失败时恢复原配置并重试。{platform?.nginx_mode === "agent" ? "独立代理可在 CMS 暂停时继续清理到期规则。" : "直接管理模式在 GoCMS 运行期间同步封禁和到期解封。"}</p></div>
+        <div className="space-y-3 rounded-xl border bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><Unplug className="size-4" /><span className="font-medium">同步状态</span><Badge variant={nginx?.status.state === "failed" ? "destructive" : "outline"}>{nginx ? syncLabels[nginx.status.state] : "读取中"}</Badge></div><Button variant="outline" disabled={pending || !platform || (!platform.nginx_enabled && nginx?.status.state === "disabled")} onClick={syncNginx}><RefreshCw className="size-4" />{platformDirty ? "保存并同步" : "立即同步"}</Button></div>
+          {platformDirty && <p className="text-xs leading-5 text-muted-foreground">接入设置已修改，将先保存当前配置再同步；更改配置路径或运行用户后需要重新执行初始化命令。</p>}
+          {nginx?.status.applied_at && <p className="text-xs text-muted-foreground">上次确认：<TimeText value={nginx.status.applied_at} /></p>}
+          {nginx?.status.error && <p className="break-words text-sm text-muted-foreground">{nginx.status.error}</p>}
+          <p className="text-xs leading-5 text-muted-foreground">Go 防护独立生效。Nginx 初始化后约每 15 秒同步封禁和到期解封；检查或重载失败时恢复原配置并重试。</p>
+        </div>
+        <div className="space-y-3 rounded-xl border p-4">
+          <div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-medium">一次性 root 初始化</h3><Badge variant={nginx?.setup.ready ? "secondary" : "outline"}>{nginx?.setup.ready ? "已授权" : "待初始化"}</Badge></div>
+          <p className="text-sm leading-6 text-muted-foreground">先保存下方接入设置，再在宝塔终端以 root 执行以下命令。初始化会备份配置、补齐 include 并授权同一 GoCMS 程序执行固定的 Nginx 管理操作。</p>
+          {nginx?.init_command && <div className="flex items-start gap-2"><ScrollArea orientation="horizontal" className="min-w-0 flex-1 rounded-lg bg-muted" contentClassName="p-3"><code className="whitespace-nowrap text-xs">{nginx.init_command}</code></ScrollArea><Button type="button" variant="outline" size="icon" aria-label="复制 Nginx 初始化命令" onClick={() => void act(() => navigator.clipboard.writeText(nginx.init_command), "初始化命令已复制")}><Copy className="size-4" /></Button></div>}
+          {nginx?.setup.message && <p className="break-words text-xs leading-5 text-muted-foreground">{nginx.setup.message}</p>}
+          {nginx?.setup.initialized_at && <p className="text-xs text-muted-foreground">上次初始化：<TimeText value={nginx.setup.initialized_at} /></p>}
+          <p className="text-xs leading-5 text-muted-foreground">日常运行用户：<code>{nginx?.runtime_user ?? "读取中"}</code>。完成后返回点击“立即同步”，无需下载接入包或运行其他常驻服务。</p>
+        </div>
         {platform && <form onSubmit={savePlatform} className="space-y-5"><fieldset disabled={pending} className="space-y-5">
-          <Field label="可信代理 IP / 网段" id="security-proxies" hint="每行一条，仅信任实际反向代理。GoCMS 与 Nginx 同机时通常填写 127.0.0.1/32 和 ::1/128；未配置时使用连接来源 IP。使用 CDN 时，还需在 Nginx 配置可信的真实 IP 来源。"><Textarea id="security-proxies" rows={3} placeholder={"127.0.0.1/32\n::1/128"} className="font-mono" value={proxyText} onChange={e => setProxyText(e.target.value)} /></Field>
-          <Field label="Nginx 管理方式" id="security-nginx-mode"><Select value={platform.nginx_mode} onValueChange={nginx_mode => { if (nginx_mode === "direct" || nginx_mode === "agent") setPlatform({ ...platform, nginx_mode }) }}><SelectTrigger id="security-nginx-mode" className="w-full"><SelectValue>{platform.nginx_mode === "direct" ? "GoCMS 直接管理" : "独立代理（兼容模式）"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="direct">GoCMS 直接管理</SelectItem><SelectItem value="agent">独立代理（兼容模式）</SelectItem></SelectContent></Select></Field>
-          <div className="flex items-center justify-between gap-4 rounded-xl border p-4"><div><Label htmlFor="security-nginx-enabled">启用 Nginx 名单同步</Label><p className="mt-1 text-xs leading-5 text-muted-foreground">保存配置后自动同步；关闭后仍需完成一次同步以清除 Nginx 中的规则。</p></div><Switch id="security-nginx-enabled" checked={platform.nginx_enabled} onCheckedChange={nginx_enabled => setPlatform({ ...platform, nginx_enabled })} /></div>
-          {platform.nginx_mode === "agent" && <Field label="本机 Socket 路径" id="security-socket"><Input id="security-socket" required className="font-mono" value={platform.socket_path} onChange={e => setPlatform({ ...platform, socket_path: e.target.value })} /></Field>}
-          <div className="rounded-xl border p-4"><h3 className="mb-2 text-sm font-medium">Nginx 配置路径</h3><p className="mb-4 text-xs leading-5 text-muted-foreground">{platform.nginx_mode === "agent" ? "以下路径变更后需重新安装代理接入包。" : "安全规则集中保存在所选站点配置的 GoCMS 标记区。自动检查主配置的站点引用，已有通配或嵌套引用会直接沿用；缺少时自动备份并补上 include。"}</p><div className="grid gap-4 sm:grid-cols-2">{([
-            ["nginx_binary", "Nginx 可执行文件"], ["nginx_config", "Nginx 主配置文件"], ["server_config", "宝塔站点配置文件"],
+          <Field label="可信代理 IP / 网段" id="security-proxies" hint="每行一条，仅信任实际反向代理。GoCMS 与 Nginx 同机时通常填写 127.0.0.1/32 和 ::1/128；使用 CDN 时，还需在 Nginx 配置可信的真实 IP 来源。"><Textarea id="security-proxies" rows={3} placeholder={"127.0.0.1/32\n::1/128"} className="font-mono" value={proxyText} onChange={e => setProxyText(e.target.value)} /></Field>
+          <div className="flex items-center justify-between gap-4 rounded-xl border p-4"><div><Label htmlFor="security-nginx-enabled">启用 Nginx 名单同步</Label><p className="mt-1 text-xs leading-5 text-muted-foreground">保存后自动同步；关闭后仍需完成一次同步以清除 Nginx 中的规则。</p></div><Switch id="security-nginx-enabled" checked={platform.nginx_enabled} onCheckedChange={nginx_enabled => setPlatform({ ...platform, nginx_enabled })} /></div>
+          <div className="rounded-xl border p-4"><h3 className="mb-2 text-sm font-medium">Nginx 配置路径</h3><p className="mb-4 text-xs leading-5 text-muted-foreground">安全规则集中保存在所选站点配置的 GoCMS 标记区。已有引用会沿用，缺少时自动备份主配置并补上 include。</p><div className="grid gap-4 sm:grid-cols-2">{([
+            ["nginx_binary", "Nginx 可执行文件"], ["nginx_config", "Nginx 主配置文件"], ["server_config", "宝塔站点配置文件"], ["run_user", "GoCMS 系统运行用户"],
           ] as const).map(([key, label]) => <Field key={key} label={label} id={`security-${key}`}><Input id={`security-${key}`} required className="font-mono" value={platform[key]} onChange={e => setPlatform({ ...platform, [key]: e.target.value })} /></Field>)}</div></div>
-          {platform.nginx_mode === "agent" && <Field label="GoCMS 系统运行用户" id="security-agent-user"><Input id="security-agent-user" required value={platform.agent_user} onChange={e => setPlatform({ ...platform, agent_user: e.target.value })} /></Field>}
-        </fieldset><div className="flex flex-wrap gap-2"><Button type="submit" disabled={pending}>保存平台设置</Button>{platform.nginx_mode === "agent" && <Button type="button" variant="outline" disabled={pending} onClick={() => void act(async () => {
-          const blob = await downloadSecurityInstaller(); if (!mounted.current) return
-          const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "gocms-security-install.zip"; a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-        }, "接入包已下载，使用已保存的安装参数") }><Download className="size-4" />下载接入包</Button>}</div></form>}
-        {platform?.nginx_mode === "agent" ? <div className="space-y-2 text-sm leading-6 text-muted-foreground"><p>保存参数 → 下载并解压接入包 → 在服务器以 root 执行安装 → 返回后台开启同步。</p><p>安装命令：<code className="break-all text-xs">sudo sh install.sh /绝对路径/site</code></p></div> : <div className="space-y-2 text-sm leading-6 text-muted-foreground"><p>当前系统运行用户：<code>{nginx?.runtime_user ?? "读取中"}</code>。该用户需具备站点配置写入、配置检查与重载权限；缺少站点引用时还需主配置写入权限。</p><p>确认路径 → 开启并保存同步 → 点击“立即同步”，自动完成引用检查和接入。原文件备份保存在 /etc/gocms-security/，无需安装其他服务。</p></div>}
+        </fieldset><Button type="submit" disabled={pending}>保存平台设置</Button></form>}
         {nginx && <details className="rounded-xl border p-4"><summary className="cursor-pointer text-sm">查看待同步配置</summary><ScrollArea orientation="both" className="mt-3 max-h-80" contentClassName="p-1"><pre className="text-xs leading-5">{nginx.http_config}{"\n"}{nginx.server_config}</pre></ScrollArea></details>}
       </section>}
       {!canManage && <p className="text-xs text-muted-foreground">当前为只读。修改本站设置与名单需要“管理站点安全防护”权限。</p>}

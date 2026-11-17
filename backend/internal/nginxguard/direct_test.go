@@ -3,7 +3,6 @@ package nginxguard
 import (
 	"bytes"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,7 +18,7 @@ func directFixture(t *testing.T) *Direct {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	c := Config{SocketPath: filepath.Join(dir, "agent.sock"), NginxBinary: filepath.Join(dir, "nginx"), NginxConfig: filepath.Join(dir, "nginx.conf"), ServerConfig: filepath.Join(dir, "site.conf"), AgentUser: "www"}
+	c := Config{NginxBinary: filepath.Join(dir, "nginx"), NginxConfig: filepath.Join(dir, "nginx.conf"), ServerConfig: filepath.Join(dir, "site.conf"), RunUser: "www"}
 	script := "#!/bin/sh\nprintf '%s\\n' \"$1\" >> \"$0.calls\"\nif [ -f \"$0.fail-test\" ] && [ -f \"$0.prepared\" ]; then exit 1; fi\ntouch \"$0.prepared\"\nif [ \"$1\" = '-s' ] && [ -f \"$0.fail-reload\" ]; then exit 1; fi\nif [ \"$1\" = '-T' ]; then\n  printf '# configuration file %s:\\n' \"$3\"\n  site=\"$(dirname \"$0\")/site.conf\"\n  if grep -F \"include $site;\" \"$3\" > /dev/null; then printf '# configuration file %s:\\n' \"$site\"; fi\nfi\nexit 0\n"
 	main := fmt.Sprintf("pid %s/nginx.pid;\nerror_log %s/error.log;\nevents {}\nhttp {\n include %s;\n}\n", dir, dir, c.ServerConfig)
 	for path, text := range map[string]string{c.NginxConfig: main, c.ServerConfig: "server {\n listen 8080;\n # Existing panel and TLS settings stay in place.\n location / { return 200 'ok'; }\n}\n", c.NginxBinary: script} {
@@ -28,7 +27,7 @@ func directFixture(t *testing.T) *Direct {
 		}
 	}
 	d := NewDirect(c)
-	d.engine.statePath = filepath.Join(dir, "state", "snapshot.json")
+	d.engine.backupDir = filepath.Join(dir, "state")
 	d.engine.logPath = filepath.Join(dir, "logs", "probes.log")
 	return d
 }
@@ -47,11 +46,11 @@ func TestDirectManageConfigAndRules(t *testing.T) {
 	if err != nil || !bytes.Equal(main, originalMain) {
 		t.Fatalf("main configuration changed: %s %v", main, err)
 	}
-	backup, err := os.ReadFile(filepath.Join(filepath.Dir(d.engine.statePath), "server.conf.before"))
+	backup, err := os.ReadFile(filepath.Join(d.engine.backupDir, "server.conf.before"))
 	if err != nil || !bytes.Equal(backup, originalServer) {
 		t.Fatalf("original backup: %v", err)
 	}
-	files, err := os.ReadDir(filepath.Dir(d.engine.statePath))
+	files, err := os.ReadDir(d.engine.backupDir)
 	if err != nil || len(files) != 1 || files[0].Name() != "server.conf.before" {
 		t.Fatalf("unexpected extra configuration or state file: %+v %v", files, err)
 	}
@@ -76,9 +75,6 @@ func TestDirectManageConfigAndRules(t *testing.T) {
 	server = bytes.ReplaceAll(server, []byte("# Existing panel and TLS settings stay in place."), []byte("# Changed in the panel after synchronization."))
 	if err := os.WriteFile(c.ServerConfig, server, 0700); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := os.Lstat(c.SocketPath); !os.IsNotExist(err) {
-		t.Fatalf("direct mode created an agent socket: %v", err)
 	}
 	if _, err := d.Apply(Snapshot{}); err != nil {
 		t.Fatal(err)
@@ -117,7 +113,7 @@ func TestDirectInitialFailureRestoresPanelConfiguration(t *testing.T) {
 					t.Fatalf("panel file not restored: %s %v", path, err)
 				}
 			}
-			for _, path := range []string{filepath.Join(filepath.Dir(d.engine.statePath), "http.conf"), filepath.Join(filepath.Dir(d.engine.statePath), "server.conf"), d.engine.statePath} {
+			for _, path := range []string{filepath.Join(d.engine.backupDir, "http.conf"), filepath.Join(d.engine.backupDir, "server.conf"), filepath.Join(d.engine.backupDir, "snapshot.json")} {
 				if _, err := os.Lstat(path); !os.IsNotExist(err) {
 					t.Fatalf("partial installation retained: %s %v", path, err)
 				}
@@ -129,18 +125,6 @@ func TestDirectInitialFailureRestoresPanelConfiguration(t *testing.T) {
 				t.Fatalf("retry failed: %v", err)
 			}
 		})
-	}
-}
-
-func TestDirectRejectsConcurrentAgent(t *testing.T) {
-	d := directFixture(t)
-	listener, err := net.Listen("unix", d.engine.config.SocketPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	if _, err := d.Apply(exampleSnapshot()); err == nil || !strings.Contains(err.Error(), "停止 gocms-security-agent") {
-		t.Fatalf("active agent not rejected: %v", err)
 	}
 }
 
@@ -158,51 +142,6 @@ func TestDirectSingleFilePassesRealNginxValidation(t *testing.T) {
 	}
 	if _, err := d.Apply(exampleSnapshot()); err != nil {
 		t.Fatalf("single site configuration rejected by Nginx: %v", err)
-	}
-}
-
-func TestDirectMigratesLegacySiteIncludeWithoutChangingMain(t *testing.T) {
-	binary, err := exec.LookPath("nginx")
-	if err != nil {
-		t.Skip("nginx unavailable")
-	}
-	d := directFixture(t)
-	c := d.engine.config
-	// Load the old http declarations alongside the new file to detect variable
-	// or log-format collisions left by v0.1.61's main-config include.
-	h, _, err := Render(exampleSnapshot(), time.Now(), d.engine.logPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	main, _ := os.ReadFile(c.NginxConfig)
-	main = bytes.Replace(main, []byte("http {"), []byte("http {\n"+h), 1)
-	if err := os.WriteFile(c.NginxConfig, main, 0400); err != nil {
-		t.Fatal(err)
-	}
-	site, _ := os.ReadFile(c.ServerConfig)
-	site, err = IncludeInBlock(site, "server", serverFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(c.ServerConfig, site, 0600); err != nil {
-		t.Fatal(err)
-	}
-	// Skip only the pre-change check; the generated result uses real nginx -t.
-	quoted := "'" + strings.ReplaceAll(binary, "'", "'\\''") + "'"
-	script := "#!/bin/sh\nif [ \"$1\" = '-s' ]; then exit 0; fi\nif [ ! -f \"$0.initial\" ]; then touch \"$0.initial\"; printf '# configuration file %s:\\n# configuration file %s:\\n' \"$3\" \"$(dirname \"$0\")/site.conf\"; exit 0; fi\nexec " + quoted + " \"$@\"\n"
-	if err := os.WriteFile(c.NginxBinary, []byte(script), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.Apply(exampleSnapshot()); err != nil {
-		t.Fatal(err)
-	}
-	updatedMain, _ := os.ReadFile(c.NginxConfig)
-	if !bytes.Equal(main, updatedMain) {
-		t.Fatal("legacy main config was changed")
-	}
-	updatedSite, _ := os.ReadFile(c.ServerConfig)
-	if bytes.Contains(updatedSite, []byte("include "+serverFile)) {
-		t.Fatal("legacy site include still active")
 	}
 }
 

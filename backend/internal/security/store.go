@@ -1,5 +1,5 @@
 // Package security owns platform and tenant-scoped request protection. Nginx is
-// an optional enforcement adapter, managed in process or by a local agent.
+// an optional enforcement adapter using a restricted root command.
 package security
 
 import (
@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/netip"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,16 +19,18 @@ import (
 type Platform struct {
 	TrustedProxies []string `json:"trusted_proxies"`
 	NginxEnabled   bool     `json:"nginx_enabled"`
-	NginxMode      string   `json:"nginx_mode"`
-	SocketPath     string   `json:"socket_path"`
 	NginxBinary    string   `json:"nginx_binary"`
 	NginxConfig    string   `json:"nginx_config"`
 	ServerConfig   string   `json:"server_config"`
-	AgentUser      string   `json:"agent_user"`
+	RunUser        string   `json:"run_user"`
 }
 
 func DefaultPlatform() Platform {
-	return Platform{TrustedProxies: []string{"127.0.0.1/32", "::1/128"}, NginxMode: "direct", SocketPath: "/run/gocms-security/agent.sock", NginxBinary: "/www/server/nginx/sbin/nginx", NginxConfig: "/www/server/nginx/conf/nginx.conf", ServerConfig: "/www/server/panel/vhost/nginx/gocms.conf", AgentUser: "www"}
+	return Platform{TrustedProxies: []string{"127.0.0.1/32", "::1/128"}, NginxBinary: "/www/server/nginx/sbin/nginx", NginxConfig: "/www/server/nginx/conf/nginx.conf", ServerConfig: "/www/server/panel/vhost/nginx/gocms.conf", RunUser: "www"}
+}
+
+func (p Platform) ControlConfig() nginxguard.Config {
+	return nginxguard.Config{NginxBinary: p.NginxBinary, NginxConfig: p.NginxConfig, ServerConfig: p.ServerConfig, RunUser: p.RunUser}
 }
 
 type Policy struct {
@@ -102,9 +103,19 @@ func LoadPlatform(ctx context.Context, database *sql.DB) (Platform, error) {
 	if err := loadConfig(ctx, database, 0, &saved); err != nil || len(saved) == 0 {
 		return p, err
 	}
-	// Existing deployments keep their agent mode until explicitly switched.
-	p.NginxMode = "agent"
 	err := json.Unmarshal(saved, &p)
+	if err != nil {
+		return p, err
+	}
+	// Preserve a previously configured service user when renaming the field.
+	// The removed mode and Socket settings never select an execution path.
+	var previous struct {
+		RunUser   *string `json:"run_user"`
+		AgentUser string  `json:"agent_user"`
+	}
+	if err = json.Unmarshal(saved, &previous); err == nil && previous.RunUser == nil && previous.AgentUser != "" {
+		p.RunUser = previous.AgentUser
+	}
 	return p, err
 }
 
@@ -143,12 +154,6 @@ func Network(value string) (netip.Prefix, error) {
 }
 
 func ValidatePlatform(p *Platform) error {
-	if p.NginxMode == "" {
-		p.NginxMode = "direct"
-	}
-	if p.NginxMode != "direct" && p.NginxMode != "agent" {
-		return errors.New("Nginx 管理方式无效")
-	}
 	if len(p.TrustedProxies) > 64 {
 		return errors.New("可信代理最多 64 项")
 	}
@@ -159,22 +164,8 @@ func ValidatePlatform(p *Platform) error {
 		}
 		p.TrustedProxies[i] = n.String()
 	}
-	for _, value := range []string{p.SocketPath, p.NginxBinary, p.NginxConfig, p.ServerConfig} {
-		if !filepath.IsAbs(value) || filepath.Clean(value) != value || len(value) > 512 || strings.ContainsAny(value, "\x00\r\n\"'`;${} \\ ") {
-			return errors.New("接入路径必须为不含空白或特殊字符的绝对路径")
-		}
-	}
-	if err := (nginxguard.Config{SocketPath: p.SocketPath, NginxBinary: p.NginxBinary, NginxConfig: p.NginxConfig, ServerConfig: p.ServerConfig, AgentUser: p.AgentUser}).Validate(); err != nil {
-		return errors.New("接入路径或运行用户无效")
-	}
-	if len(p.SocketPath) > 100 {
-		return errors.New("本机 Socket 路径过长")
-	}
-	if p.NginxConfig == p.ServerConfig {
-		return errors.New("Nginx 主配置和站点配置不能为同一文件")
-	}
-	if p.AgentUser == "" || len(p.AgentUser) > 64 || strings.Trim(p.AgentUser, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != "" {
-		return errors.New("请输入有效的 GoCMS 系统运行用户")
+	if err := p.ControlConfig().Validate(); err != nil {
+		return err
 	}
 	return nil
 }

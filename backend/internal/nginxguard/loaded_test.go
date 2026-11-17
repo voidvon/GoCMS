@@ -74,7 +74,7 @@ func TestDirectAutomaticallyIncludesSite(t *testing.T) {
 			}
 			updatedMain, _ := os.ReadFile(c.NginxConfig)
 			include := []byte("\n    include " + c.ServerConfig + "; # GoCMS security\n")
-			backupPath := filepath.Join(filepath.Dir(d.engine.statePath), "nginx.conf.before")
+			backupPath := filepath.Join(d.engine.backupDir, "nginx.conf.before")
 			if alreadyLoaded {
 				if !bytes.Equal(main, updatedMain) {
 					t.Fatal("already-loaded site changed the main configuration")

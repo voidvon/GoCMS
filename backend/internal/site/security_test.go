@@ -1,18 +1,12 @@
 package site
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -267,9 +261,8 @@ func TestSecurityPermissionsAndPlatformBoundary(t *testing.T) {
 		}
 	}
 	w := siteAdminRequest(s, root, "POST", "/api/admin/security/nginx/install", "1", "{}")
-	archive, err := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
-	if w.Code != 200 || err != nil || len(archive.File) != 3 {
-		t.Fatalf("install bundle: %d %v", w.Code, err)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("removed installer still available: %d", w.Code)
 	}
 	if w := siteAdminRequest(s, root, "POST", "/api/admin/security/entries", "1", `{"network":"203.0.113.1; include /etc/passwd","kind":"deny","reason":"test"}`); w.Code != 400 {
 		t.Fatal("network injection accepted")
@@ -277,77 +270,55 @@ func TestSecurityPermissionsAndPlatformBoundary(t *testing.T) {
 	if w := siteAdminRequest(s, root, "POST", "/api/admin/security/entries", "1", `{"network":"0.0.0.0/0","kind":"deny","reason":"lock myself out"}`); w.Code != 400 {
 		t.Fatal("operator self-ban allowed")
 	}
-	// Configuration is generated as data, not embedded executable statements.
-	if strings.Contains(w.Body.String(), "sudo") {
-		t.Fatal("unexpected command response")
+}
+
+func TestSecuritySyncNeedsRootInitialization(t *testing.T) {
+	s, _, token, _ := newSiteAdminTestServer(t)
+	p := security.DefaultPlatform()
+	p.NginxEnabled = true
+	raw, _ := json.Marshal(p)
+	if w := siteAdminRequest(s, token, "PUT", "/api/admin/security/platform", "1", string(raw)); w.Code != 200 {
+		t.Fatalf("save: %d %s", w.Code, w.Body.String())
+	}
+	w := siteAdminRequest(s, token, "POST", "/api/admin/security/nginx/sync", "1", "{}")
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "init-nginx") || strings.Contains(w.Body.String(), "Socket") {
+		t.Fatalf("initialization error: %d %s", w.Code, w.Body.String())
+	}
+	w = siteAdminRequest(s, token, "GET", "/api/admin/security/nginx", "1", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "init_command") || !strings.Contains(w.Body.String(), "setup") {
+		t.Fatalf("setup instructions: %d %s", w.Code, w.Body.String())
 	}
 }
 
-func TestSecuritySyncMissingAgentShowsSetupInstructions(t *testing.T) {
-	s, _, token, _ := newSiteAdminTestServer(t)
-	dir, err := os.MkdirTemp("", "gocms-agent-")
-	if err != nil {
-		t.Fatal(err)
+type securityTestController struct {
+	fail bool
+	last nginxguard.Snapshot
+}
+
+func (c *securityTestController) Apply(_ context.Context, _ nginxguard.Config, snapshot nginxguard.Snapshot) (nginxguard.Result, error) {
+	if c.fail {
+		return nginxguard.Result{}, fmt.Errorf("nginx check failed")
 	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	p := security.DefaultPlatform()
-	p.NginxMode = "agent"
-	p.NginxEnabled = true
-	p.SocketPath = filepath.Join(dir, "missing.sock")
-	raw, _ := json.Marshal(p)
-	if w := siteAdminRequest(s, token, "PUT", "/api/admin/security/platform", "1", string(raw)); w.Code != 200 {
-		t.Fatalf("save platform: %d %s", w.Code, w.Body.String())
-	}
-	w := siteAdminRequest(s, token, "POST", "/api/admin/security/nginx/sync", "1", "{}")
-	var result struct {
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != http.StatusConflict {
-		t.Fatalf("sync setup error must be JSON conflict: %d %s %v", w.Code, w.Body.String(), err)
-	}
-	if !strings.Contains(result.Error, "未找到") || !strings.Contains(result.Error, "GoCMS 直接管理") || !strings.Contains(result.Error, "保存后重新同步") || strings.Contains(result.Error, "首次接入需") {
-		t.Fatalf("missing direct-mode guidance: %s", result.Error)
-	}
-	if status := s.security.Status(context.Background()); status.State != "failed" || status.Error != result.Error {
-		t.Fatalf("setup failure status: %+v", status)
-	}
+	c.last = snapshot
+	return nginxguard.Result{Digest: nginxguard.Digest(snapshot), AppliedAt: time.Now().UTC().Format(time.RFC3339)}, nil
+}
+func (c *securityTestController) Events(context.Context, nginxguard.Config, string) (nginxguard.LogBatch, error) {
+	return nginxguard.LogBatch{}, nil
+}
+func (c *securityTestController) Setup(context.Context, nginxguard.Config) nginxguard.SetupStatus {
+	return nginxguard.SetupStatus{Ready: true}
 }
 
 func TestSecuritySyncAcknowledgementRetryAndDisable(t *testing.T) {
 	s, database, token, _ := newSiteAdminTestServer(t)
-	dir, err := os.MkdirTemp("", "gocms-agent-")
+	controller := &securityTestController{fail: true}
+	var err error
+	s.security, err = security.New(database, controller)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	socket := filepath.Join(dir, "agent.sock")
-	listener, err := net.Listen("unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var fail atomic.Bool
-	fail.Store(true)
-	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var snapshot nginxguard.Snapshot
-		if err := json.NewDecoder(r.Body).Decode(&snapshot); err != nil {
-			t.Error(err)
-			w.WriteHeader(400)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if fail.Load() {
-			w.WriteHeader(502)
-			_, _ = w.Write([]byte(`{"error":"nginx check failed"}`))
-			return
-		}
-		_ = json.NewEncoder(w).Encode(nginxguard.Result{Digest: nginxguard.Digest(snapshot), AppliedAt: time.Now().UTC().Format(time.RFC3339)})
-	})}
-	go server.Serve(listener)
-	t.Cleanup(func() { server.Close() })
 	p := security.DefaultPlatform()
-	p.NginxMode = "agent"
 	p.NginxEnabled = true
-	p.SocketPath = socket
 	call := func(method, path, body string, want int) *httptest.ResponseRecorder {
 		t.Helper()
 		w := siteAdminRequest(s, token, method, path, "1", body)
@@ -362,80 +333,60 @@ func TestSecuritySyncAcknowledgementRetryAndDisable(t *testing.T) {
 	if status := s.security.Status(context.Background()); status.State != "failed" || !strings.Contains(status.Error, "nginx check failed") {
 		t.Fatalf("failure status %+v", status)
 	}
-	fail.Store(false)
+	controller.fail = false
 	call("POST", "/api/admin/security/nginx/sync", "{}", 200)
 	if status := s.security.Status(context.Background()); status.State != "applied" {
 		t.Fatalf("success status %+v", status)
 	}
-	p.NginxMode = "direct"
-	raw, _ = json.Marshal(p)
+	changed := p
+	changed.ServerConfig = "/different/site.conf"
+	raw, _ = json.Marshal(changed)
 	call("PUT", "/api/admin/security/platform", string(raw), 400)
-	p.NginxMode = "agent"
 	call("POST", "/api/admin/security/entries", `{"network":"203.0.113.5","kind":"deny","reason":"test sync"}`, 201)
 	if status := s.security.Status(context.Background()); status.State != "pending" {
 		t.Fatalf("pending status %+v", status)
 	}
 	call("POST", "/api/admin/security/nginx/sync", "{}", 200)
+	if len(controller.last.Rules) != 1 {
+		t.Fatalf("new rules not sent: %+v", controller.last)
+	}
 	p.NginxEnabled = false
 	raw, _ = json.Marshal(p)
 	call("PUT", "/api/admin/security/platform", string(raw), 200)
-	if status := s.security.Status(context.Background()); status.State != "pending" {
-		t.Fatalf("cleanup not marked pending %+v", status)
-	}
-	restarted, err := New(database, t.TempDir())
+	restarted, err := security.New(database, controller)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status := restarted.security.Status(context.Background()); status.State != "pending" {
-		t.Fatalf("restart forgot outstanding cleanup %+v", status)
+	if status := restarted.Status(context.Background()); status.State != "pending" {
+		t.Fatalf("restart forgot cleanup %+v", status)
 	}
 	call("POST", "/api/admin/security/nginx/sync", "{}", 200)
-	if status := s.security.Status(context.Background()); status.State != "disabled" {
-		t.Fatalf("cleanup failed %+v", status)
+	if len(controller.last.Rules) != 0 || len(controller.last.Tenants) != 0 {
+		t.Fatal("disable did not send empty rules")
 	}
-	p.NginxMode = "direct"
-	raw, _ = json.Marshal(p)
+	if status := s.security.Status(context.Background()); status.State != "disabled" {
+		t.Fatalf("cleanup status %+v", status)
+	}
+	changed.NginxEnabled = false
+	raw, _ = json.Marshal(changed)
 	call("PUT", "/api/admin/security/platform", string(raw), 200)
 }
 
-func TestSecurityDirectModeDefaultsAndAgentMigration(t *testing.T) {
-	s, database, token, _ := newSiteAdminTestServer(t)
+func TestSecurityObsoleteModeSettingsAreIgnored(t *testing.T) {
+	_, database, _, _ := newSiteAdminTestServer(t)
+	if err := security.SaveConfig(context.Background(), database, 0, map[string]any{"nginx_mode": "agent", "socket_path": "/missing/agent.sock", "nginx_enabled": false, "agent_user": "cmsworker"}); err != nil {
+		t.Fatal(err)
+	}
 	p, err := security.LoadPlatform(context.Background(), database)
-	if err != nil || p.NginxMode != "direct" {
-		t.Fatalf("new platform should default to direct management: %+v %v", p, err)
+	if err != nil || p.RunUser != "cmsworker" {
+		t.Fatalf("saved config: %+v %v", p, err)
 	}
-	// Saved pre-mode configurations retain their original agent integration.
-	if err := security.SaveConfig(context.Background(), database, 0, map[string]any{"nginx_enabled": false}); err != nil {
-		t.Fatal(err)
-	}
-	s.security.Invalidate()
-	p, err = security.LoadPlatform(context.Background(), database)
-	if err != nil || p.NginxMode != "agent" {
-		t.Fatalf("legacy integration changed: %+v %v", p, err)
-	}
-	p.NginxEnabled = true
-	dir, err := os.MkdirTemp("", "gocms-agent-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	p.SocketPath = filepath.Join(dir, "agent.sock")
 	raw, _ := json.Marshal(p)
-	if w := siteAdminRequest(s, token, "PUT", "/api/admin/security/platform", "1", string(raw)); w.Code != 200 {
-		t.Fatalf("save agent mode: %d %s", w.Code, w.Body.String())
+	if strings.Contains(string(raw), "socket_path") || strings.Contains(string(raw), "nginx_mode") {
+		t.Fatal("removed options exposed")
 	}
-	if w := siteAdminRequest(s, token, "POST", "/api/admin/security/nginx/sync", "1", "{}"); w.Code != http.StatusConflict {
-		t.Fatalf("missing agent should fail: %d %s", w.Code, w.Body.String())
-	}
-	// An integration that never applied rules can switch without contacting the missing agent.
-	p.NginxMode = "direct"
-	p.NginxBinary = "/gocms-nonexistent-test-nginx"
-	raw, _ = json.Marshal(p)
-	if w := siteAdminRequest(s, token, "PUT", "/api/admin/security/platform", "1", string(raw)); w.Code != 200 {
-		t.Fatalf("switch uninstalled agent to direct management: %d %s", w.Code, w.Body.String())
-	}
-	w := siteAdminRequest(s, token, "POST", "/api/admin/security/nginx/sync", "1", "{}")
-	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "GoCMS 直接同步 Nginx 失败") || strings.Contains(w.Body.String(), "下载接入包") {
-		t.Fatalf("direct mode should execute Nginx, not contact an agent: %d %s", w.Code, w.Body.String())
+	config, snapshot, err := security.NginxInitialization(context.Background(), database)
+	if err != nil || config != p.ControlConfig() || len(snapshot.Rules) != 0 {
+		t.Fatalf("init settings: %+v %+v %v", config, snapshot, err)
 	}
 }

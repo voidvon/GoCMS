@@ -23,11 +23,19 @@ import (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "security-agent" {
-		if err := nginxguard.Run(os.Args[2:]); err != nil {
-			log.Fatal(err)
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "init-nginx":
+			if err := initializeNginx(os.Args[2:]); err != nil {
+				log.Fatal(err)
+			}
+			return
+		case "__nginx-control":
+			if err := nginxguard.RunControl(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+				log.Fatal(err)
+			}
+			return
 		}
-		return
 	}
 	if imageopt.RunWorker() {
 		return

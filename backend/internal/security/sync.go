@@ -1,18 +1,12 @@
 package security
 
 import (
-	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"log"
-	"net"
-	"net/http"
 	"net/netip"
-	"os"
-	"syscall"
 	"time"
 
 	"gocms/internal/nginxguard"
@@ -31,64 +25,6 @@ type SyncError struct{ Err error }
 
 func (e *SyncError) Error() string { return e.Err.Error() }
 func (e *SyncError) Unwrap() error { return e.Err }
-
-func agentConnectionError(socket string, err error) error {
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return fmt.Errorf("当前使用独立代理模式，未找到 Nginx 同步代理的 Socket（%s）。无需安装代理时，请在“Nginx 接入”选择“GoCMS 直接管理”，保存后重新同步；继续使用代理模式时，请检查代理服务与 Socket 路径，尚未安装时再下载接入包", socket)
-	case errors.Is(err, os.ErrPermission):
-		return fmt.Errorf("GoCMS 无权访问 Nginx 同步代理（%s）：请确认接入参数中的系统运行用户与 GoCMS 实际进程用户一致，再重新安装接入包", socket)
-	case errors.Is(err, syscall.ECONNREFUSED):
-		return fmt.Errorf("Nginx 同步代理未运行或未监听（%s）：请检查 gocms-security-agent 服务状态", socket)
-	default:
-		var timeout net.Error
-		if errors.As(err, &timeout) && timeout.Timeout() {
-			return errors.New("Nginx 同步代理响应超时，请检查代理服务及 Nginx 配置检查、重载日志")
-		}
-		return fmt.Errorf("无法连接本机 Nginx 同步代理（%s）：%w", socket, err)
-	}
-}
-
-func agentCall(ctx context.Context, socket, method, path string, input, output any) error {
-	var body io.Reader
-	if input != nil {
-		b, err := json.Marshal(input)
-		if err != nil {
-			return err
-		}
-		body = bytes.NewReader(b)
-	}
-	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
-	}}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 20 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, method, "http://agent"+path, body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	res, err := client.Do(req)
-	if err != nil {
-		return agentConnectionError(socket, err)
-	}
-	defer res.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(res.Body, 2<<20))
-	if err != nil {
-		return err
-	}
-	if res.StatusCode != http.StatusOK {
-		var e struct {
-			Error string `json:"error"`
-		}
-		_ = json.Unmarshal(data, &e)
-		if e.Error != "" {
-			return fmt.Errorf("Nginx 同步失败：%s", e.Error)
-		}
-		return fmt.Errorf("Nginx 同步器返回 %d", res.StatusCode)
-	}
-	return json.Unmarshal(data, output)
-}
 
 func (s *Service) desired(ctx context.Context) (*state, nginxguard.Snapshot, error) {
 	v, err := s.current(ctx)
@@ -137,12 +73,7 @@ func (s *Service) Sync(ctx context.Context) error {
 	if !v.platform.NginxEnabled && s.status.Digest == "" {
 		return &SyncError{Err: errors.New("请先保存并启用 Nginx 同步")}
 	}
-	var result nginxguard.Result
-	if v.platform.NginxMode == "direct" {
-		result, err = s.directController(v.platform).Apply(want)
-	} else {
-		err = agentCall(ctx, v.platform.SocketPath, http.MethodPost, "/apply", want, &result)
-	}
+	result, err := s.controller.Apply(ctx, v.platform.ControlConfig(), want)
 	if err != nil {
 		s.status.State = "failed"
 		s.status.Error = err.Error()
@@ -164,24 +95,12 @@ func (s *Service) Sync(ctx context.Context) error {
 	return nil
 }
 
-// Caller holds syncMu; Direct serializes its file and log operations itself.
-func (s *Service) directController(p Platform) *nginxguard.Direct {
-	c := nginxguard.Config{SocketPath: p.SocketPath, NginxBinary: p.NginxBinary, NginxConfig: p.NginxConfig, ServerConfig: p.ServerConfig, AgentUser: p.AgentUser}
-	if s.direct == nil || s.directConfig != c {
-		s.direct, s.directConfig = nginxguard.NewDirect(c), c
-	}
-	return s.direct
-}
-
 func (s *Service) Preview(ctx context.Context) (string, string, error) {
-	v, want, err := s.desired(ctx)
+	_, want, err := s.desired(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	if v.platform.NginxMode == "direct" {
-		return nginxguard.SingleFileFragments(want, time.Now(), "/var/log/gocms-security/probes.log")
-	}
-	return nginxguard.Render(want, time.Now(), "/var/log/gocms-security/probes.log")
+	return nginxguard.SingleFileFragments(want, time.Now(), "/var/log/gocms-security/probes.log")
 }
 
 // Pull Nginx-only probes as well: Nginx may reject .env/.git before they reach
@@ -192,15 +111,7 @@ func (s *Service) pull(ctx context.Context, p Platform) error {
 	if err != nil {
 		cursor = ""
 	}
-	var batch nginxguard.LogBatch
-	if p.NginxMode == "direct" {
-		s.syncMu.Lock()
-		controller := s.directController(p)
-		s.syncMu.Unlock()
-		batch, err = controller.Events(cursor)
-	} else {
-		err = agentCall(ctx, p.SocketPath, http.MethodPost, "/events", map[string]string{"cursor": cursor}, &batch)
-	}
+	batch, err := s.controller.Events(ctx, p.ControlConfig(), cursor)
 	if err != nil {
 		return err
 	}
@@ -261,4 +172,23 @@ func (s *Service) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func (s *Service) NginxSetup(ctx context.Context) nginxguard.SetupStatus {
+	v, err := s.current(ctx)
+	if err != nil {
+		return nginxguard.SetupStatus{Message: err.Error()}
+	}
+	return s.controller.Setup(ctx, v.platform.ControlConfig())
+}
+
+// NginxInitialization reads the existing CMS settings without creating tables
+// or writing SQLite files as root. It is used only by the explicit init CLI.
+func NginxInitialization(ctx context.Context, database *sql.DB) (nginxguard.Config, nginxguard.Snapshot, error) {
+	service := &Service{database: database}
+	v, snapshot, err := service.desired(ctx)
+	if err != nil {
+		return nginxguard.Config{}, nginxguard.Snapshot{}, err
+	}
+	return v.platform.ControlConfig(), snapshot, nil
 }
