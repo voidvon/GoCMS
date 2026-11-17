@@ -15,6 +15,7 @@ export function getErrorMessage(reason: unknown, fallback = "操作失败，请�
     if (depth > 4) return undefined
     if (typeof value === "string") {
       const message = value.trim()
+      if (/<!doctype\s+html\b|<\s*(?:html|head|body)(?:\s|>)/i.test(message)) return undefined
       return message && message !== "[object Object]" ? message : undefined
     }
     if (value instanceof Error) return read(value.message, depth + 1)

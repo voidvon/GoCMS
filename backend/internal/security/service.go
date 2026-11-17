@@ -35,13 +35,15 @@ type attempt struct {
 	touched time.Time
 }
 type Service struct {
-	database *sql.DB
-	mu       sync.Mutex
-	loaded   time.Time
-	state    *state
-	attempts map[string]attempt
-	syncMu   sync.Mutex
-	status   SyncStatus
+	database     *sql.DB
+	mu           sync.Mutex
+	loaded       time.Time
+	state        *state
+	attempts     map[string]attempt
+	syncMu       sync.Mutex
+	status       SyncStatus
+	direct       *nginxguard.Direct
+	directConfig nginxguard.Config
 }
 
 func New(database *sql.DB) (*Service, error) {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -86,8 +87,10 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 				accountError(w, err)
 				return
 			}
-			if old.SocketPath != p.SocketPath && (old.NginxEnabled || s.security.Status(r.Context()).State != "disabled") {
-				accountInputError(w, "请先关闭 Nginx 同步并确认清理成功，再更换 Socket 路径")
+			changed := old.NginxMode != p.NginxMode || old.SocketPath != p.SocketPath || old.NginxBinary != p.NginxBinary || old.NginxConfig != p.NginxConfig || old.ServerConfig != p.ServerConfig
+			status := s.security.Status(r.Context())
+			if changed && status.Digest != "" && status.State != "disabled" {
+				accountInputError(w, "请先关闭 Nginx 同步并确认清理成功，再更换管理方式或配置路径")
 				return
 			}
 			if err := security.SaveConfig(r.Context(), s.database, 0, p); err != nil {
@@ -111,7 +114,7 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 			accountError(w, err)
 			return
 		}
-		writeJSON(w, 200, map[string]any{"status": s.security.Status(r.Context()), "http_config": h, "server_config": server})
+		writeJSON(w, 200, map[string]any{"status": s.security.Status(r.Context()), "http_config": h, "server_config": server, "runtime_user": nginxguard.ExecutionUser()})
 		return
 	}
 	if endpoint == "/nginx/sync" {
@@ -120,7 +123,12 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if err := s.security.Sync(r.Context()); err != nil {
-			writeJSON(w, 502, map[string]string{"error": err.Error()})
+			var syncError *security.SyncError
+			if errors.As(err, &syncError) {
+				writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			} else {
+				accountError(w, err)
+			}
 			return
 		}
 		writeJSON(w, 200, s.security.Status(r.Context()))

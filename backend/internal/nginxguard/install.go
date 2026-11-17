@@ -204,9 +204,8 @@ func Install(c Config) error {
 	if err := atomicFile("/etc/systemd/system/gocms-security-agent.service", []byte(unit), 0644); err != nil {
 		return err
 	}
-	rotation := fmt.Sprintf("%s {\n    daily\n    maxsize 20M\n    rotate 3\n    missingok\n    notifempty\n    compress\n    delaycompress\n    create 0600 root root\n    postrotate\n        %s -s reopen -c %s\n    endscript\n}\n", logFile, c.NginxBinary, c.NginxConfig)
 	if _, err := os.Stat("/etc/logrotate.d"); err == nil {
-		if err := atomicFile("/etc/logrotate.d/gocms-security", []byte(rotation), 0644); err != nil {
+		if err := atomicFile("/etc/logrotate.d/gocms-security", []byte(rotationConfig(c, logFile)), 0644); err != nil {
 			return err
 		}
 	}
@@ -217,4 +216,8 @@ func Install(c Config) error {
 	}
 	fmt.Println("GoCMS security agent installed. Return to Security Protection and test synchronization.")
 	return nil
+}
+
+func rotationConfig(c Config, path string) string {
+	return fmt.Sprintf("%s {\n    daily\n    maxsize 20M\n    rotate 3\n    missingok\n    notifempty\n    compress\n    delaycompress\n    create 0600 root root\n    postrotate\n        '%s' -s reopen -c '%s'\n    endscript\n}\n", path, c.NginxBinary, c.NginxConfig)
 }

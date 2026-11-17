@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"syscall"
 	"time"
 
 	"gocms/internal/nginxguard"
@@ -22,6 +23,30 @@ type SyncStatus struct {
 	Digest    string `json:"digest"`
 	AppliedAt string `json:"applied_at"`
 	Error     string `json:"error"`
+}
+
+// SyncError describes an operational synchronization failure. The admin API
+// returns it as a conflict so gateways preserve the application's explanation.
+type SyncError struct{ Err error }
+
+func (e *SyncError) Error() string { return e.Err.Error() }
+func (e *SyncError) Unwrap() error { return e.Err }
+
+func agentConnectionError(socket string, err error) error {
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("未找到 Nginx 同步代理的 Socket（%s）：首次接入需在后台下载接入包并以 root 安装 GoCMS 同步代理；已安装时请检查服务状态和 Socket 路径", socket)
+	case errors.Is(err, os.ErrPermission):
+		return fmt.Errorf("GoCMS 无权访问 Nginx 同步代理（%s）：请确认接入参数中的系统运行用户与 GoCMS 实际进程用户一致，再重新安装接入包", socket)
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return fmt.Errorf("Nginx 同步代理未运行或未监听（%s）：请检查 gocms-security-agent 服务状态", socket)
+	default:
+		var timeout net.Error
+		if errors.As(err, &timeout) && timeout.Timeout() {
+			return errors.New("Nginx 同步代理响应超时，请检查代理服务及 Nginx 配置检查、重载日志")
+		}
+		return fmt.Errorf("无法连接本机 Nginx 同步代理（%s）：%w", socket, err)
+	}
 }
 
 func agentCall(ctx context.Context, socket, method, path string, input, output any) error {
@@ -45,7 +70,7 @@ func agentCall(ctx context.Context, socket, method, path string, input, output a
 	req.Header.Set("Content-Type", "application/json")
 	res, err := client.Do(req)
 	if err != nil {
-		return errors.New("无法连接本机 Nginx 同步器，请检查接入和运行用户")
+		return agentConnectionError(socket, err)
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, 2<<20))
@@ -109,16 +134,24 @@ func (s *Service) Sync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if !v.platform.NginxEnabled && s.status.Digest == "" {
+		return &SyncError{Err: errors.New("请先保存并启用 Nginx 同步")}
+	}
 	var result nginxguard.Result
-	if err = agentCall(ctx, v.platform.SocketPath, http.MethodPost, "/apply", want, &result); err != nil {
+	if v.platform.NginxMode == "direct" {
+		result, err = s.directController(v.platform).Apply(want)
+	} else {
+		err = agentCall(ctx, v.platform.SocketPath, http.MethodPost, "/apply", want, &result)
+	}
+	if err != nil {
 		s.status.State = "failed"
 		s.status.Error = err.Error()
-		return err
+		return &SyncError{Err: err}
 	}
 	if result.Digest != nginxguard.Digest(want) {
 		s.status.State = "failed"
-		s.status.Error = "同步器未确认当前名单"
-		return errors.New(s.status.Error)
+		s.status.Error = "Nginx 管理器未确认当前名单"
+		return &SyncError{Err: errors.New(s.status.Error)}
 	}
 	s.status = SyncStatus{State: "applied", Digest: result.Digest, AppliedAt: result.AppliedAt}
 	raw, err := json.Marshal(s.status)
@@ -129,6 +162,15 @@ func (s *Service) Sync(ctx context.Context) error {
 		return err
 	}
 	return nil
+}
+
+// Caller holds syncMu; Direct serializes its file and log operations itself.
+func (s *Service) directController(p Platform) *nginxguard.Direct {
+	c := nginxguard.Config{SocketPath: p.SocketPath, NginxBinary: p.NginxBinary, NginxConfig: p.NginxConfig, ServerConfig: p.ServerConfig, AgentUser: p.AgentUser}
+	if s.direct == nil || s.directConfig != c {
+		s.direct, s.directConfig = nginxguard.NewDirect(c), c
+	}
+	return s.direct
 }
 
 func (s *Service) Preview(ctx context.Context) (string, string, error) {
@@ -148,7 +190,15 @@ func (s *Service) pull(ctx context.Context, p Platform) error {
 		cursor = ""
 	}
 	var batch nginxguard.LogBatch
-	if err := agentCall(ctx, p.SocketPath, http.MethodPost, "/events", map[string]string{"cursor": cursor}, &batch); err != nil {
+	if p.NginxMode == "direct" {
+		s.syncMu.Lock()
+		controller := s.directController(p)
+		s.syncMu.Unlock()
+		batch, err = controller.Events(cursor)
+	} else {
+		err = agentCall(ctx, p.SocketPath, http.MethodPost, "/events", map[string]string{"cursor": cursor}, &batch)
+	}
+	if err != nil {
 		return err
 	}
 	for _, e := range batch.Items {
@@ -184,7 +234,7 @@ func (s *Service) Run(ctx context.Context) {
 				continue
 			}
 			if !v.platform.NginxEnabled {
-				if _, err := os.Stat(v.platform.SocketPath); err != nil {
+				if status := s.Status(ctx); status.Digest == "" || status.State == "disabled" {
 					continue
 				}
 			}

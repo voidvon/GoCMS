@@ -14,11 +14,11 @@ export type AdminUser = {
 
 export type CurrencyInfo = { code: string; exponent: number }
 export type SecurityPolicy = { enabled: boolean; window_seconds: number; threshold: number; ban_scope: "global" | "site"; ban_seconds: number; paths: string[] }
-export type SecurityPlatform = { trusted_proxies: string[]; nginx_enabled: boolean; socket_path: string; nginx_binary: string; nginx_config: string; server_config: string; agent_user: string }
+export type SecurityPlatform = { trusted_proxies: string[]; nginx_enabled: boolean; nginx_mode: "direct" | "agent"; socket_path: string; nginx_binary: string; nginx_config: string; server_config: string; agent_user: string }
 export type SecurityEntry = { id: number; site_id: number; network: string; kind: "allow" | "deny"; reason: string; source: string; created_at: string; expires_at: string; revoked_at: string }
 export type SecurityEvent = { id: number; site_id: number; ip: string; host: string; path: string; action: string; reason: string; created_at: string }
 export type SecuritySync = { state: "disabled" | "pending" | "applied" | "failed"; digest: string; applied_at: string; error: string }
-export type SecurityNginx = { status: SecuritySync; http_config: string; server_config: string }
+export type SecurityNginx = { status: SecuritySync; http_config: string; server_config: string; runtime_user: string }
 export const getSecurityPolicy = () => request<SecurityPolicy>("/api/admin/security/policy")
 export const saveSecurityPolicy = (input: SecurityPolicy) => request("/api/admin/security/policy", { method: "PUT", body: JSON.stringify(input) })
 export const getSecurityPlatform = () => request<SecurityPlatform>("/api/admin/security/platform")
@@ -733,6 +733,7 @@ export function getActiveSiteId(): number {
 
 async function request<T>(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
+  if (!headers.has("Accept")) headers.set("Accept", "application/json")
   if (!headers.has("X-Site-Id")) {
     headers.set("X-Site-Id", String(getActiveSiteId()))
   }
@@ -746,11 +747,14 @@ async function request<T>(path: string, init: RequestInit = {}) {
     headers,
   })
   const contentType = response.headers.get("content-type") ?? ""
-  const payload = contentType.includes("application/json")
+  const payload = contentType.includes("application/json") || contentType.includes("+json")
     ? await response.json()
     : await response.text()
   if (!response.ok) {
-    throw new APIError(response.status, getErrorMessage(payload, `请求失败（${response.status}）`))
+    const fallback = [502, 503, 504].includes(response.status)
+      ? `服务器或代理暂时无法处理请求（HTTP ${response.status}），请稍后重试`
+      : `请求失败（${response.status}）`
+    throw new APIError(response.status, getErrorMessage(payload, fallback))
   }
   return payload as T
 }
