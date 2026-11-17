@@ -270,10 +270,10 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 func (s *Server) nginxInitCommand(ctx context.Context) string {
 	executable, err := os.Executable()
 	if err != nil {
-		return "sudo ./gocms init-nginx"
+		return "sudo ./gocms nginx setup"
 	}
 	quote := func(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
-	command := "sudo " + quote(executable) + " init-nginx"
+	command := "sudo " + quote(executable) + " nginx setup"
 	var databasePath string
 	if err := s.database.QueryRowContext(ctx, `SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&databasePath); err == nil && databasePath != "" {
 		command += " -db " + quote(databasePath)

@@ -15,17 +15,24 @@ import (
 	"gocms/internal/security"
 )
 
-func initializeNginx(args []string) error {
-	flags := flag.NewFlagSet("init-nginx", flag.ContinueOnError)
+func runNginx(args []string) error {
+	if len(args) == 0 || args[0] != "setup" {
+		return errors.New("用法：./gocms nginx setup [-db /绝对路径/site.db]")
+	}
+	return setupNginx(args[1:])
+}
+
+func setupNginx(args []string) error {
+	flags := flag.NewFlagSet("nginx setup", flag.ContinueOnError)
 	databasePath := flags.String("db", runtimeDefaults().database, "正在运行的 GoCMS 使用的 SQLite 数据库路径")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
-		return errors.New("用法：./gocms init-nginx [-db /绝对路径/site.db]")
+		return errors.New("用法：./gocms nginx setup [-db /绝对路径/site.db]")
 	}
 	if os.Geteuid() != 0 {
-		return errors.New("请以 root 执行 ./gocms init-nginx；日常 GoCMS 继续以 www 等普通用户运行")
+		return errors.New("请以 root 执行 ./gocms nginx setup；日常 GoCMS 继续以 www 等普通用户运行")
 	}
 	path, err := filepath.Abs(*databasePath)
 	if err != nil {
@@ -48,10 +55,10 @@ func initializeNginx(args []string) error {
 	if err != nil {
 		return fmt.Errorf("读取后台已保存的 Nginx 接入设置失败：%w", err)
 	}
-	fmt.Printf("初始化 Nginx：\n运行用户：%s\n可执行文件：%s\n主配置：%s\n站点配置：%s\n", config.RunUser, config.NginxBinary, config.NginxConfig, config.ServerConfig)
+	fmt.Printf("配置 GoCMS 的 Nginx 接入：\n运行用户：%s\n可执行文件：%s\n主配置：%s\n站点配置：%s\n", config.RunUser, config.NginxBinary, config.NginxConfig, config.ServerConfig)
 	if err := nginxguard.Initialize(ctx, config, snapshot); err != nil {
 		return err
 	}
-	fmt.Println("Nginx 初始化完成。返回后台点击“立即同步”即可；GoCMS 继续以普通系统用户运行，无需其他常驻服务。")
+	fmt.Println("Nginx 接入配置完成。返回后台点击“立即同步”即可；GoCMS 继续以普通系统用户运行，无需其他常驻服务。")
 	return nil
 }

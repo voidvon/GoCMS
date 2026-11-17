@@ -128,7 +128,7 @@ func (l controlLayout) load() (installation, error) {
 	var installed installation
 	path := filepath.Join(l.state, "control.json")
 	if err := checkTrustedPath(path, false, l.owner); err != nil {
-		return installed, fmt.Errorf("Nginx 授权配置不可用，请以 root 重新执行 init-nginx：%w", err)
+		return installed, fmt.Errorf("Nginx 授权配置不可用，请以 root 重新执行 nginx setup：%w", err)
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -139,7 +139,7 @@ func (l controlLayout) load() (installation, error) {
 		return installed, err
 	}
 	if installed.Protocol != controlProtocol || installed.UID <= 0 {
-		return installed, errors.New("Nginx 授权版本或用户无效，请以 root 重新执行 init-nginx")
+		return installed, errors.New("Nginx 授权版本或用户无效，请以 root 重新执行 nginx setup")
 	}
 	return installed, installed.Config.Validate()
 }
@@ -147,7 +147,7 @@ func (l controlLayout) load() (installation, error) {
 func (l controlLayout) execute(ctx context.Context, installed installation, request controlRequest) (controlResponse, error) {
 	var response controlResponse
 	if request.Protocol != controlProtocol || request.Config != installed.Config {
-		return response, errors.New("接入设置与 root 授权不一致，请保存设置后由 root 重新执行 init-nginx")
+		return response, errors.New("接入设置与 root 授权不一致，请保存设置后由 root 重新执行 nginx setup")
 	}
 	if request.Action != "apply" && request.Action != "events" && request.Action != "status" {
 		return response, errors.New("不支持的 Nginx 管理操作")
@@ -253,7 +253,7 @@ func RunControl(args []string, input io.Reader, output io.Writer) error {
 }
 
 // Client starts a short-lived instance of the same GoCMS executable installed
-// by init-nginx. It never runs the web-writable main binary through sudo.
+// by nginx setup. It never runs the web-writable main binary through sudo.
 type Client struct{}
 
 func (Client) call(ctx context.Context, request controlRequest) (controlResponse, error) {
@@ -262,7 +262,7 @@ func (Client) call(ctx context.Context, request controlRequest) (controlResponse
 		return response, err
 	}
 	if err := checkTrustedPath(controlBinary, false, 0); err != nil {
-		return response, fmt.Errorf("Nginx 尚未初始化或授权入口不可用，请先保存接入设置，再以 root 执行 ./gocms init-nginx：%w", err)
+		return response, fmt.Errorf("Nginx 尚未初始化或授权入口不可用，请先保存接入设置，再以 root 执行 ./gocms nginx setup：%w", err)
 	}
 	request.Protocol = controlProtocol
 	data, err := json.Marshal(request)
@@ -285,10 +285,10 @@ func (Client) call(ctx context.Context, request controlRequest) (controlResponse
 		return response, errors.New(response.Error)
 	}
 	if err != nil {
-		return response, fmt.Errorf("Nginx 授权调用失败（系统用户 %s），请确认 root 已执行 init-nginx 且授权用户正确：%s（%w）", ExecutionUser(), strings.TrimSpace(stderr.String()), err)
+		return response, fmt.Errorf("Nginx 授权调用失败（系统用户 %s），请确认 root 已执行 nginx setup 且授权用户正确：%s（%w）", ExecutionUser(), strings.TrimSpace(stderr.String()), err)
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
-		return response, errors.New("Nginx 管理入口返回了无效数据，请以 root 重新执行 init-nginx")
+		return response, errors.New("Nginx 管理入口返回了无效数据，请以 root 重新执行 nginx setup")
 	}
 	return response, nil
 }
@@ -338,7 +338,7 @@ func (c Client) Setup(ctx context.Context, config Config) SetupStatus {
 		return SetupStatus{Message: err.Error()}
 	}
 	if response.Setup == nil {
-		return SetupStatus{Message: "Nginx 初始化状态无效，请以 root 重新执行 init-nginx"}
+		return SetupStatus{Message: "Nginx 初始化状态无效，请以 root 重新执行 nginx setup"}
 	}
 	return *response.Setup
 }

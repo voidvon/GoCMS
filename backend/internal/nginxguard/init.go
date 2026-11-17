@@ -17,7 +17,7 @@ import (
 )
 
 func sudoRule(uid int, binary string) []byte {
-	return []byte(fmt.Sprintf("# Managed by GoCMS init-nginx. Only this exact command is allowed.\n#%d ALL=(root) NOPASSWD: %s %s\nDefaults!%s !requiretty\n", uid, binary, controlArgument, binary))
+	return []byte(fmt.Sprintf("# Managed by GoCMS nginx setup. Only this exact command is allowed.\n#%d ALL=(root) NOPASSWD: %s %s\nDefaults!%s !requiretty\n", uid, binary, controlArgument, binary))
 }
 
 func ensureSudoInclude(data []byte, dir string) []byte {
@@ -177,7 +177,7 @@ func initializeWithLayout(ctx context.Context, l controlLayout, c Config, snapsh
 // admin. Web requests cannot invoke this installer or replace its executable.
 func Initialize(ctx context.Context, c Config, snapshot Snapshot) error {
 	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
-		return errors.New("请在 Linux 服务器以 root 执行 ./gocms init-nginx；日常 GoCMS 继续使用普通用户运行")
+		return errors.New("请在 Linux 服务器以 root 执行 ./gocms nginx setup；日常 GoCMS 继续使用普通用户运行")
 	}
 	uid, err := lookupRunUser(c.RunUser)
 	if err != nil {
@@ -193,7 +193,7 @@ func Initialize(ctx context.Context, c Config, snapshot Snapshot) error {
 	}
 	visudo, err := exec.LookPath("visudo")
 	if err != nil {
-		return errors.New("服务器缺少 visudo，请先安装 sudo 后重新执行 init-nginx")
+		return errors.New("服务器缺少 visudo，请先安装 sudo 后重新执行 nginx setup")
 	}
 	for _, binary := range []string{visudo, "/usr/bin/sudo"} {
 		if err := checkTrustedPath(binary, false, 0); err != nil {

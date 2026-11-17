@@ -281,11 +281,11 @@ func TestSecuritySyncNeedsRootInitialization(t *testing.T) {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
 	w := siteAdminRequest(s, token, "POST", "/api/admin/security/nginx/sync", "1", "{}")
-	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "init-nginx") || strings.Contains(w.Body.String(), "Socket") {
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "nginx setup") || strings.Contains(w.Body.String(), "Socket") {
 		t.Fatalf("initialization error: %d %s", w.Code, w.Body.String())
 	}
 	w = siteAdminRequest(s, token, "GET", "/api/admin/security/nginx", "1", "")
-	if w.Code != 200 || !strings.Contains(w.Body.String(), "init_command") || !strings.Contains(w.Body.String(), "setup") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "init_command") || !strings.Contains(w.Body.String(), "nginx setup") || strings.Contains(w.Body.String(), "init-nginx") {
 		t.Fatalf("setup instructions: %d %s", w.Code, w.Body.String())
 	}
 }

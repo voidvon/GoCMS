@@ -25,8 +25,13 @@ import (
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
-		case "init-nginx":
-			if err := initializeNginx(os.Args[2:]); err != nil {
+		case "nginx":
+			if err := runNginx(os.Args[2:]); err != nil && !errors.Is(err, flag.ErrHelp) {
+				log.Fatal(err)
+			}
+			return
+		case "init-nginx": // Compatibility for commands shown by previously installed root helpers.
+			if err := setupNginx(os.Args[2:]); err != nil && !errors.Is(err, flag.ErrHelp) {
 				log.Fatal(err)
 			}
 			return
