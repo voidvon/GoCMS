@@ -214,6 +214,7 @@ func TestSecurityPermissionsAndPlatformBoundary(t *testing.T) {
 		{"GET", "/api/admin/security/platform", "1", "", 403},
 		{"GET", "/api/admin/SECURITY/PLATFORM", "2", "", 403},
 		{"GET", "/api/admin/security/nginx", "2", "", 403},
+		{"GET", "/api/admin/security/nginx/config", "2", "", 403},
 		{"POST", "/api/admin/security/nginx/install", "2", "{}", 403},
 		{"POST", "/api/admin/security/entries?scope=global", "2", `{"network":"203.0.113.8","kind":"deny","reason":"test"}`, 403},
 	} {
@@ -225,6 +226,9 @@ func TestSecurityPermissionsAndPlatformBoundary(t *testing.T) {
 	key := apiKeyForTest(t, s, "security-editor")
 	if w := apiKeyRequest(t, s, key.Key, "GET", "/api/admin/security/platform", ""); w.Code != 403 {
 		t.Fatal("API key bypassed platform boundary")
+	}
+	if w := apiKeyRequest(t, s, key.Key, "GET", "/api/admin/security/nginx/config", ""); w.Code != 403 {
+		t.Fatal("API key read platform configuration without super admin permission")
 	}
 	p := security.DefaultPolicy()
 	p.Enabled = true
@@ -333,6 +337,45 @@ func (c *securityTestController) Events(context.Context, nginxguard.Config, stri
 }
 func (c *securityTestController) Setup(context.Context, nginxguard.Config) nginxguard.SetupStatus {
 	return nginxguard.SetupStatus{Ready: true}
+}
+func (c *securityTestController) Configuration(_ context.Context, config nginxguard.Config) (nginxguard.ConfigFile, error) {
+	if c.fail {
+		return nginxguard.ConfigFile{}, fmt.Errorf("configuration read failed")
+	}
+	return nginxguard.ConfigFile{Path: config.ServerConfig, Content: "# Actual file, including custom comments\ngeo $example { default 0; }\n", ModifiedAt: "2026-11-17T12:00:00Z"}, nil
+}
+
+func TestSecurityReadsActualNginxConfiguration(t *testing.T) {
+	s, database, token, _ := newSiteAdminTestServer(t)
+	controller := &securityTestController{}
+	var err error
+	s.security, err = security.New(database, controller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/admin/security/nginx/config"
+	w := siteAdminRequest(s, token, "GET", path+"?path=/etc/passwd", "1", "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
+		t.Fatalf("configuration read response: %d %s", w.Code, w.Body.String())
+	}
+	var file nginxguard.ConfigFile
+	if err := json.Unmarshal(w.Body.Bytes(), &file); err != nil {
+		t.Fatal(err)
+	}
+	if file.Path != security.DefaultPlatform().ServerConfig || file.Content != "# Actual file, including custom comments\ngeo $example { default 0; }\n" || file.ModifiedAt == "" {
+		t.Fatalf("incorrect actual file response: %+v", file)
+	}
+	if w := siteAdminRequest(s, "", "GET", path, "1", ""); w.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous configuration read: %d", w.Code)
+	}
+	if w := siteAdminRequest(s, token, "POST", path, "1", "{}"); w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("configuration view accepted write: %d", w.Code)
+	}
+	controller.fail = true
+	w = siteAdminRequest(s, token, "GET", path, "1", "")
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "configuration read failed") {
+		t.Fatalf("configuration failure should retain readable error: %d %s", w.Code, w.Body.String())
+	}
 }
 
 func TestSecuritySyncAcknowledgementRetryAndDisable(t *testing.T) {

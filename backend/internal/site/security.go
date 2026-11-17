@@ -132,6 +132,19 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, s.security.Status(r.Context()))
 		return
 	}
+	if endpoint == "/nginx/config" {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w)
+			return
+		}
+		file, err := s.security.NginxConfiguration(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, file)
+		return
+	}
 	scope, err := s.securityScope(r)
 	if err != nil {
 		writeJSON(w, 403, map[string]string{"error": err.Error()})

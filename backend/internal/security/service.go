@@ -49,6 +49,7 @@ type NginxController interface {
 	Apply(context.Context, nginxguard.Config, nginxguard.Snapshot) (nginxguard.Result, error)
 	Events(context.Context, nginxguard.Config, string) (nginxguard.LogBatch, error)
 	Setup(context.Context, nginxguard.Config) nginxguard.SetupStatus
+	Configuration(context.Context, nginxguard.Config) (nginxguard.ConfigFile, error)
 }
 
 func New(database *sql.DB, controllers ...NginxController) (*Service, error) {

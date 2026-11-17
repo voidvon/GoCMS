@@ -182,6 +182,14 @@ func (s *Service) NginxSetup(ctx context.Context) nginxguard.SetupStatus {
 	return s.controller.Setup(ctx, v.platform.ControlConfig())
 }
 
+func (s *Service) NginxConfiguration(ctx context.Context) (nginxguard.ConfigFile, error) {
+	v, err := s.current(ctx)
+	if err != nil {
+		return nginxguard.ConfigFile{}, err
+	}
+	return s.controller.Configuration(ctx, v.platform.ControlConfig())
+}
+
 // NginxInitialization reads the existing CMS settings without creating tables
 // or writing SQLite files as root. It is used only by the explicit init CLI.
 func NginxInitialization(ctx context.Context, database *sql.DB) (nginxguard.Config, nginxguard.Snapshot, error) {

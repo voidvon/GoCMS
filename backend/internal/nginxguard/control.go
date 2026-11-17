@@ -20,6 +20,7 @@ const controlProtocol = 1
 const controlBinary = "/usr/local/libexec/gocms-nginx"
 const controlArgument = "__nginx-control"
 const maxControlInput = 4 << 20
+const unsupportedAction = "不支持的 Nginx 管理操作"
 
 type SetupStatus struct {
 	Ready         bool   `json:"ready"`
@@ -49,6 +50,7 @@ type controlResponse struct {
 	Result *Result      `json:"result,omitempty"`
 	Batch  *LogBatch    `json:"batch,omitempty"`
 	Setup  *SetupStatus `json:"setup,omitempty"`
+	File   *ConfigFile  `json:"file,omitempty"`
 }
 
 type controlLayout struct {
@@ -150,8 +152,8 @@ func (l controlLayout) execute(ctx context.Context, installed installation, requ
 	if request.Protocol != controlProtocol || request.Config != installed.Config {
 		return response, errors.New("接入设置与 root 授权不一致，请保存设置后由 root 重新执行 nginx setup")
 	}
-	if request.Action != "apply" && request.Action != "events" && request.Action != "status" {
-		return response, errors.New("不支持的 Nginx 管理操作")
+	if request.Action != "apply" && request.Action != "events" && request.Action != "status" && request.Action != "config" {
+		return response, errors.New(unsupportedAction)
 	}
 	if request.Action == "apply" {
 		if request.Snapshot == nil || request.Cursor != "" {
@@ -184,6 +186,14 @@ func (l controlLayout) execute(ctx context.Context, installed installation, requ
 		return response, errors.New("Nginx 授权已变更，请重新读取接入设置后同步")
 	}
 	installed = current
+	if request.Action == "config" {
+		file, err := readConfigFile(installed.Config.ServerConfig, l.owner)
+		if err != nil {
+			return response, err
+		}
+		response.File = &file
+		return response, nil
+	}
 	if err := checkTrustedPath(filepath.Dir(l.log), true, l.owner); err != nil {
 		return response, err
 	}
@@ -282,6 +292,10 @@ func (Client) call(ctx context.Context, request controlRequest) (controlResponse
 	cmd.Dir, cmd.Env = "/", commandEnvironment()
 	cmd.Stdin = bytes.NewReader(data)
 	stdout := cappedOutput{limit: 8 << 20}
+	if request.Action == "config" {
+		// JSON can expand each input byte to a six-character escape sequence.
+		stdout.limit = maxConfigBytes*6 + (1 << 20)
+	}
 	var stderr diagnosticOutput
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
@@ -348,6 +362,20 @@ func (c Client) Setup(ctx context.Context, config Config) SetupStatus {
 		return SetupStatus{Message: "Nginx 初始化状态无效，请以 root 重新执行 nginx setup"}
 	}
 	return *response.Setup
+}
+
+func (c Client) Configuration(ctx context.Context, config Config) (ConfigFile, error) {
+	response, err := c.call(ctx, controlRequest{Action: "config", Config: config})
+	if err != nil {
+		if err.Error() == unsupportedAction {
+			return ConfigFile{}, errors.New("当前 Nginx 管理入口尚不支持查看配置，请以 root 重新执行后台提供的 nginx setup 命令以更新入口")
+		}
+		return ConfigFile{}, err
+	}
+	if response.File == nil {
+		return ConfigFile{}, errors.New("Nginx 管理入口未返回配置文件，请以 root 重新执行后台提供的 nginx setup 命令")
+	}
+	return *response.File, nil
 }
 
 func lookupRunUser(name string) (int, error) {

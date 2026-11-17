@@ -19,6 +19,7 @@ export type SecurityEntry = { id: number; site_id: number; network: string; kind
 export type SecurityEvent = { id: number; site_id: number; ip: string; host: string; path: string; action: string; reason: string; created_at: string }
 export type SecuritySync = { state: "disabled" | "pending" | "applied" | "failed"; digest: string; applied_at: string; error: string }
 export type SecurityNginx = { status: SecuritySync; http_config: string; server_config: string; runtime_user: string; init_command: string; setup: { ready: boolean; initialized_at?: string; protocol?: number; message?: string } }
+export type SecurityNginxFile = { path: string; content: string; modified_at: string }
 export const getSecurityPolicy = () => request<SecurityPolicy>("/api/admin/security/policy")
 export const saveSecurityPolicy = (input: SecurityPolicy) => request("/api/admin/security/policy", { method: "PUT", body: JSON.stringify(input) })
 export const getSecurityPlatform = () => request<SecurityPlatform>("/api/admin/security/platform")
@@ -28,6 +29,7 @@ export const addSecurityEntry = (scope: string, input: Pick<SecurityEntry, "netw
 export const revokeSecurityEntry = (scope: string, id: number) => request(`/api/admin/security/entries/${id}?scope=${scope}`, { method: "DELETE" })
 export const getSecurityEvents = (scope: string, page: number) => request<{ items: SecurityEvent[]; total: number }>(`/api/admin/security/events?scope=${scope}&page=${page}`)
 export const getSecurityNginx = () => request<SecurityNginx>("/api/admin/security/nginx")
+export const getSecurityNginxFile = () => request<SecurityNginxFile>("/api/admin/security/nginx/config")
 export const syncSecurityNginx = () => request<SecuritySync>("/api/admin/security/nginx/sync", { method: "POST", body: "{}" })
 export type CurrencyRule = { currency: string; rate: string; enabled: boolean; countries: string[] }
 export type PricingSettings = { enabled: boolean; base_currency: string; currencies: CurrencyRule[]; max_age_hours: number; rates_updated_at: string; revision: number; country_header: string; trusted_proxies: string[]; refresh_rates?: boolean }

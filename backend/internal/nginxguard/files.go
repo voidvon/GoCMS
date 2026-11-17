@@ -4,15 +4,57 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const stateDir = "/etc/gocms-security"
 const logFile = "/var/log/gocms-security/probes.log"
+const maxConfigBytes = 8 << 20
+
+type ConfigFile struct {
+	Path       string `json:"path"`
+	Content    string `json:"content"`
+	ModifiedAt string `json:"modified_at"`
+}
+
+func readConfigFile(path string, owner int) (ConfigFile, error) {
+	var result ConfigFile
+	if err := checkTrustedPath(path, false, owner); err != nil {
+		if os.IsNotExist(err) {
+			return result, fmt.Errorf("安全规则文件不存在（%s），请先以 root 执行后台提供的 nginx setup 命令", path)
+		}
+		return result, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return result, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return result, err
+	}
+	if info.Size() > maxConfigBytes {
+		return result, errors.New("安全规则文件超过 8 MiB，无法在线查看完整内容")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxConfigBytes+1))
+	if err != nil {
+		return result, err
+	}
+	if len(data) > maxConfigBytes {
+		return result, errors.New("安全规则文件超过 8 MiB，无法在线查看完整内容")
+	}
+	if !utf8.Valid(data) {
+		return result, errors.New("安全规则文件不是有效的 UTF-8 文本，无法在线查看完整内容")
+	}
+	return ConfigFile{Path: path, Content: string(data), ModifiedAt: info.ModTime().UTC().Format(time.RFC3339Nano)}, nil
+}
 
 type Config struct {
 	NginxBinary  string `json:"nginx_binary"`

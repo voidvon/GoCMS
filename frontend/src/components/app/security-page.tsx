@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog, TablePagination } from "./app-ui"
 import { showError, showSuccess } from "./admin-notifications"
 import { TimeText } from "./time-text"
+import { NginxConfigDialog } from "./nginx-config-dialog"
 
 const syncLabels = { disabled: "未启用", pending: "待同步", applied: "已生效", failed: "同步失败" }
 const actionLabels: Record<string, string> = { probe: "路径探测", ban: "自动封禁", deny: "手动封禁", allow: "加入白名单", revoke: "移除名单" }
@@ -226,6 +227,7 @@ export function SecurityPage({ user }: { user: AdminUser }) {
             ["nginx_binary", "Nginx 可执行文件"], ["nginx_config", "Nginx 主配置文件"], ["server_config", "GoCMS 安全规则文件"], ["run_user", "GoCMS 系统运行用户"],
           ] as const).map(([key, label]) => <Field key={key} label={label} id={`security-${key}`}><Input id={`security-${key}`} required className="font-mono" value={platform[key]} onChange={e => setPlatform({ ...platform, [key]: e.target.value })} /></Field>)}</div></div>
         </fieldset><Button type="submit" disabled={pending}>保存平台设置</Button></form>}
+        <div className="flex flex-wrap items-center gap-3"><NginxConfigDialog /><p className="text-xs text-muted-foreground">查看已保存接入设置对应的实际文件。</p></div>
         {nginx && <details className="rounded-xl border p-4"><summary className="cursor-pointer text-sm">查看待同步配置</summary><ScrollArea orientation="both" className="mt-3 max-h-80" contentClassName="p-1"><pre className="text-xs leading-5">{nginx.http_config}{"\n"}{nginx.server_config}</pre></ScrollArea></details>}
       </section>}
       {!canManage && <p className="text-xs text-muted-foreground">当前为只读。修改本站设置与名单需要“管理站点安全防护”权限。</p>}
