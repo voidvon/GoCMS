@@ -39,7 +39,10 @@ export function SecurityPage({ user }: { user: AdminUser }) {
   const canManagePolicy = canManage && (user.is_super || policy?.ban_scope === "site")
   const [pathText, setPathText] = useState("")
   const [platform, setPlatform] = useState<SecurityPlatform | null>(null)
+  const [savedPlatform, setSavedPlatform] = useState<SecurityPlatform | null>(null)
   const [proxyText, setProxyText] = useState("")
+  const platformInput = platform ? { ...platform, trusted_proxies: lines(proxyText) } : null
+  const platformDirty = platformInput !== null && JSON.stringify(platformInput) !== JSON.stringify(savedPlatform)
   const [nginx, setNginx] = useState<SecurityNginx | null>(null)
   const [entries, setEntries] = useState<SecurityEntry[]>([])
   const [events, setEvents] = useState<SecurityEvent[]>([])
@@ -87,7 +90,7 @@ export function SecurityPage({ user }: { user: AdminUser }) {
       }
     }).catch(error => { if (mounted.current) showError(error) })
     if (user.is_super) {
-      void getSecurityPlatform().then(value => { if (mounted.current) { setPlatform(value); setProxyText(value.trusted_proxies.join("\n")) } }).catch(error => { if (mounted.current) showError(error) })
+      void getSecurityPlatform().then(value => { if (mounted.current) { setPlatform(value); setSavedPlatform(value); setProxyText(value.trusted_proxies.join("\n")) } }).catch(error => { if (mounted.current) showError(error) })
       const poll = () => { void getSecurityNginx().then(value => { if (mounted.current) setNginx(value) }).catch(error => { if (mounted.current) showError(error) }) }
       poll()
       const timer = window.setInterval(poll, 15000)
@@ -122,7 +125,26 @@ export function SecurityPage({ user }: { user: AdminUser }) {
   }
   function savePlatform(event: FormEvent) {
     event.preventDefault()
-    if (platform) void act(() => saveSecurityPlatform({ ...platform, trusted_proxies: lines(proxyText) }), "平台接入设置已保存")
+    if (platformInput) void act(() => persistPlatform(platformInput), "平台接入设置已保存")
+  }
+  async function persistPlatform(input: SecurityPlatform) {
+    await saveSecurityPlatform(input)
+    if (mounted.current) { setPlatform(input); setSavedPlatform(input) }
+  }
+  function syncNginx() {
+    if (!platformInput) return
+    void act(async () => {
+      if (platformDirty) await persistPlatform(platformInput)
+      await syncSecurityNginx()
+    }, "Nginx 已确认当前配置")
+  }
+  function switchToDirect() {
+    if (!platformInput) return
+    const input: SecurityPlatform = { ...platformInput, nginx_mode: "direct" }
+    void act(async () => {
+      await persistPlatform(input)
+      if (input.nginx_enabled) await syncSecurityNginx()
+    }, input.nginx_enabled ? "已切换为 GoCMS 直接管理并完成同步" : "已切换为 GoCMS 直接管理")
   }
   function add(event: FormEvent) {
     event.preventDefault()
@@ -190,8 +212,8 @@ export function SecurityPage({ user }: { user: AdminUser }) {
       </section>}
 
       {tab === "nginx" && user.is_super && <section className="max-w-4xl space-y-5" aria-label="Nginx 接入设置">
-        {platform?.nginx_mode === "agent" && !nginx?.status.applied_at && <div className="space-y-2 rounded-xl border bg-muted/30 p-4"><p className="text-sm font-medium">当前使用独立代理模式</p><p className="text-sm leading-6 text-muted-foreground">此模式需要安装本机同步代理。使用“GoCMS 直接管理”可由当前程序读写配置并重载 Nginx。</p></div>}
-        <div className="space-y-3 rounded-xl border bg-card p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><Unplug className="size-4" /><span className="font-medium">同步状态</span><Badge variant={nginx?.status.state === "failed" ? "destructive" : "outline"}>{nginx ? syncLabels[nginx.status.state] : "读取中"}</Badge></div><Button variant="outline" disabled={pending || !platform || (!platform.nginx_enabled && nginx?.status.state === "disabled")} onClick={() => void act(() => syncSecurityNginx(), "Nginx 已确认当前配置") }><RefreshCw className="size-4" />立即同步</Button></div>{nginx?.status.applied_at && <p className="text-xs text-muted-foreground">上次确认：<TimeText value={nginx.status.applied_at} /></p>}{nginx?.status.error && <p className="break-words text-sm text-muted-foreground">{nginx.status.error}</p>}<p className="text-xs leading-5 text-muted-foreground">Go 防护独立生效。接入后约每 15 秒同步一次；检查或重载失败时恢复原配置并重试。{platform?.nginx_mode === "agent" ? "独立代理可在 CMS 暂停时继续清理到期规则。" : "直接管理模式在 GoCMS 运行期间同步封禁和到期解封。"}</p></div>
+        {platform?.nginx_mode === "agent" && !nginx?.status.applied_at && <div className="space-y-2 rounded-xl border bg-muted/30 p-4"><p className="text-sm font-medium">当前使用独立代理模式</p><p className="text-sm leading-6 text-muted-foreground">旧版配置会保留此模式。选择“GoCMS 直接管理”可直接使用当前程序读写配置并重载 Nginx，无需下载接入包。</p><Button type="button" variant="outline" size="sm" disabled={pending || !nginx} onClick={switchToDirect}>{platform.nginx_enabled ? "切换为直接管理并同步" : "切换为直接管理"}</Button></div>}
+        <div className="space-y-3 rounded-xl border bg-card p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><Unplug className="size-4" /><span className="font-medium">同步状态</span><Badge variant={nginx?.status.state === "failed" ? "destructive" : "outline"}>{nginx ? syncLabels[nginx.status.state] : "读取中"}</Badge></div><Button variant="outline" disabled={pending || !platform || (!platform.nginx_enabled && nginx?.status.state === "disabled")} onClick={syncNginx}><RefreshCw className="size-4" />{platformDirty ? "保存并同步" : "立即同步"}</Button></div>{platformDirty && <p className="text-xs leading-5 text-muted-foreground">接入设置已修改，点击“保存并同步”将先保存当前管理方式和配置，再执行同步。</p>}{nginx?.status.applied_at && <p className="text-xs text-muted-foreground">上次确认：<TimeText value={nginx.status.applied_at} /></p>}{nginx?.status.error && <p className="break-words text-sm text-muted-foreground">{nginx.status.error}</p>}<p className="text-xs leading-5 text-muted-foreground">Go 防护独立生效。接入后约每 15 秒同步一次；检查或重载失败时恢复原配置并重试。{platform?.nginx_mode === "agent" ? "独立代理可在 CMS 暂停时继续清理到期规则。" : "直接管理模式在 GoCMS 运行期间同步封禁和到期解封。"}</p></div>
         {platform && <form onSubmit={savePlatform} className="space-y-5"><fieldset disabled={pending} className="space-y-5">
           <Field label="可信代理 IP / 网段" id="security-proxies" hint="每行一条，仅信任实际反向代理。GoCMS 与 Nginx 同机时通常填写 127.0.0.1/32 和 ::1/128；未配置时使用连接来源 IP。使用 CDN 时，还需在 Nginx 配置可信的真实 IP 来源。"><Textarea id="security-proxies" rows={3} placeholder={"127.0.0.1/32\n::1/128"} className="font-mono" value={proxyText} onChange={e => setProxyText(e.target.value)} /></Field>
           <Field label="Nginx 管理方式" id="security-nginx-mode"><Select value={platform.nginx_mode} onValueChange={nginx_mode => { if (nginx_mode === "direct" || nginx_mode === "agent") setPlatform({ ...platform, nginx_mode }) }}><SelectTrigger id="security-nginx-mode" className="w-full"><SelectValue>{platform.nginx_mode === "direct" ? "GoCMS 直接管理" : "独立代理（兼容模式）"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="direct">GoCMS 直接管理</SelectItem><SelectItem value="agent">独立代理（兼容模式）</SelectItem></SelectContent></Select></Field>

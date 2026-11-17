@@ -35,7 +35,7 @@ func (e *SyncError) Unwrap() error { return e.Err }
 func agentConnectionError(socket string, err error) error {
 	switch {
 	case errors.Is(err, os.ErrNotExist):
-		return fmt.Errorf("未找到 Nginx 同步代理的 Socket（%s）：首次接入需在后台下载接入包并以 root 安装 GoCMS 同步代理；已安装时请检查服务状态和 Socket 路径", socket)
+		return fmt.Errorf("当前使用独立代理模式，未找到 Nginx 同步代理的 Socket（%s）。无需安装代理时，请在“Nginx 接入”选择“GoCMS 直接管理”，保存后重新同步；继续使用代理模式时，请检查代理服务与 Socket 路径，尚未安装时再下载接入包", socket)
 	case errors.Is(err, os.ErrPermission):
 		return fmt.Errorf("GoCMS 无权访问 Nginx 同步代理（%s）：请确认接入参数中的系统运行用户与 GoCMS 实际进程用户一致，再重新安装接入包", socket)
 	case errors.Is(err, syscall.ECONNREFUSED):

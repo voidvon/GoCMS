@@ -305,8 +305,8 @@ func TestSecuritySyncMissingAgentShowsSetupInstructions(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || w.Code != http.StatusConflict {
 		t.Fatalf("sync setup error must be JSON conflict: %d %s %v", w.Code, w.Body.String(), err)
 	}
-	if !strings.Contains(result.Error, "未找到") || !strings.Contains(result.Error, "下载接入包") || !strings.Contains(result.Error, "以 root 安装 GoCMS 同步代理") {
-		t.Fatalf("missing installation guidance: %s", result.Error)
+	if !strings.Contains(result.Error, "未找到") || !strings.Contains(result.Error, "GoCMS 直接管理") || !strings.Contains(result.Error, "保存后重新同步") || strings.Contains(result.Error, "首次接入需") {
+		t.Fatalf("missing direct-mode guidance: %s", result.Error)
 	}
 	if status := s.security.Status(context.Background()); status.State != "failed" || status.Error != result.Error {
 		t.Fatalf("setup failure status: %+v", status)
