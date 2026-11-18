@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"gocms/internal/db"
+	"gocms/internal/sitecontacts"
 )
 
 type BoolInt int
@@ -50,12 +51,13 @@ type LanguageItem struct {
 	// IsAdminDefault marks the language the admin backend displays by default in
 	// category and content lists. It is independent from IsDefault (the primary
 	// site language rendered at the site root).
-	IsAdminDefault int `json:"is_admin_default"`
+	IsAdminDefault int      `json:"is_admin_default"`
+	ContactCardIDs []string `json:"contact_card_ids"`
 }
 
 func (s *Server) getLanguages(ctx context.Context, siteID int64) ([]LanguageItem, error) {
 	rows, err := s.database.QueryContext(ctx, `
-		SELECT "id", "code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir", "is_admin_default"
+		SELECT "id", "code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir", "is_admin_default", "contact_card_ids"
 		FROM "`+db.LanguageTable+`" WHERE "site_id" = ?
 		ORDER BY "is_default" DESC, "sort_order" ASC, "id" ASC`, siteID)
 	if err != nil {
@@ -65,7 +67,12 @@ func (s *Server) getLanguages(ctx context.Context, siteID int64) ([]LanguageItem
 	items := make([]LanguageItem, 0)
 	for rows.Next() {
 		var item LanguageItem
-		if err := rows.Scan(&item.ID, &item.Code, &item.Name, &item.IsDefault, &item.IsFallback, &item.IsEnabled, &item.SortOrder, &item.PathPrefix, &item.SiteMode, &item.Domain, &item.OutputDir, &item.IsAdminDefault); err != nil {
+		var contactCardIDs string
+		if err := rows.Scan(&item.ID, &item.Code, &item.Name, &item.IsDefault, &item.IsFallback, &item.IsEnabled, &item.SortOrder, &item.PathPrefix, &item.SiteMode, &item.Domain, &item.OutputDir, &item.IsAdminDefault, &contactCardIDs); err != nil {
+			return nil, err
+		}
+		item.ContactCardIDs, err = sitecontacts.ParseSelection(contactCardIDs)
+		if err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -170,17 +177,18 @@ func (s *Server) adminLanguageItem(response http.ResponseWriter, request *http.R
 // or an ID owned by another site cannot clear this site's language defaults.
 func (s *Server) saveLanguage(response http.ResponseWriter, request *http.Request, siteID, id int64) {
 	var payload struct {
-		Code           string  `json:"code"`
-		Name           string  `json:"name"`
-		IsDefault      BoolInt `json:"is_default"`
-		IsFallback     BoolInt `json:"is_fallback"`
-		IsEnabled      BoolInt `json:"is_enabled"`
-		SortOrder      int     `json:"sort_order"`
-		PathPrefix     string  `json:"path_prefix"`
-		SiteMode       string  `json:"site_mode"`
-		Domain         string  `json:"domain"`
-		OutputDir      string  `json:"output_dir"`
-		IsAdminDefault BoolInt `json:"is_admin_default"`
+		Code           string   `json:"code"`
+		Name           string   `json:"name"`
+		IsDefault      BoolInt  `json:"is_default"`
+		IsFallback     BoolInt  `json:"is_fallback"`
+		IsEnabled      BoolInt  `json:"is_enabled"`
+		SortOrder      int      `json:"sort_order"`
+		PathPrefix     string   `json:"path_prefix"`
+		SiteMode       string   `json:"site_mode"`
+		Domain         string   `json:"domain"`
+		OutputDir      string   `json:"output_dir"`
+		IsAdminDefault BoolInt  `json:"is_admin_default"`
+		ContactCardIDs []string `json:"contact_card_ids"`
 	}
 	if err := decodeRequest(request, &payload); err != nil {
 		http.Error(response, "invalid payload", http.StatusBadRequest)
@@ -234,6 +242,23 @@ func (s *Server) saveLanguage(response http.ResponseWriter, request *http.Reques
 			return
 		}
 	}
+
+	var contactCardIDs any
+	if payload.ContactCardIDs != nil {
+		if len(payload.ContactCardIDs) > 0 {
+			library, err := loadContactLibrary(ctx, tx, siteID)
+			if err != nil {
+				contactCardsError(response, http.StatusInternalServerError, "加载联系方式失败")
+				return
+			}
+			if err := library.ValidateSelection(payload.ContactCardIDs); err != nil {
+				contactCardsError(response, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		raw, _ := json.Marshal(payload.ContactCardIDs)
+		contactCardIDs = string(raw)
+	}
 	for _, flag := range []struct {
 		name  string
 		value BoolInt
@@ -247,16 +272,16 @@ func (s *Server) saveLanguage(response http.ResponseWriter, request *http.Reques
 			}
 		}
 	}
-	args := []any{payload.Code, payload.Name, payload.IsDefault, payload.IsFallback, payload.IsEnabled, payload.SortOrder, payload.PathPrefix, payload.SiteMode, payload.Domain, payload.OutputDir, payload.IsAdminDefault, siteID}
+	args := []any{payload.Code, payload.Name, payload.IsDefault, payload.IsFallback, payload.IsEnabled, payload.SortOrder, payload.PathPrefix, payload.SiteMode, payload.Domain, payload.OutputDir, payload.IsAdminDefault, contactCardIDs, siteID}
 	var result sql.Result
 	if id == 0 {
 		result, err = tx.ExecContext(ctx, `INSERT INTO "`+db.LanguageTable+`"
-			("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir", "is_admin_default", "site_id")
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...)
+			("code", "name", "is_default", "is_fallback", "is_enabled", "sort_order", "path_prefix", "site_mode", "domain", "output_dir", "is_admin_default", "contact_card_ids", "site_id")
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, '[]'), ?)`, args...)
 	} else {
 		args = append(args, id)
 		result, err = tx.ExecContext(ctx, `UPDATE "`+db.LanguageTable+`"
-			SET "code" = ?, "name" = ?, "is_default" = ?, "is_fallback" = ?, "is_enabled" = ?, "sort_order" = ?, "path_prefix" = ?, "site_mode" = ?, "domain" = ?, "output_dir" = ?, "is_admin_default" = ?
+			SET "code" = ?, "name" = ?, "is_default" = ?, "is_fallback" = ?, "is_enabled" = ?, "sort_order" = ?, "path_prefix" = ?, "site_mode" = ?, "domain" = ?, "output_dir" = ?, "is_admin_default" = ?, "contact_card_ids" = COALESCE(?, "contact_card_ids")
 			WHERE "site_id" = ? AND "id" = ?`, args...)
 	}
 	if err != nil {

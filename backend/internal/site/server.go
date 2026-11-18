@@ -343,6 +343,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminSiteSettings(response, request)
 	case "/api/admin/languages":
 		s.adminLanguages(response, request)
+	case "/api/admin/languages/contact-cards":
+		s.adminContactCards(response, request)
 	case "/api/admin/api-keys":
 		s.adminApiKeys(response, request)
 	case "/api/admin/theme/activate":

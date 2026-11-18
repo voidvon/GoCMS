@@ -47,6 +47,7 @@ func languageTableSchema(table string) string {
 		"domain" TEXT NOT NULL DEFAULT '',
 		"output_dir" TEXT NOT NULL DEFAULT '',
 		"is_admin_default" INTEGER NOT NULL DEFAULT 0,
+		"contact_card_ids" TEXT NOT NULL DEFAULT '[]',
 		UNIQUE ("site_id", "code")
 	)`
 }
@@ -67,6 +68,7 @@ func EnsureLanguages(ctx context.Context, database *sql.DB) error {
 		"domain":           "TEXT NOT NULL DEFAULT ''",
 		"output_dir":       "TEXT NOT NULL DEFAULT ''",
 		"is_admin_default": "INTEGER NOT NULL DEFAULT 0",
+		"contact_card_ids": "TEXT NOT NULL DEFAULT '[]'",
 	} {
 		if err := ensureLanguageColumn(ctx, database, name, definition); err != nil {
 			return err

@@ -13,6 +13,7 @@ import (
 	"gocms/internal/db"
 	"gocms/internal/imageopt"
 	"gocms/internal/security"
+	"gocms/internal/sitecontacts"
 )
 
 func (s *Server) currentAdmin(r *http.Request) *AdminUser {
@@ -285,12 +286,17 @@ func (s *Server) adminSiteSettings(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		delete(settings, sitecontacts.SettingKey)
 		writeJSON(w, http.StatusOK, settings)
 
 	case http.MethodPut, http.MethodPost:
 		var payload map[string]string
 		if err := decodeRequest(r, &payload); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式不正确"})
+			return
+		}
+		if _, ok := payload[sitecontacts.SettingKey]; ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请在语言管理中编辑联系方式"})
 			return
 		}
 		if _, err := imageopt.ParseSettings(payload); err != nil {

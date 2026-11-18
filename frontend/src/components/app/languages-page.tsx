@@ -1,6 +1,10 @@
 import { useDialogState } from "@/lib/use-dialog-state"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
+import { Combobox } from "@base-ui/react/combobox"
 import {
+  Check,
+  ChevronDown,
+  Contact,
   LoaderCircle,
   Monitor,
   Pencil,
@@ -9,18 +13,23 @@ import {
   Star,
   ShieldCheck,
   Trash2,
+  X,
 } from "lucide-react"
 
 import {
   createLanguage,
   deleteLanguage,
+  getContactCards,
   updateLanguage,
+  type ContactCard,
   type Language,
   type LanguageInput,
 } from "@/lib/api"
 import { useLanguage } from "@/lib/language-context"
 import { useSite } from "@/lib/site-context"
 import { ConsentSettingsDialog } from "@/components/app/consent-settings-dialog"
+import { ContactCardsDialog } from "@/components/app/contact-cards-dialog"
+import { showError, showSuccess } from "@/components/app/admin-notifications"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -33,6 +42,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
   SelectContent,
@@ -51,9 +61,113 @@ import {
 } from "@/components/ui/table"
 import { ConfirmDialog, InlineAlert } from "@/components/app/app-ui"
 
+function LanguageContactPicker({
+  siteId, selected, inherited, fallbackName, onChange,
+}: {
+  siteId: number
+  selected: string[]
+  inherited: string[]
+  fallbackName?: string
+  onChange: (ids: string[]) => void
+}) {
+  const [cards, setCards] = useState<ContactCard[] | null>(null)
+  const [failed, setFailed] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const anchor = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    let active = true
+    getContactCards(siteId).then(data => {
+      if (active) setCards(data.cards)
+    }).catch(error => {
+      if (!active) return
+      setFailed(true)
+      showError(error, "加载联系方式失败")
+    })
+    return () => { active = false }
+  }, [siteId, attempt])
+
+  const items = cards?.map(card => ({ value: card.id, label: card.name })) ?? []
+  const byID = new Map(items.map(item => [item.value, item]))
+  const selectedItems = selected.map(id => byID.get(id) ?? { value: id, label: "卡片已移除" })
+  const inheritedNames = inherited.flatMap(id => byID.get(id)?.label ?? [])
+  const inheritedText = inheritedNames.length ? `继承${fallbackName}：${inheritedNames.join("、")}` : `留空继承${fallbackName}`
+  const placeholder = !cards ? "加载联系方式…" : !cards.length && !selected.length ? "请先添加联系卡片" :
+    selected.length ? "" : fallbackName ? inheritedText : "选择联系卡片"
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3 border-t pt-3">
+      <Label htmlFor="language-contact-cards" className="whitespace-nowrap">联系方式</Label>
+      {failed ? (
+        <Button id="language-contact-cards" type="button" variant="outline" className="justify-self-start" onClick={() => { setFailed(false); setAttempt(attempt + 1) }}>重新加载</Button>
+      ) : (
+        <Combobox.Root
+          multiple
+          items={items}
+          value={selectedItems}
+          onValueChange={selection => onChange(selection.map(item => item.value))}
+          isItemEqualToValue={(item, value) => item.value === value.value}
+          disabled={!cards || (!cards.length && !selected.length)}
+        >
+          <Combobox.Chips
+            ref={anchor}
+            data-slot="contact-chips"
+            className="flex min-h-8 flex-wrap items-center gap-1 rounded-lg border border-input py-1 ps-2 pe-1 transition-colors focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50 dark:bg-input/30"
+          >
+            {selectedItems.map(item => (
+              <Combobox.Chip
+                key={item.value}
+                data-slot="contact-chip"
+                className="flex min-w-0 max-w-full items-center gap-1 rounded-md bg-secondary ps-1.5 pe-0.5 text-xs text-secondary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span className="truncate">{item.label}</span>
+                <Combobox.ChipRemove
+                  aria-label={`移除${item.label}`}
+                  className="grid size-5 shrink-0 place-items-center rounded-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X className="size-3" />
+                </Combobox.ChipRemove>
+              </Combobox.Chip>
+            ))}
+            <Combobox.Input
+              id="language-contact-cards"
+              placeholder={placeholder}
+              title={!selected.length && fallbackName ? inheritedText : undefined}
+              className="min-w-8 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+            />
+            <Combobox.Trigger aria-label="切换联系卡片选项" className="grid size-6 shrink-0 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+              <ChevronDown className="size-4" />
+            </Combobox.Trigger>
+          </Combobox.Chips>
+          <Combobox.Portal>
+            <Combobox.Positioner anchor={anchor} sideOffset={4} className="isolate z-50 w-(--anchor-width)">
+              <Combobox.Popup className="rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10">
+                <Combobox.Empty className="px-2 py-1.5 text-sm text-muted-foreground empty:hidden">没有匹配的卡片</Combobox.Empty>
+                <ScrollArea className="max-h-[min(14rem,var(--available-height))]" contentClassName="pr-2">
+                  <Combobox.List>
+                    {(item: (typeof items)[number]) => (
+                      <Combobox.Item
+                        key={item.value}
+                        value={item}
+                        className="flex cursor-default items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground"
+                      >
+                        <span className="truncate">{item.label}</span>
+                        <Combobox.ItemIndicator><Check className="size-4" /></Combobox.ItemIndicator>
+                      </Combobox.Item>
+                    )}
+                  </Combobox.List>
+                </ScrollArea>
+              </Combobox.Popup>
+            </Combobox.Positioner>
+          </Combobox.Portal>
+        </Combobox.Root>
+      )}
+    </div>
+  )
+}
+
 export function LanguagesPage() {
   const { activeSiteId, activeSite } = useSite()
   const [privacyLanguage, setPrivacyLanguage] = useState<string | null>(null)
+  const [contactsOpen, setContactsOpen] = useState(false)
   const {
     languages,
     refreshLanguages,
@@ -137,7 +251,7 @@ export function LanguagesPage() {
     try {
       if (editingLang) {
         await updateLanguage(editingLang.id, formData)
-        setSuccessMsg("语言更新成功")
+        showSuccess(formData.contact_card_ids ? "语言及联系方式已保存，静态发布后生效" : "语言更新成功")
       } else {
         await createLanguage(formData)
         setSuccessMsg("语言添加成功")
@@ -155,6 +269,7 @@ export function LanguagesPage() {
     try {
       await updateLanguage(lang.id, {
         ...lang,
+        contact_card_ids: undefined,
         is_default: 1,
         is_enabled: 1,
         path_prefix: "",
@@ -170,6 +285,7 @@ export function LanguagesPage() {
     try {
       await updateLanguage(lang.id, {
         ...lang,
+        contact_card_ids: undefined,
         is_fallback: 1,
       })
       setSuccessMsg(`已将 ${lang.name} 设为兜底语言`)
@@ -183,6 +299,7 @@ export function LanguagesPage() {
     try {
       await updateLanguage(lang.id, {
         ...lang,
+        contact_card_ids: undefined,
         is_admin_default: 1,
         is_enabled: 1,
       })
@@ -207,16 +324,26 @@ export function LanguagesPage() {
 
   const enabledLanguages = languages.filter((lang) => lang.is_enabled === 1)
   const adminDefaultName = languages.find((lang) => lang.code === adminLang)?.name || adminLang
+  const otherFallback = enabledLanguages.find(lang => lang.id !== editingLang?.id && lang.is_fallback === 1)
+  const fallbackLanguage = formData.is_fallback && formData.is_enabled
+    ? editingLang
+    : otherFallback ?? (formData.is_default
+      ? editingLang
+      : enabledLanguages.find(lang => lang.id !== editingLang?.id && lang.is_default === 1))
+  const inheritedContacts = fallbackLanguage?.id === editingLang?.id ? undefined : fallbackLanguage
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" onClick={() => setPrivacyLanguage("")}>
-          <ShieldCheck className="size-4 mr-2" />隐私与 Cookie
-        </Button>
         <Button size="sm" onClick={openCreate}>
           <Plus className="size-4 mr-2" />
           新增语言
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => setPrivacyLanguage("")}>
+          <ShieldCheck className="size-4 mr-2" />隐私与 Cookie
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => setContactsOpen(true)}>
+          <Contact className="size-4 mr-2" />联系方式
         </Button>
         <Button variant="outline" size="sm" onClick={() => refreshLanguages()} disabled={loading}>
           <RefreshCw className={`size-4 mr-2 ${loading ? "animate-spin" : ""}`} />
@@ -428,15 +555,16 @@ export function LanguagesPage() {
 
       {/* Add / Edit Dialog */}
       {privacyLanguage !== null && <ConsentSettingsDialog key={`${activeSiteId}:${privacyLanguage}`} siteId={activeSiteId} siteName={activeSite?.name || "当前站点"} initialLanguage={privacyLanguage} onClose={() => setPrivacyLanguage(null)} />}
+      {contactsOpen && <ContactCardsDialog key={activeSiteId} siteId={activeSiteId} onClose={() => setContactsOpen(false)} />}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="flex max-h-[90dvh] flex-col sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{editingLang ? "编辑语言" : "新增语言"}</DialogTitle>
             <DialogDescription>
               配置语言信息。主站语言在根目录展示，其他语言在配置的路径前缀下展示；后台显示语言决定分类与内容列表默认展示哪种语言。
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <ScrollArea className="min-h-0" contentClassName="space-y-4 py-2 pr-3">
             <div className="space-y-2">
               <Label htmlFor="lang-code">语言代码 <span className="text-destructive">*</span></Label>
               <Input
@@ -546,6 +674,17 @@ export function LanguagesPage() {
               />
             </div>
 
+            {dialogOpen && editingLang && (
+              <LanguageContactPicker
+                key={`${activeSiteId}:${editingLang.id}`}
+                siteId={activeSiteId}
+                selected={formData.contact_card_ids ?? editingLang.contact_card_ids ?? []}
+                inherited={inheritedContacts?.contact_card_ids ?? []}
+                fallbackName={inheritedContacts?.name}
+                onChange={ids => setFormData(current => ({ ...current, contact_card_ids: ids }))}
+              />
+            )}
+
             <div className="flex items-center justify-between border-t pt-3">
               <div>
                 <Label htmlFor="is-enabled" className="text-sm font-medium">启用此语言</Label>
@@ -611,7 +750,7 @@ export function LanguagesPage() {
                 onCheckedChange={(checked) => setFormData({ ...formData, is_fallback: checked ? 1 : 0 })}
               />
             </div>
-          </div>
+          </ScrollArea>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>取消</Button>
             <Button onClick={handleSave} disabled={submitting}>

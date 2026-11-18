@@ -22,6 +22,7 @@ import (
 	"gocms/internal/consent"
 	"gocms/internal/db"
 	"gocms/internal/routing"
+	"gocms/internal/sitecontacts"
 	"gocms/internal/templateconfig"
 	"gocms/internal/templatelabel"
 	"gocms/internal/translation"
@@ -121,6 +122,7 @@ type LanguageInfo struct {
 type content struct {
 	siteID           int64
 	consentPolicy    consent.Policy
+	contactCards     []sitecontacts.Card
 	tables           map[string][]Row
 	settings         map[string]string
 	templates        map[string]*template.Template
@@ -261,6 +263,16 @@ func TemplateTags() []TemplateTag {
 			Context:     "所有模板", Example: `{{range listItems .}}{{label "content-card" .}}{{end}}`,
 		},
 		{
+			Name: "siteContacts", Category: "全局设置", Signature: `{{range siteContacts}}...{{end}}`,
+			Description: "返回当前语言选中的公开联系卡片，按选择顺序排列；留空时使用站点兜底语言。",
+			Context:     "所有模板", Example: `{{range siteContacts}}{{if .Email}}<a href="mailto:{{html .Email}}">{{html .Email}}</a>{{end}}{{end}}`,
+			Fields: []TemplateField{
+				{Name: ".ID / .Name", Type: "string", Description: "卡片标识及名称"},
+				{Name: ".Email / .Phone / .Address", Type: "string", Description: "邮箱、电话及地址"},
+				{Name: ".Channels", Type: "[]Channel", Description: "联络渠道，每项有 .Label、.URL、.QRURL"},
+			},
+		},
+		{
 			Name: "consent", Category: "隐私同意", Signature: `{{with consent}}...{{end}}`,
 			Description: "返回当前站点和语言的隐私策略。主题通过 data-consent 用途标记控制可选资源，通过 data-consent-open 增加设置入口。",
 			Context:     "所有模板", Example: `<button type="button" data-consent-open>隐私设置</button>`,
@@ -387,6 +399,7 @@ func TemplateTags() []TemplateTag {
 
 func (c *content) templateFuncs() template.FuncMap {
 	return template.FuncMap{
+		"siteContacts":          func() []sitecontacts.Card { return c.contactCards },
 		"consent":               func() consent.Policy { return c.consentPolicy },
 		"contentItems":          c.contentItems,
 		"contentItemsWithImage": c.contentItemsWithImage,
@@ -786,6 +799,16 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		_ = tx.Rollback()
 		return report, err
 	}
+	contactData, err := sitecontacts.Parse(c.settings[sitecontacts.SettingKey])
+	if err != nil {
+		_ = tx.Rollback()
+		return report, err
+	}
+	contactLibrary, err := sitecontacts.NewLibrary(contactData)
+	if err != nil {
+		_ = tx.Rollback()
+		return report, err
+	}
 	privacy, err := consent.Parse(c.settings[consent.SettingKey])
 	if err != nil {
 		_ = tx.Rollback()
@@ -813,12 +836,19 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		return report, err
 	}
 
+	contactSelections := make(map[string][]string)
 	var enabledLanguages []LanguageInfo
 	defaultLang := ""
 	fallbackLang := ""
 
 	for _, lr := range c.tables["gocms_language"] {
 		if lr.n("is_enabled") == 1 {
+			code := lr["code"]
+			ids, err := sitecontacts.ParseSelection(lr["contact_card_ids"])
+			if err != nil {
+				return report, fmt.Errorf("语言 %s: %w", code, err)
+			}
+			contactSelections[code] = ids
 			isDef := lr.n("is_default") == 1
 			isFb := lr.n("is_fallback") == 1
 			prefix := strings.Trim(lr["path_prefix"], "/")
@@ -985,6 +1015,7 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 
 	for _, lang := range enabledLanguages {
 		c.lang = lang.Code
+		c.contactCards = contactLibrary.Resolve(contactSelections[lang.Code], contactSelections[fallbackLang])
 		c.consentPolicy = privacy.Resolve(siteID, lang.Code)
 		c.isStandalone = (lang.SiteMode == "standalone")
 		c.currentLangInfo = lang

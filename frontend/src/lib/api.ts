@@ -480,9 +480,30 @@ export type Language = {
   output_dir?: string
   /** Language the admin backend shows by default in category and content lists. */
   is_admin_default: number
+  contact_card_ids?: string[]
 }
 
 export type LanguageInput = Omit<Language, "id">
+
+export type ContactChannel = {
+  label: string
+  url: string
+  qr_url: string
+}
+
+export type ContactCard = {
+  id: string
+  name: string
+  email: string
+  phone: string
+  address: string
+  channels: ContactChannel[] | null
+}
+
+export type ContactCardLibrary = {
+  cards: ContactCard[]
+  revision: string
+}
 
 export type SystemModel = {
   id: number
@@ -810,6 +831,17 @@ export function getCategories(lang?: string) {
 
 export function getLanguages(siteId?: number) {
   return request<Language[]>(`/api/admin/languages${query({ site_id: siteId })}`)
+}
+
+export function getContactCards(siteId: number) {
+  return request<ContactCardLibrary>(`/api/admin/languages/contact-cards${query({ site_id: siteId })}`)
+}
+
+export function saveContactCards(siteId: number, payload: ContactCardLibrary) {
+  return request<ContactCardLibrary>(`/api/admin/languages/contact-cards${query({ site_id: siteId })}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  })
 }
 
 export function createLanguage(payload: LanguageInput) {

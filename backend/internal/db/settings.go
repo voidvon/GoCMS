@@ -113,6 +113,14 @@ func SaveSiteSettingsForSite(ctx context.Context, database *sql.DB, siteID int64
 	}
 	defer tx.Rollback()
 
+	if err := UpsertSiteSettings(ctx, tx, siteID, settings); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpsertSiteSettings writes settings within the caller's transaction.
+func UpsertSiteSettings(ctx context.Context, tx *sql.Tx, siteID int64, settings map[string]string) error {
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO "`+siteSettingsTable+`" ("site_id", "key", "value", "updated_at")
 		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
@@ -128,7 +136,7 @@ func SaveSiteSettingsForSite(ctx context.Context, database *sql.DB, siteID int64
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // LoadSiteSetting returns a single site setting. It returns sql.ErrNoRows when
