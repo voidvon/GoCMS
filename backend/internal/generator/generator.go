@@ -24,6 +24,7 @@ import (
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
 	"gocms/internal/templatelabel"
+	"gocms/internal/translation"
 )
 
 type Row map[string]string
@@ -625,11 +626,12 @@ func readOptionalTable(ctx context.Context, tx *sql.Tx, name string) ([]Row, err
 	return rows, nil
 }
 
-func prepareTranslatedCategories(baseRows, transRows []Row, targetLang, fallbackLang string) []Row {
+func prepareTranslatedCategories(baseRows, transRows []Row, targetLang, defaultLang, fallbackLang string) []Row {
 	transMap := make(map[string]Row)
+	hasTranslations := make(map[string]bool)
 	for _, tr := range transRows {
-		key := tr["category_id"] + "_" + tr["lang"]
-		transMap[key] = tr
+		transMap[tr["category_id"]+"_"+tr["lang"]] = tr
+		hasTranslations[tr["category_id"]] = true
 	}
 
 	result := make([]Row, len(baseRows))
@@ -638,57 +640,28 @@ func prepareTranslatedCategories(baseRows, transRows []Row, targetLang, fallback
 		for k, v := range base {
 			row[k] = v
 		}
-
-		catID := base["id"]
-		targetTrans := transMap[catID+"_"+targetLang]
-		fallbackTrans := transMap[catID+"_"+fallbackLang]
-
-		if v := strings.TrimSpace(targetTrans["name"]); v != "" {
-			row["name"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["name"]); v != "" {
-			row["name"] = v
+		// Base-only legacy rows belong to the primary language. Once translations
+		// exist, a missing primary translation is empty too.
+		key := base["id"] + "_" + defaultLang
+		if !hasTranslations[base["id"]] {
+			transMap[key] = base
 		}
-
-		if v := strings.TrimSpace(targetTrans["seo_title"]); v != "" {
-			row["seo_title"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["seo_title"]); v != "" {
-			row["seo_title"] = v
+		target := transMap[base["id"]+"_"+targetLang]
+		fallback := transMap[base["id"]+"_"+fallbackLang]
+		for _, field := range []string{"name", "seo_title", "description", "cover_content", "link_url"} {
+			row[field] = translation.Text(target[field], fallback[field])
 		}
-
-		if v := strings.TrimSpace(targetTrans["seo_title"]); v != "" {
-			row["seo_title"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["seo_title"]); v != "" {
-			row["seo_title"] = v
-		}
-
-		if v := strings.TrimSpace(targetTrans["description"]); v != "" {
-			row["description"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["description"]); v != "" {
-			row["description"] = v
-		}
-
-		if v := strings.TrimSpace(targetTrans["cover_content"]); v != "" {
-			row["cover_content"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["cover_content"]); v != "" {
-			row["cover_content"] = v
-		}
-
-		if v := strings.TrimSpace(targetTrans["link_url"]); v != "" {
-			row["link_url"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["link_url"]); v != "" {
-			row["link_url"] = v
-		}
-
 		result[i] = row
 	}
 	return result
 }
 
-func prepareTranslatedContent(baseRows, transRows []Row, targetLang, fallbackLang string, transFields map[string]bool) []Row {
+func prepareTranslatedContent(baseRows, transRows []Row, targetLang, defaultLang, fallbackLang string, fieldsByModel map[string]map[string]bool) []Row {
 	transMap := make(map[string]Row)
+	hasTranslations := make(map[string]bool)
 	for _, tr := range transRows {
-		key := tr["content_id"] + "_" + tr["lang"]
-		transMap[key] = tr
+		transMap[tr["content_id"]+"_"+tr["lang"]] = tr
+		hasTranslations[tr["content_id"]] = true
 	}
 
 	result := make([]Row, len(baseRows))
@@ -697,81 +670,30 @@ func prepareTranslatedContent(baseRows, transRows []Row, targetLang, fallbackLan
 		for k, v := range base {
 			row[k] = v
 		}
+		key := base["id"] + "_" + defaultLang
+		if !hasTranslations[base["id"]] {
+			transMap[key] = base
+		}
+		target := transMap[base["id"]+"_"+targetLang]
+		fallback := transMap[base["id"]+"_"+fallbackLang]
+		for _, field := range []string{"title", "summary", "seo_title", "description"} {
+			row[field] = translation.Text(target[field], fallback[field])
+		}
+		targetBody := translation.Text(target["body"], target["content"])
+		fallbackBody := translation.Text(fallback["body"], fallback["content"])
+		row["body"] = translation.Text(targetBody, fallbackBody)
 
-		contentID := base["id"]
-		targetTrans := transMap[contentID+"_"+targetLang]
-		fallbackTrans := transMap[contentID+"_"+fallbackLang]
-
-		if v := strings.TrimSpace(targetTrans["title"]); v != "" {
-			row["title"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["title"]); v != "" {
-			row["title"] = v
+		var baseExtra, targetExtra, fallbackExtra map[string]any
+		_ = json.Unmarshal([]byte(base["extra_data"]), &baseExtra)
+		_ = json.Unmarshal([]byte(target["extra_data"]), &targetExtra)
+		_ = json.Unmarshal([]byte(fallback["extra_data"]), &fallbackExtra)
+		fields := fieldsByModel[base["model_id"]]
+		if fields == nil {
+			fields = fieldsByModel[""]
 		}
-
-		if v := strings.TrimSpace(targetTrans["summary"]); v != "" {
-			row["summary"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["summary"]); v != "" {
-			row["summary"] = v
-		}
-
-		bodyVal := strings.TrimSpace(targetTrans["body"])
-		if bodyVal == "" {
-			bodyVal = strings.TrimSpace(targetTrans["content"])
-		}
-		if bodyVal != "" {
-			row["body"] = bodyVal
-		} else {
-			fbBodyVal := strings.TrimSpace(fallbackTrans["body"])
-			if fbBodyVal == "" {
-				fbBodyVal = strings.TrimSpace(fallbackTrans["content"])
-			}
-			if fbBodyVal != "" {
-				row["body"] = fbBodyVal
-			}
-		}
-
-		if v := strings.TrimSpace(targetTrans["seo_title"]); v != "" {
-			row["seo_title"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["seo_title"]); v != "" {
-			row["seo_title"] = v
-		}
-
-		if v := strings.TrimSpace(targetTrans["description"]); v != "" {
-			row["description"] = v
-		} else if v := strings.TrimSpace(fallbackTrans["description"]); v != "" {
-			row["description"] = v
-		}
-
-		var extraMap map[string]any
-		if baseExtra := strings.TrimSpace(base["extra_data"]); baseExtra != "" && baseExtra != "{}" {
-			_ = json.Unmarshal([]byte(baseExtra), &extraMap)
-		}
-		if extraMap == nil {
-			extraMap = make(map[string]any)
-		}
-		if fbExtraStr := strings.TrimSpace(fallbackTrans["extra_data"]); fbExtraStr != "" && fbExtraStr != "{}" {
-			var fbExtra map[string]any
-			if err := json.Unmarshal([]byte(fbExtraStr), &fbExtra); err == nil {
-				for k, v := range fbExtra {
-					if transFields[k] && strings.TrimSpace(fmt.Sprint(v)) != "" {
-						extraMap[k] = v
-					}
-				}
-			}
-		}
-		if tgExtraStr := strings.TrimSpace(targetTrans["extra_data"]); tgExtraStr != "" && tgExtraStr != "{}" {
-			var tgExtra map[string]any
-			if err := json.Unmarshal([]byte(tgExtraStr), &tgExtra); err == nil {
-				for k, v := range tgExtra {
-					if transFields[k] && strings.TrimSpace(fmt.Sprint(v)) != "" {
-						extraMap[k] = v
-					}
-				}
-			}
-		}
-		extraBytes, _ := json.Marshal(extraMap)
+		extra := translation.ExtraData(baseExtra, targetExtra, fallbackExtra, fields)
+		extraBytes, _ := json.Marshal(extra)
 		row["extra_data"] = string(extraBytes)
-
 		result[i] = row
 	}
 	return result
@@ -855,7 +777,7 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		}
 		c.tables[name] = filtered
 	}
-	for _, name := range []string{"gocms_category_translation", "gocms_content_translation", "gocms_model_field"} {
+	for _, name := range []string{"gocms_category_translation", "gocms_content_translation", "gocms_model_field", db.ModelTable} {
 		rows, _ := readOptionalTable(ctx, tx, name)
 		c.tables[name] = rows
 	}
@@ -968,18 +890,15 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 	}
 	c.languages = enabledLanguages
 
-	transFields := map[string]bool{
-		"title":       true,
-		"summary":     true,
-		"body":        true,
-		"content":     true,
-		"seo_title":   true,
-		"description": true,
-	}
-	for _, f := range c.tables["gocms_model_field"] {
-		if f.n("is_translatable") == 1 {
-			transFields[strings.ToLower(strings.TrimSpace(f["field_name"]))] = true
+	fieldsByModel := map[string]map[string]bool{"": {}}
+	for _, model := range c.tables[db.ModelTable] {
+		fields := make(map[string]bool)
+		for _, field := range c.tables["gocms_model_field"] {
+			if field["table_id"] == model["table_id"] && field.n("is_translatable") == 1 {
+				fields[field["field_name"]] = true
+			}
 		}
+		fieldsByModel[model["id"]] = fields
 	}
 
 	for _, label := range labels {
@@ -1076,8 +995,8 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		}
 		c.pages = make(map[string][]byte)
 
-		c.tables["gocms_category"] = prepareTranslatedCategories(baseCategories, c.tables["gocms_category_translation"], lang.Code, fallbackLang)
-		c.tables["gocms_content"] = prepareTranslatedContent(baseContents, c.tables["gocms_content_translation"], lang.Code, fallbackLang, transFields)
+		c.tables["gocms_category"] = prepareTranslatedCategories(baseCategories, c.tables["gocms_category_translation"], lang.Code, defaultLang, fallbackLang)
+		c.tables["gocms_content"] = prepareTranslatedContent(baseContents, c.tables["gocms_content_translation"], lang.Code, defaultLang, fallbackLang, fieldsByModel)
 		c.visibleCache = nil
 		c.categoryCache = nil
 		c.categoryByID = nil

@@ -80,29 +80,18 @@ function buildInitialContentTranslations(
     }
   }
 
-  // The item may be rendered in the admin display language instead of the
-  // primary site language, so only trust the rendered fields for the primary
-  // language. Every other language comes from the translations payload.
-  const renderedInDefaultLang = !content.lang || content.lang === defaultLang
-  if (!renderedInDefaultLang) return output
+  // Rendered fields may contain fallback values. Existing translations retain
+  // their stored empty fields when the editor opens and saves them.
+  if (Object.keys(source).length > 0 || (content.lang && content.lang !== defaultLang)) return output
 
-  if (!output[defaultLang]) {
-    output[defaultLang] = {
-      title: content.title || "",
-      summary: content.summary || "",
-      content: content.content || "",
-      seo_title: content.seo_title || "",
-      description: content.description || "",
-      extra_data: content.extra_data || {},
-      publish_status: "published",
-    }
-  } else if (!output[defaultLang].title && content.title) {
-    output[defaultLang].title = content.title
-    output[defaultLang].summary = content.summary || output[defaultLang].summary
-    output[defaultLang].content = content.content || output[defaultLang].content
-    output[defaultLang].seo_title = content.seo_title || output[defaultLang].seo_title
-    output[defaultLang].description = content.description || output[defaultLang].description
-    output[defaultLang].extra_data = { ...(content.extra_data || {}), ...(output[defaultLang].extra_data || {}) }
+  output[defaultLang] = {
+    title: content.title || "",
+    summary: content.summary || "",
+    content: content.content || "",
+    seo_title: content.seo_title || "",
+    description: content.description || "",
+    extra_data: content.extra_data || {},
+    publish_status: "published",
   }
 
   return output
@@ -1316,9 +1305,9 @@ function ContentEditor({
                     {translatableFields.map((field) => {
                       const isRequired = isDefault && (field.field_name === "title" || mustFieldSet.has(field.field_name))
                       const val = getTranslationFieldValue(lang.code, field.field_name)
-                      const placeholderNote = !isDefault
-                        ? `留空将使用兜底语言（${fallbackLangName}）的内容`
-                        : undefined
+                      const placeholderNote = lang.code === fallbackLang
+                        ? "留空则保持为空"
+                        : `留空将使用兜底语言（${fallbackLangName}）的内容，兜底内容也为空时保持为空`
                       return renderFieldControl(
                         field,
                         val,

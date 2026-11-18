@@ -328,7 +328,7 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 	// Add category translation for en
 	if _, err := database.Exec(`
 		INSERT INTO "gocms_category_translation" ("category_id", "lang", "name", "seo_title")
-		VALUES (1, 'en', 'English News', 'news, english')`); err != nil {
+		VALUES (1, 'zh-CN', '中文新闻', ''), (1, 'en', 'English News', 'news, english')`); err != nil {
 		t.Fatal(err)
 	}
 	// Add content 10 (has en translation) and 11 (no translation, falls back)
@@ -342,7 +342,8 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 	}
 	if _, err := database.Exec(`
 		INSERT INTO "gocms_content_translation" ("content_id", "lang", "title", "summary", "body")
-		VALUES (10, 'en', 'First English Title', 'English Summary 1', '<p>English Body 1</p>')`); err != nil {
+		VALUES (10, 'zh-CN', '第一篇中文', '摘要一', '<p>正文一</p>'),
+			(10, 'en', 'First English Title', 'English Summary 1', '<p>English Body 1</p>')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -469,6 +470,9 @@ func TestLinkCategoryGeneration(t *testing.T) {
 		INSERT INTO "gocms_category_translation"
 			("category_id", "lang", "name", "seo_title", "description", "cover_content", "link_url")
 		VALUES
+			(1, 'zh-CN', '首页', '', '', '', '/'),
+			(2, 'zh-CN', '关于我们', '', '', '', ''),
+			(3, 'zh-CN', '外链', '', '', '', 'https://example.com'),
 			(1, 'en', 'Home', '', '', '', '/en/'),
 			(2, 'en', 'About Us', '', '', '', ''),
 			(3, 'en', 'External', '', '', '', 'https://example.com/en')`); err != nil {

@@ -143,7 +143,8 @@ func TestGenerateContentLanguagesAndSiteIsolation(t *testing.T) {
 		(2, 'en', 'Other English', 'subdir', 'foreign-english', ''),
 		(2, 'de', 'Deutsch', 'standalone', '', 'foreign-standalone');
 		UPDATE gocms_language SET domain = 'ru.example.test' WHERE site_id = 1 AND code = 'ru';
-		INSERT INTO gocms_content_translation (content_id, lang, title) VALUES (301, 'en', 'English before'), (301, 'ru', 'Russian before');
+		INSERT INTO gocms_content_translation (content_id, lang, title) VALUES
+		(301, 'zh-CN', '原始标题'), (301, 'en', 'English before'), (301, 'ru', 'Russian before');
 		INSERT INTO gocms_content (id, site_id, category_id, route_key, title, visible) VALUES (901, 2, 93, 'other-site', '其他站点', 1)`); err != nil {
 		t.Fatal(err)
 	}
@@ -151,6 +152,7 @@ func TestGenerateContentLanguagesAndSiteIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := p.DB.Exec(`UPDATE gocms_content SET title = '中文更新' WHERE id = 301;
+		UPDATE gocms_content_translation SET title = '中文更新' WHERE content_id = 301 AND lang = 'zh-CN';
 		UPDATE gocms_content_translation SET title = 'English after' WHERE content_id = 301 AND lang = 'en';
 		UPDATE gocms_content_translation SET title = 'Russian after' WHERE content_id = 301 AND lang = 'ru'`); err != nil {
 		t.Fatal(err)

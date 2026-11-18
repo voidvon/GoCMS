@@ -11,6 +11,7 @@ import (
 	"gocms/internal/commerce"
 	"gocms/internal/db"
 	"gocms/internal/routing"
+	"gocms/internal/translation"
 )
 
 // Content is the runtime content model. Historical source rows are imported
@@ -648,54 +649,31 @@ func (s *Server) applyContentTranslation(ctx context.Context, item *Content, tra
 	if translations == nil {
 		translations = make(map[string]ContentTranslationItem)
 	}
-	if _, ok := translations[defaultLang]; !ok {
+	transFields := s.getTranslatableFieldNames(ctx, nil, item.ModelID)
+	if len(translations) == 0 {
 		translations[defaultLang] = ContentTranslationItem{
 			Title:         item.Title,
 			Summary:       item.Summary,
 			Content:       item.Content,
 			SEOTitle:      item.SEOTitle,
 			Description:   item.Description,
-			ExtraData:     make(map[string]any),
+			ExtraData:     translation.ExtraData(nil, item.ExtraData, nil, transFields),
 			PublishStatus: "published",
 		}
 	}
 
-	transFields := s.getTranslatableFieldNames(ctx, nil, item.ModelID)
 	trans := translations[lang]
 	fallbackTrans := translations[fallbackLang]
 
-	if strings.TrimSpace(trans.Title) != "" {
-		item.Title = trans.Title
-	} else if strings.TrimSpace(fallbackTrans.Title) != "" {
-		item.Title = fallbackTrans.Title
-		if lang != fallbackLang {
-			item.IsFallback = true
-			item.FallbackLang = fallbackLang
-		}
-	}
-
-	if strings.TrimSpace(trans.Summary) != "" {
-		item.Summary = trans.Summary
-	} else if strings.TrimSpace(fallbackTrans.Summary) != "" {
-		item.Summary = fallbackTrans.Summary
-	}
-
-	if strings.TrimSpace(trans.Content) != "" {
-		item.Content = trans.Content
-	} else if strings.TrimSpace(fallbackTrans.Content) != "" {
-		item.Content = fallbackTrans.Content
-	}
-
-	if strings.TrimSpace(trans.SEOTitle) != "" {
-		item.SEOTitle = trans.SEOTitle
-	} else if strings.TrimSpace(fallbackTrans.SEOTitle) != "" {
-		item.SEOTitle = fallbackTrans.SEOTitle
-	}
-
-	if strings.TrimSpace(trans.Description) != "" {
-		item.Description = trans.Description
-	} else if strings.TrimSpace(fallbackTrans.Description) != "" {
-		item.Description = fallbackTrans.Description
+	item.Title = translation.Text(trans.Title, fallbackTrans.Title)
+	item.Summary = translation.Text(trans.Summary, fallbackTrans.Summary)
+	item.Content = translation.Text(trans.Content, fallbackTrans.Content)
+	item.SEOTitle = translation.Text(trans.SEOTitle, fallbackTrans.SEOTitle)
+	item.Description = translation.Text(trans.Description, fallbackTrans.Description)
+	item.IsFallback = lang != fallbackLang && strings.TrimSpace(trans.Title) == "" && strings.TrimSpace(fallbackTrans.Title) != ""
+	item.FallbackLang = ""
+	if item.IsFallback {
+		item.FallbackLang = fallbackLang
 	}
 
 	if trans.PublishStatus != "" {
@@ -706,13 +684,7 @@ func (s *Server) applyContentTranslation(ctx context.Context, item *Content, tra
 		item.PublishStatus = "published"
 	}
 
-	for k := range transFields {
-		if val, exists := trans.ExtraData[k]; exists && val != nil && val != "" {
-			item.ExtraData[k] = val
-		} else if val, fExists := fallbackTrans.ExtraData[k]; fExists && val != nil && val != "" {
-			item.ExtraData[k] = val
-		}
-	}
+	item.ExtraData = translation.ExtraData(item.ExtraData, trans.ExtraData, fallbackTrans.ExtraData, transFields)
 
 	item.Lang = lang
 	item.Translations = translations

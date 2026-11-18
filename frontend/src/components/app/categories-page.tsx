@@ -70,28 +70,15 @@ function buildInitialCategoryTranslations(
     }
   }
 
-  // The list may be rendered in the admin display language instead of the
-  // primary site language, so only trust the rendered fields for the primary
-  // language. Every other language comes from the translations payload.
-  const renderedInDefaultLang = !category.lang || category.lang === defaultLang
-  if (!renderedInDefaultLang) return output
+  // Preserve stored empty fields instead of copying rendered fallback values.
+  if (Object.keys(source).length > 0 || (category.lang && category.lang !== defaultLang)) return output
 
-  if (!output[defaultLang]) {
-    output[defaultLang] = {
-      name: category.name || "",
-      seo_title: category.seo_title || "",
-      description: category.description || "",
-      cover_content: category.cover_content || "",
-      link_url: category.link_url || "",
-    }
-  } else if (!output[defaultLang].name && category.name) {
-    output[defaultLang].name = category.name
-    output[defaultLang].seo_title = category.seo_title || output[defaultLang].seo_title
-    output[defaultLang].description = category.description || output[defaultLang].description
-    output[defaultLang].cover_content = category.cover_content || output[defaultLang].cover_content
-    output[defaultLang].link_url = category.link_url || output[defaultLang].link_url
-  } else if (!output[defaultLang].link_url && category.link_url) {
-    output[defaultLang].link_url = category.link_url
+  output[defaultLang] = {
+    name: category.name || "",
+    seo_title: category.seo_title || "",
+    description: category.description || "",
+    cover_content: category.cover_content || "",
+    link_url: category.link_url || "",
   }
 
   return output
@@ -883,6 +870,9 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
                 {enabledLanguages.map((lang) => {
                   const isDefault = lang.code === defaultLang
                   const fallbackLangName = enabledLanguages.find((l) => l.code === fallbackLang)?.name || fallbackLang
+                  const emptyFieldNote = lang.code === fallbackLang
+                    ? "留空则保持为空"
+                    : `留空将使用兜底语言（${fallbackLangName}）的内容，兜底内容也为空时保持为空`
                   const trans = translations[lang.code] || { name: "", seo_title: "", description: "", cover_content: "" }
                   return (
                     <TabsContent key={lang.id} value={lang.code} className="flex min-h-0 flex-1 flex-col mt-0">
@@ -896,9 +886,9 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
                           )}>
                             <Languages className={cn("size-4 shrink-0", isDefault ? "text-blue-600 dark:text-blue-400" : "text-amber-600 dark:text-amber-400")} />
                             {isDefault ? (
-                              <span>这是默认主站语言（<strong>{lang.name}</strong>），栏目名称为必填项。</span>
+                              <span>这是默认主站语言（<strong>{lang.name}</strong>），栏目名称为必填项。{emptyFieldNote}。</span>
                             ) : (
-                              <span>当前正在编辑 <strong>{lang.name}</strong> 语言的栏目翻译。名称、关键词、描述等翻译字段留空时，将自动使用兜底语言（<strong>{fallbackLangName}</strong>）的内容。</span>
+                              <span>当前正在编辑 <strong>{lang.name}</strong> 语言的栏目翻译。{emptyFieldNote}。</span>
                             )}
                           </div>
 
@@ -916,7 +906,7 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
                                   update("name", event.target.value)
                                 }
                               }}
-                              placeholder={isDefault ? "请输入分类名称" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                              placeholder={isDefault ? "请输入分类名称" : emptyFieldNote}
                               autoFocus={isDefault}
                               required={isDefault}
                             />
@@ -934,10 +924,10 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
                                     update("link_url", event.target.value)
                                   }
                                 }}
-                                placeholder={isDefault ? "例如 / 或 https://... 或 #" : `留空将使用兜底语言（${fallbackLangName}）的链接`}
+                                placeholder={isDefault ? "例如 / 或 https://... 或 #" : emptyFieldNote}
                               />
                               <p className="text-xs text-muted-foreground">
-                                {isDefault ? "当前语言的菜单跳转链接。" : `当前语言对应的跳转链接（如英语首页可设为 /en/），留空则使用兜底语言（${fallbackLangName}）。`}
+                                {isDefault ? "当前语言的菜单跳转链接。" : `当前语言对应的跳转链接。${emptyFieldNote}。`}
                               </p>
                             </div>
                           ) : (
@@ -948,7 +938,7 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
                                   id={`category-seo-title-${lang.code}`}
                                   value={trans.seo_title || ""}
                                   onChange={(event) => updateTranslation(lang.code, { seo_title: event.target.value })}
-                                  placeholder={isDefault ? "用 | 或逗号分隔关键词" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                                  placeholder={isDefault ? "用 | 或逗号分隔关键词" : emptyFieldNote}
                                 />
                               </div>
 
@@ -958,7 +948,7 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
                                   id={`category-description-${lang.code}`}
                                   value={trans.description || ""}
                                   onChange={(event) => updateTranslation(lang.code, { description: event.target.value })}
-                                  placeholder={isDefault ? "请输入栏目 SEO 描述" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                                  placeholder={isDefault ? "请输入栏目 SEO 描述" : emptyFieldNote}
                                   className="min-h-20"
                                 />
                               </div>
@@ -970,7 +960,7 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
                                     id={`category-cover-content-${lang.code}`}
                                     value={trans.cover_content || ""}
                                     onChange={(event) => updateTranslation(lang.code, { cover_content: event.target.value })}
-                                    placeholder={isDefault ? "请输入封面介绍内容（支持 HTML 或文本）" : `留空将使用兜底语言（${fallbackLangName}）的内容`}
+                                    placeholder={isDefault ? "请输入封面介绍内容（支持 HTML 或文本）" : emptyFieldNote}
                                     className="min-h-28"
                                   />
                                 </div>

@@ -97,10 +97,13 @@ func TestAdminContentListTitlesMatchDetail(t *testing.T) {
 		{"missing requested translation", "fr", "zh-CN", map[string]string{"zh-CN": "中文"}, "中文"},
 		{"blank requested translation", "en", "zh-CN", map[string]string{"en": " \t\n", "zh-CN": "中文"}, "中文"},
 		{"missing primary and fallback translation", "fr", "zh-CN", nil, "Base title"},
-		{"missing primary before distinct fallback", "zh-CN", "en", map[string]string{"en": "English"}, "Base title"},
+		{"missing primary uses configured fallback", "zh-CN", "en", map[string]string{"en": "English"}, "English"},
 		{"blank primary allows distinct fallback", "zh-CN", "en", map[string]string{"zh-CN": " ", "en": "English"}, "English"},
 		{"distinct fallback", "fr", "en", map[string]string{"en": "English"}, "English"},
-		{"blank translations retain base", "fr", "en", map[string]string{"fr": " ", "en": ""}, "Base title"},
+		{"blank translations stay empty", "fr", "en", map[string]string{"fr": " ", "en": ""}, ""},
+		{"blank fallback language stays empty", "en", "en", map[string]string{"en": ""}, ""},
+		{"missing distinct fallback stays empty", "fr", "en", nil, ""},
+		{"missing fallback with another translation stays empty", "en", "en", map[string]string{"zh-CN": "中文"}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

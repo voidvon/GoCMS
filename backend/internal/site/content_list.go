@@ -7,6 +7,7 @@ import (
 
 	"gocms/internal/db"
 	"gocms/internal/routing"
+	"gocms/internal/translation"
 )
 
 // AdminContentItem contains only the fields used by the admin content table.
@@ -165,17 +166,17 @@ func (s *Server) populateAdminContentTitles(ctx context.Context, items []AdminCo
 		return nil
 	}
 	placeholders := make([]string, len(items))
-	args := make([]any, 0, len(items)+2)
+	args := make([]any, 0, len(items))
 	for i, item := range items {
 		placeholders[i] = "?"
 		args = append(args, item.ID)
 	}
-	args = append(args, lang, fallbackLang)
-	// Load titles only, for this page and the two languages that can be displayed.
+	// Load titles only for this page. Translation presence distinguishes legacy
+	// base-only entries from a missing translation in multilingual entries.
 	rows, err := s.database.QueryContext(ctx, `
 		SELECT "content_id", "lang", COALESCE("title", '')
 		FROM "`+db.ContentTranslationTable+`"
-		WHERE "content_id" IN (`+strings.Join(placeholders, ",")+`) AND "lang" IN (?, ?)`, args...)
+		WHERE "content_id" IN (`+strings.Join(placeholders, ",")+`)`, args...)
 	if err != nil {
 		return err
 	}
@@ -197,21 +198,17 @@ func (s *Server) populateAdminContentTitles(ctx context.Context, items []AdminCo
 	}
 	for i := range items {
 		translations := titles[items[i].ID]
-		requested, exists := translations[lang]
-		// Match applyContentTranslation: a missing primary-language translation
-		// uses the base title, while an existing blank title allows fallback.
-		if !exists && lang == defaultLang {
-			requested = items[i].Title
+		requested := translations[lang]
+		fallback := translations[fallbackLang]
+		if len(translations) == 0 {
+			if lang == defaultLang {
+				requested = items[i].Title
+			}
+			if fallbackLang == defaultLang {
+				fallback = items[i].Title
+			}
 		}
-		fallback, exists := translations[fallbackLang]
-		if !exists && fallbackLang == defaultLang {
-			fallback = items[i].Title
-		}
-		if strings.TrimSpace(requested) != "" {
-			items[i].Title = requested
-		} else if strings.TrimSpace(fallback) != "" {
-			items[i].Title = fallback
-		}
+		items[i].Title = translation.Text(requested, fallback)
 	}
 	return nil
 }

@@ -18,6 +18,7 @@ import (
 	"gocms/internal/db"
 	"gocms/internal/routing"
 	"gocms/internal/templateconfig"
+	"gocms/internal/translation"
 )
 
 type adminCredentials struct {
@@ -414,7 +415,7 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 		if translations == nil {
 			translations = make(map[string]CategoryTranslationItem)
 		}
-		if _, ok := translations[defaultLang]; !ok {
+		if len(translations) == 0 {
 			translations[defaultLang] = CategoryTranslationItem{
 				Name:         items[i].Name,
 				SEOTitle:     items[i].SEOTitle,
@@ -424,31 +425,18 @@ func (s *Server) adminCategories(response http.ResponseWriter, request *http.Req
 			}
 		}
 
-		if trans, ok := translations[requestedLang]; ok && strings.TrimSpace(trans.Name) != "" {
-			items[i].Name = trans.Name
-			items[i].SEOTitle = trans.SEOTitle
-			items[i].Description = trans.Description
-			items[i].CoverContent = trans.CoverContent
-			if trans.LinkURL != "" {
-				items[i].LinkURL = trans.LinkURL
-			}
-		} else {
-			// FALLBACK to fallback language
-			fallbackTrans := translations[fallbackLang]
-			if strings.TrimSpace(fallbackTrans.Name) != "" {
-				items[i].Name = fallbackTrans.Name
-				items[i].SEOTitle = fallbackTrans.SEOTitle
-				items[i].Description = fallbackTrans.Description
-				items[i].CoverContent = fallbackTrans.CoverContent
-				if fallbackTrans.LinkURL != "" {
-					items[i].LinkURL = fallbackTrans.LinkURL
-				}
-				if requestedLang != fallbackLang {
-					items[i].IsFallback = true
-					items[i].FallbackLang = fallbackLang
-				}
-			}
+		trans := translations[requestedLang]
+		fallbackTrans := translations[fallbackLang]
+		items[i].Name = translation.Text(trans.Name, fallbackTrans.Name)
+		items[i].SEOTitle = translation.Text(trans.SEOTitle, fallbackTrans.SEOTitle)
+		items[i].Description = translation.Text(trans.Description, fallbackTrans.Description)
+		items[i].CoverContent = translation.Text(trans.CoverContent, fallbackTrans.CoverContent)
+		items[i].LinkURL = translation.Text(trans.LinkURL, fallbackTrans.LinkURL)
+		items[i].IsFallback = requestedLang != fallbackLang && strings.TrimSpace(trans.Name) == "" && strings.TrimSpace(fallbackTrans.Name) != ""
+		if items[i].IsFallback {
+			items[i].FallbackLang = fallbackLang
 		}
+
 		items[i].Lang = requestedLang
 		items[i].Translations = translations
 	}
