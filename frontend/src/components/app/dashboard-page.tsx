@@ -7,7 +7,6 @@ import {
   Ban,
   Bug,
   Eye,
-  EyeOff,
   Inbox,
   Link2Off,
   LoaderCircle,
@@ -19,17 +18,15 @@ import {
 } from "lucide-react"
 
 import {
-  addAccessLogIgnore,
+  addSecurityEntry,
   getAccessLogErrors,
-  getAccessLogIgnores,
   getAccessLogPages,
   getStats,
-  removeAccessLogIgnore,
   type AccessLogErrorStat,
-  type AccessLogIgnore,
   type AccessLogMetrics,
   type AccessLogPageStat,
   type AdminStats,
+  type AdminUser,
   type DashboardWindow,
 } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
@@ -39,12 +36,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TimeText } from "@/components/app/time-text"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -78,8 +73,15 @@ function statusTone(status: number) {
   return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
 }
 
-export function DashboardPage() {
+export function DashboardPage({ user }: { user: AdminUser }) {
   const { activeSite } = useSite()
+  const siteId = activeSite?.id
+  const permissions = user.site_permissions && Object.keys(user.site_permissions).length > 0
+    ? user.site_permissions[siteId ?? 0] ?? []
+    : user.permissions
+  const canBlockIP = user.is_super || permissions.includes("*") || (
+    permissions.includes("security") && permissions.includes("security.manage")
+  )
   const [timeWindow, setTimeWindow] = useState<DashboardWindow>("24h")
   const [errorSort, setErrorSort] = useState<ErrorSort>("recent")
   const [loading, setLoading] = useState(true)
@@ -95,8 +97,8 @@ export function DashboardPage() {
   const [pageLoadingMore, setPageLoadingMore] = useState(false)
   const [errorLoadError, setErrorLoadError] = useState("")
   const [pageLoadError, setPageLoadError] = useState("")
-  const [ignoredPaths, setIgnoredPaths] = useState<AccessLogIgnore[]>([])
-  const [ignoreBusyPath, setIgnoreBusyPath] = useState("")
+  const [addedIPs, setAddedIPs] = useState<Set<string>>(() => new Set())
+  const [blockBusyIP, setBlockBusyIP] = useState("")
   const [revision, setRevision] = useState(0)
   const errorMoreRef = useRef(false)
   const pageMoreRef = useRef(false)
@@ -140,13 +142,6 @@ export function DashboardPage() {
         })
         .finally(() => {
           if (!controller.signal.aborted) setPageLoading(false)
-        }),
-      getAccessLogIgnores(init)
-        .then((response) => {
-          if (!controller.signal.aborted) setIgnoredPaths(response.items)
-        })
-        .catch((loadError: unknown) => {
-          if (!controller.signal.aborted) setErrorLoadError(getErrorMessage(loadError, "忽略列表加载失败"))
         }),
     ]
     void Promise.allSettled(requests).then(() => {
@@ -262,36 +257,22 @@ export function DashboardPage() {
     }
   }
 
-  async function handleIgnore(pathValue: string) {
-    if (!pathValue || ignoreBusyPath || !activeSite?.id) return
-    setIgnoreBusyPath(pathValue)
+  async function handleBlockIP(ip: string) {
+    if (!siteId || !canBlockIP || !ip || blockBusyIP || addedIPs.has(ip)) return
+    setBlockBusyIP(ip)
     try {
-      const result = await addAccessLogIgnore(pathValue, { headers: { "X-Site-Id": String(activeSite.id) } })
-      setIgnoredPaths((previous) => [result.item, ...previous.filter((item) => item.path !== result.item.path)])
-      const removed = errorRows.filter((item) => item.path === pathValue).length
-      setErrorRows((previous) => previous.filter((item) => item.path !== pathValue))
-      setErrorTotal((previous) => Math.max(0, previous - removed))
-      setRevision((value) => value + 1)
-      showSuccess("已忽略该路径")
-    } catch (ignoreError) {
-      showError(getErrorMessage(ignoreError, "添加忽略失败"))
+      await addSecurityEntry("site", {
+        network: ip,
+        kind: "deny",
+        reason: "从仪表盘的错误与死链加入",
+        expires_at: "",
+      }, { headers: { "X-Site-Id": String(siteId) } })
+      setAddedIPs((previous) => new Set(previous).add(ip))
+      showSuccess(`${ip} 已加入当前站点黑名单。Nginx 按接入状态同步`)
+    } catch (blockError) {
+      showError(getErrorMessage(blockError, "加入 IP 黑名单失败"))
     } finally {
-      setIgnoreBusyPath("")
-    }
-  }
-
-  async function handleUnignore(pathValue: string) {
-    if (!pathValue || ignoreBusyPath || !activeSite?.id) return
-    setIgnoreBusyPath(pathValue)
-    try {
-      await removeAccessLogIgnore(pathValue, { headers: { "X-Site-Id": String(activeSite.id) } })
-      setIgnoredPaths((previous) => previous.filter((item) => item.path !== pathValue))
-      setRevision((value) => value + 1)
-      showSuccess("已取消忽略")
-    } catch (ignoreError) {
-      showError(getErrorMessage(ignoreError, "取消忽略失败"))
-    } finally {
-      setIgnoreBusyPath("")
+      setBlockBusyIP("")
     }
   }
 
@@ -366,7 +347,7 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div role="group" aria-label="仪表盘工具栏" className="flex flex-wrap items-center gap-2">
+      <div role="group" aria-label="仪表盘工具栏" className="flex items-center gap-2">
         <Select items={windowOptions} value={timeWindow} onValueChange={(value) => {
           if (value && value !== timeWindow) {
             setLoading(true)
@@ -387,19 +368,17 @@ export function DashboardPage() {
           <RefreshCw className={refreshing ? "animate-spin" : ""} />
           {refreshing ? "刷新中…" : "刷新"}
         </Button>
+        {metrics && metrics.internal_404_paths > 0 ? (
+          <Badge variant="outline" className="ms-auto h-auto min-h-5 min-w-0 shrink gap-1.5 border-amber-300 text-amber-700 dark:text-amber-300">
+            <AlertTriangle className="size-3.5 shrink-0" />
+            <span className="whitespace-normal leading-tight">{formatNumber(metrics.internal_404_paths)} 个站内死链地址待处理</span>
+          </Badge>
+        ) : null}
       </div>
       {error ? <InlineAlert>{error}</InlineAlert> : null}
       {!stats && !error ? <StatCardsSkeleton count={8} /> : null}
       {metrics ? (
-        <section className="space-y-3">
-          {metrics.internal_404_paths > 0 ? (
-            <div className="flex justify-end">
-              <Badge variant="outline" className="gap-1.5 border-amber-300 text-amber-700 dark:text-amber-300">
-                <AlertTriangle className="size-3.5" />
-                {formatNumber(metrics.internal_404_paths)} 个站内死链地址待处理
-              </Badge>
-            </div>
-          ) : null}
+        <section>
           <div className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
             {trafficCards.map((card) => {
               const Icon = card.icon
@@ -441,47 +420,6 @@ export function DashboardPage() {
                 </ScrollArea>
               ) : null}
             </div>
-            <CardAction>
-              <Popover>
-                <PopoverTrigger
-                  render={
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title="忽略列表"
-                      aria-label={`忽略列表（${ignoredPaths.length} 条）`}
-                    />
-                  }
-                >
-                  <Ban />
-                </PopoverTrigger>
-                <PopoverContent side="bottom" align="end" className="w-80 p-0">
-                  <div className="border-b px-3 py-2">
-                    <p className="text-sm font-medium">已忽略路径</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">按路径匹配，所有域名生效</p>
-                  </div>
-                  <ScrollArea className="max-h-64" contentClassName="p-2">
-                    {ignoredPaths.length === 0 ? (
-                      <p className="px-2 py-4 text-center text-xs text-muted-foreground">暂无忽略路径</p>
-                    ) : (
-                      ignoredPaths.map((item) => (
-                        <div key={item.path} className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted">
-                          <span className="min-w-0 flex-1 truncate font-mono text-xs" title={item.path}>{item.path}</span>
-                          <Button
-                            variant="ghost"
-                            size="xs"
-                            disabled={ignoreBusyPath === item.path}
-                            onClick={() => void handleUnignore(item.path)}
-                          >
-                            取消忽略
-                          </Button>
-                        </div>
-                      ))
-                    )}
-                  </ScrollArea>
-                </PopoverContent>
-              </Popover>
-            </CardAction>
           </CardHeader>
           <CardContent className="flex min-h-0 flex-1 flex-col px-0">
             {errorLoadError ? (
@@ -504,6 +442,7 @@ export function DashboardPage() {
                     <TableRow>
                       <TableHead className="w-[64px]">状态</TableHead>
                       <TableHead>请求地址</TableHead>
+                      <TableHead>最近来源 IP</TableHead>
                       <TableHead className="w-[80px] text-right" aria-sort={errorSort === "hits" ? "descending" : errorSort === "hits_asc" ? "ascending" : "none"}>
                         <Button variant="ghost" size="xs" className="-mr-2 gap-1" aria-label={sortAction} title={sortAction} onClick={toggleErrorSort}>
                           命中
@@ -512,7 +451,7 @@ export function DashboardPage() {
                       </TableHead>
                       <TableHead className="w-[64px] text-right">站内</TableHead>
                       <TableHead className="w-[140px]">最近出现</TableHead>
-                      <TableHead className="w-[40px] text-right"><span className="sr-only">操作</span></TableHead>
+                      {canBlockIP && <TableHead className="text-right">操作</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -521,13 +460,13 @@ export function DashboardPage() {
                       const requestAddress = `${requestHost}${item.path}`
                       const requestURL = `${window.location.protocol}//${requestHost}${item.path.split("/").map(encodeURIComponent).join("/")}`
                       return (
-                        <TableRow key={`${item.host}-${item.status}-${item.path}`} className="group">
+                        <TableRow key={`${item.host}-${item.status}-${item.path}`}>
                           <TableCell>
                             <span className={`inline-flex rounded px-1.5 py-0.5 font-mono text-xs font-medium ${statusTone(item.status)}`}>
                               {item.status}
                             </span>
                           </TableCell>
-                          <TableCell className="min-w-[240px] max-w-[440px] whitespace-normal break-all font-mono text-xs leading-5" title={requestAddress}>
+                          <TableCell className="min-w-36 max-w-[440px] whitespace-normal break-all font-mono text-xs leading-5 sm:min-w-48" title={requestAddress}>
                             <a
                               href={requestURL}
                               target="_blank"
@@ -538,22 +477,30 @@ export function DashboardPage() {
                               {requestAddress}
                             </a>
                           </TableCell>
+                          <TableCell className="min-w-32 max-w-44 whitespace-normal break-all font-mono text-xs" title={item.last_ip || undefined}>
+                            {item.last_ip || "—"}
+                          </TableCell>
                           <TableCell className="text-right font-medium">{formatNumber(item.hits)}</TableCell>
                           <TableCell className="text-right text-muted-foreground">{formatNumber(item.internal_hits)}</TableCell>
                           <TableCell className="text-xs text-muted-foreground"><TimeText value={item.last_visited_at} /></TableCell>
-                          <TableCell className="w-[40px] text-right">
-                            <Button
-                              variant="ghost"
-                              size="icon-xs"
-                              className="opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 focus-visible:opacity-100"
-                              title="忽略此路径（全域名）"
-                              aria-label={`忽略 ${item.path}`}
-                              disabled={ignoreBusyPath === item.path}
-                              onClick={() => void handleIgnore(item.path)}
-                            >
-                              {ignoreBusyPath === item.path ? <LoaderCircle className="animate-spin" /> : <EyeOff />}
-                            </Button>
-                          </TableCell>
+                          {canBlockIP && (
+                            <TableCell className="text-right">
+                              {!item.last_ip ? "—" : addedIPs.has(item.last_ip) ? (
+                                <Badge variant="secondary">已加入黑名单</Badge>
+                              ) : (
+                                <Button
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  title="加入当前站点黑名单"
+                                  aria-label={`将 ${item.last_ip} 加入当前站点黑名单`}
+                                  disabled={!!blockBusyIP}
+                                  onClick={() => void handleBlockIP(item.last_ip)}
+                                >
+                                  {blockBusyIP === item.last_ip ? <LoaderCircle className="animate-spin" /> : <Ban />}
+                                </Button>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
                       )
                     })}

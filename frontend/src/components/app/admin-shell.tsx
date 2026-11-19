@@ -475,7 +475,7 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
     case "api-keys":
       return <ApiKeysPage />
     default:
-      return <DashboardPage />
+      return <DashboardPage user={user} key={activeSite?.id} />
   }
 }
 

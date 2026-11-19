@@ -44,12 +44,7 @@ func TestDashboardTimeWindowsAndRefresh(t *testing.T) {
 	insert(1, today.Add(3*time.Hour), "/bot", "bot", 200, "bot", "none")
 	insert(1, today.Add(4*time.Hour), "/today-error", "error", 500, "browser", "none")
 	insert(1, yesterday.Add(22*time.Hour), "/y-error", "error", 404, "browser", "internal")
-	insert(1, yesterday.Add(22*time.Hour), "/ignored", "scanner", 404, "bot", "none")
-	insert(1, today.Add(4*time.Hour), "/ignored", "scanner", 404, "bot", "none")
 	insert(2, today, "/other-site", "other", 500, "browser", "none")
-	if _, err := server.addAccessLogIgnore(t.Context(), 1, "/ignored"); err != nil {
-		t.Fatal(err)
-	}
 	get := func(path string, destination any) {
 		t.Helper()
 		response := siteAdminRequest(server, token, http.MethodGet, path, "1", "")
@@ -68,9 +63,9 @@ func TestDashboardTimeWindowsAndRefresh(t *testing.T) {
 		errors, notFound, internal404, pages int64
 		popular, errorPaths                  []string
 	}{
-		{"24h", 8, 4, 3, 1, 2, 1, 1, 4, []string{"/today-boundary", "/today-repeat", "/y-late"}, []string{"/today-error", "/y-error"}},
-		{"today", 5, 3, 2, 1, 1, 0, 0, 3, []string{"/today-boundary", "/today-repeat"}, []string{"/today-error"}},
-		{"yesterday", 5, 3, 2, 2, 1, 1, 1, 3, []string{"/y-boundary", "/y-early", "/y-late"}, []string{"/y-error"}},
+		{"24h", 6, 4, 3, 1, 2, 1, 1, 4, []string{"/today-boundary", "/today-repeat", "/y-late"}, []string{"/today-error", "/y-error"}},
+		{"today", 4, 3, 2, 1, 1, 0, 0, 3, []string{"/today-boundary", "/today-repeat"}, []string{"/today-error"}},
+		{"yesterday", 4, 3, 2, 2, 1, 1, 1, 3, []string{"/y-boundary", "/y-early", "/y-late"}, []string{"/y-error"}},
 	} {
 		t.Run(tc.window, func(t *testing.T) {
 			var full, compact AdminStats
@@ -130,19 +125,19 @@ func TestDashboardTimeWindowsAndRefresh(t *testing.T) {
 	insert(1, now, "/fresh", "fresh", 200, "browser", "none")
 	var stats AdminStats
 	get("/api/admin/stats?include_top=false&window=24h", &stats)
-	if stats.Access.Metrics.TotalRequests != 8 {
+	if stats.Access.Metrics.TotalRequests != 6 {
 		t.Fatal("range cache was overwritten by another selection")
 	}
 	get("/api/admin/stats?include_top=false&window=24h&refresh=true", &stats)
-	if stats.Access.Metrics.TotalRequests != 9 {
+	if stats.Access.Metrics.TotalRequests != 7 {
 		t.Fatalf("manual refresh reused cached counts: %+v", stats.Access.Metrics)
 	}
 	get("/api/admin/stats?include_top=false&window=today", &stats)
-	if stats.Access.Metrics.TotalRequests != 6 {
+	if stats.Access.Metrics.TotalRequests != 5 {
 		t.Fatal("refresh did not invalidate the other range for this site")
 	}
 	get("/api/admin/stats?include_top=false&window=yesterday", &stats)
-	if stats.Access.Metrics.TotalRequests != 5 {
+	if stats.Access.Metrics.TotalRequests != 4 {
 		t.Fatal("today's arrival changed yesterday's counts")
 	}
 	response := siteAdminRequest(server, token, http.MethodGet, "/api/admin/stats?window=unsupported", "1", "")

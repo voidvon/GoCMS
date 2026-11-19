@@ -25,7 +25,17 @@ export const saveSecurityPolicy = (input: SecurityPolicy) => request("/api/admin
 export const getSecurityPlatform = () => request<SecurityPlatform>("/api/admin/security/platform")
 export const saveSecurityPlatform = (input: SecurityPlatform) => request("/api/admin/security/platform", { method: "PUT", body: JSON.stringify(input) })
 export const getSecurityEntries = (scope: string, history: boolean, page: number) => request<{ items: SecurityEntry[]; total: number }>(`/api/admin/security/entries?scope=${scope}&history=${history}&page=${page}`)
-export const addSecurityEntry = (scope: string, input: Pick<SecurityEntry, "network" | "kind" | "reason" | "expires_at">) => request<SecurityEntry>(`/api/admin/security/entries?scope=${scope}`, { method: "POST", body: JSON.stringify(input) })
+export function addSecurityEntry(
+  scope: string,
+  input: Pick<SecurityEntry, "network" | "kind" | "reason" | "expires_at">,
+  init: RequestInit = {},
+) {
+  return request<SecurityEntry>(`/api/admin/security/entries?scope=${scope}`, {
+    ...init,
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+}
 export const revokeSecurityEntry = (scope: string, id: number) => request(`/api/admin/security/entries/${id}?scope=${scope}`, { method: "DELETE" })
 export const getSecurityEvents = (scope: string, page: number) => request<{ items: SecurityEvent[]; total: number }>(`/api/admin/security/events?scope=${scope}&page=${page}`)
 export const getSecurityNginx = () => request<SecurityNginx>("/api/admin/security/nginx")
@@ -218,6 +228,7 @@ export type AccessLogErrorStat = {
   hits: number
   unique_ips: number
   internal_hits: number
+  last_ip: string
   // RFC3339 UTC instant; render with the shared TimeText component.
   last_visited_at: string
   last_referer: string
@@ -294,33 +305,6 @@ export function getAccessLogPages(filters: Pick<AccessLogFilters, "limit" | "off
   return request<{ items: AccessLogPageStat[]; total: number; offset: number; limit: number; site_id: number }>(
     `/api/admin/access-logs/pages${query({ ...filters })}`,
     init,
-  )
-}
-
-export type AccessLogIgnore = {
-  path: string
-  created_at: string
-}
-
-export function getAccessLogIgnores(init: RequestInit = {}) {
-  return request<{ items: AccessLogIgnore[]; total: number; site_id: number }>(
-    "/api/admin/access-logs/ignores",
-    init,
-  )
-}
-
-export function addAccessLogIgnore(path: string, init: RequestInit = {}) {
-  return request<{ ok: boolean; item: AccessLogIgnore; site_id: number }>("/api/admin/access-logs/ignores", {
-    ...init,
-    method: "POST",
-    body: JSON.stringify({ path }),
-  })
-}
-
-export function removeAccessLogIgnore(path: string, init: RequestInit = {}) {
-  return request<{ ok: boolean; removed: number; site_id: number }>(
-    `/api/admin/access-logs/ignores${query({ path })}`,
-    { ...init, method: "DELETE" },
   )
 }
 

@@ -87,21 +87,11 @@ func TestDashboardStatsMutationInvalidation(t *testing.T) {
 		}
 	}
 	check(2, 2)
-	response := siteAdminRequest(server, token, http.MethodPost, "/api/admin/access-logs/ignores", "1", `{"path":"/missing"}`)
-	if response.Code != http.StatusCreated {
-		t.Fatalf("ignore = %d %s", response.Code, response.Body.String())
-	}
-	check(2, 1)
-	response = siteAdminRequest(server, token, http.MethodDelete, "/api/admin/access-logs/ignores?path=/missing", "1", "")
-	if response.Code != http.StatusOK {
-		t.Fatalf("unignore = %d %s", response.Code, response.Body.String())
-	}
-	check(2, 2)
 	if _, err := server.cleanupAccessLogs(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	check(1, 1)
-	response = siteAdminRequest(server, token, http.MethodDelete, "/api/admin/access-logs", "1", "")
+	response := siteAdminRequest(server, token, http.MethodDelete, "/api/admin/access-logs", "1", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("clear = %d %s", response.Code, response.Body.String())
 	}

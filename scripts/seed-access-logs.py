@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Seed realistic access-log rows for local dashboard testing.
 
-This script only touches gocms_access_log / gocms_access_log_ignore for one
-site. It never changes content, categories, templates, or site settings.
+This script only writes gocms_access_log for one site.
 
 Examples:
   python3 scripts/seed-access-logs.py --reset
@@ -13,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import posixpath
 import random
 import sqlite3
 import sys
@@ -25,7 +23,6 @@ from urllib.parse import urlparse
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB = ROOT / "data" / "site.db"
 ACCESS_LOG = "gocms_access_log"
-IGNORE_TABLE = "gocms_access_log_ignore"
 SEED = 20261021
 
 CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
@@ -148,15 +145,6 @@ def fetch_site_hosts(conn: sqlite3.Connection, site_id: int) -> list[str]:
     return result or ["localhost"]
 
 
-def normalize_ignore_path(value: str) -> str:
-    parsed = urlparse(value.strip())
-    path = parsed.path or "/"
-    if not path.startswith("/"):
-        path = "/" + path
-    clean = posixpath.normpath(path)
-    return "/" if clean in ("", ".") else clean
-
-
 def referer_host(value: str) -> str:
     if not value:
         return ""
@@ -174,7 +162,6 @@ def seed(
     site_id: int,
     hosts: list[str],
     reset: bool,
-    ignores: list[str],
 ) -> tuple[int, int, int, int]:
     rng = random.Random(SEED)
     now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
@@ -256,12 +243,6 @@ def seed(
 
     if reset:
         conn.execute(f'DELETE FROM "{ACCESS_LOG}" WHERE "site_id" = ?', (site_id,))
-        conn.execute(f'DELETE FROM "{IGNORE_TABLE}" WHERE "site_id" = ?', (site_id,))
-    for path in ignores:
-        conn.execute(
-            f'INSERT OR IGNORE INTO "{IGNORE_TABLE}" ("site_id", "path") VALUES (?, ?)',
-            (site_id, path),
-        )
     conn.executemany(
         f'INSERT INTO "{ACCESS_LOG}" ("site_id","host","day_key","path","query","method","status","kind","content_type","ip","referer","referer_host","referer_kind","user_agent","agent_kind","agent_label","device_kind","visited_at") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         rows,
@@ -275,9 +256,7 @@ def main() -> int:
     parser.add_argument("--db", default=str(DEFAULT_DB), help="SQLite database path")
     parser.add_argument("--site", type=int, default=1, help="site id to seed (default: 1)")
     parser.add_argument("--hosts", default="", help="comma-separated extra hosts (default: derive from site)")
-    parser.add_argument("--reset", action="store_true", help="delete this site's existing access logs and ignore rules first")
-    parser.add_argument("--ignore", action="append", default=[], help="path to add to the ignore list (repeatable)")
-    parser.add_argument("--no-default-ignore", action="store_true", help="do not add /xmlrpc.php to the ignore list")
+    parser.add_argument("--reset", action="store_true", help="delete this site's existing access logs first")
     args = parser.parse_args()
 
     db_path = Path(args.db).expanduser().resolve()
@@ -288,35 +267,24 @@ def main() -> int:
     columns = {row[1] for row in conn.execute(f'PRAGMA table_info("{ACCESS_LOG}")')}
     if "host" not in columns:
         raise SystemExit("gocms_access_log.host is missing; start the new GoCMS binary once first")
-    if not conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (IGNORE_TABLE,)
-    ).fetchone():
-        raise SystemExit(f"{IGNORE_TABLE} is missing; start the new GoCMS binary once first")
-
     hosts = [host.strip().lower() for host in args.hosts.split(",") if host.strip()]
     if not hosts:
         hosts = fetch_site_hosts(conn, args.site)
-    ignores = [normalize_ignore_path(path) for path in args.ignore if path.strip()]
-    if not args.no_default_ignore and "/xmlrpc.php" not in ignores:
-        ignores.append("/xmlrpc.php")
-
     with conn:
         before = conn.execute(
             f'SELECT COUNT(*) FROM "{ACCESS_LOG}" WHERE "site_id" = ?', (args.site,)
         ).fetchone()[0]
-        pages, errors, total, error_paths = seed(conn, args.site, hosts, args.reset, ignores)
+        pages, errors, total, error_paths = seed(conn, args.site, hosts, args.reset)
 
     print(f"db: {db_path}")
     print(f"site: #{args.site}  hosts: {', '.join(hosts)}")
     print(f"existing rows: {before}  reset: {'yes' if args.reset else 'no'}")
     print(f"seeded: {pages} page views + {errors} errors = {total} rows, {error_paths} distinct error paths")
-    print(f"ignored paths: {', '.join(ignores) if ignores else '(none)'}")
-    print("top error groups (ignored excluded):")
+    print("top error groups:")
     query = f'''
         SELECT l."host", l."path", l."status", COUNT(*)
         FROM "{ACCESS_LOG}" l
         WHERE l."site_id" = ? AND l."status" >= 400
-          AND NOT EXISTS (SELECT 1 FROM "{IGNORE_TABLE}" i WHERE i."site_id" = l."site_id" AND i."path" = CASE WHEN l."path" = '/' THEN '/' ELSE RTRIM(l."path", '/') END)
         GROUP BY l."host", l."path", l."status"
         ORDER BY COUNT(*) DESC, MAX(l."visited_at") DESC LIMIT 8
     '''

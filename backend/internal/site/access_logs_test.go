@@ -550,12 +550,6 @@ func TestAccessLogPermissions(t *testing.T) {
 	if response := siteAdminRequest(server, readerToken, http.MethodGet, "/api/admin/access-logs/pages", "1", ""); response.Code != http.StatusOK {
 		t.Fatalf("reader GET pages = %d, body %s", response.Code, response.Body.String())
 	}
-	if response := siteAdminRequest(server, readerToken, http.MethodPost, "/api/admin/access-logs/ignores", "1", `{"path":"/reader-ignore"}`); response.Code != http.StatusCreated {
-		t.Fatalf("reader POST ignore = %d, body %s", response.Code, response.Body.String())
-	}
-	if response := siteAdminRequest(server, readerToken, http.MethodDelete, "/api/admin/access-logs/ignores?path=/reader-ignore", "1", ""); response.Code != http.StatusOK {
-		t.Fatalf("reader DELETE ignore = %d, body %s", response.Code, response.Body.String())
-	}
 	if response := siteAdminRequest(server, readerToken, http.MethodGet, "/api/admin/stats", "1", ""); response.Code != http.StatusOK {
 		t.Fatalf("reader GET stats = %d, body %s", response.Code, response.Body.String())
 	}
@@ -757,129 +751,68 @@ func TestAccessLogErrorsGroupByHost(t *testing.T) {
 	}
 }
 
-func TestAccessLogIgnoreRules(t *testing.T) {
+func TestAccessLogPathIgnoresRemoved(t *testing.T) {
 	server, database, token, _ := newSiteAdminTestServer(t)
-	today := time.Now().In(time.Local).Format("2006-01-02")
-	now := time.Now().UTC().Format("2006-01-02 15:04:05")
-	insert := func(path string) {
-		t.Helper()
-		if _, err := database.Exec(`INSERT INTO "`+db.AccessLogTable+`"
-			("site_id", "host", "day_key", "path", "status", "kind", "content_type", "referer_kind", "agent_kind", "agent_label", "device_kind", "visited_at")
-			VALUES (1, 'example.test', ?, ?, 404, 'error', 'text/html', 'none', 'browser', 'Chrome', 'desktop', ?)`, today, path, now); err != nil {
-			t.Fatal(err)
-		}
-	}
-	insert("/wp-admin/install.php")
-	insert("/wp-admin/install.php/")
-	insert("/real-missing")
-	if _, err := database.Exec(`UPDATE "gocms_site" SET "domain" = 'example.test' WHERE "is_default" = 1`); err != nil {
+	// Recreate the table left by older installations.
+	if _, err := database.Exec(`CREATE TABLE gocms_access_log_ignore (
+		site_id INTEGER NOT NULL, path TEXT NOT NULL,
+		created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (site_id, path)
+	);
+	INSERT INTO gocms_access_log_ignore (site_id, path) VALUES (1, '/missing');
+	INSERT INTO gocms_access_log (site_id, host, path, status, kind, referer_kind, ip)
+	VALUES (1, 'example.test', '/missing', 404, 'error', 'internal', '192.0.2.1'),
+	       (1, 'en.example.test', '/missing/', 404, 'error', 'none', '2001:db8::1')`); err != nil {
 		t.Fatal(err)
 	}
 
-	stats := func() AccessLogMetrics {
+	const endpoint = "/api/admin/access-logs/ignores"
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+		requestPath, body := endpoint, ""
+		switch method {
+		case http.MethodPost:
+			body = `{"path":"/other"}`
+		case http.MethodDelete:
+			requestPath += "?path=/missing"
+		}
+		response := siteAdminRequest(server, token, method, requestPath, "1", body)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("%s %s = %d, want 404: %s", method, requestPath, response.Code, response.Body.String())
+		}
+	}
+
+	get := func(path string, target any) {
 		t.Helper()
-		response := siteAdminRequest(server, token, http.MethodGet, "/api/admin/stats", "1", "")
+		response := siteAdminRequest(server, token, http.MethodGet, path, "1", "")
 		if response.Code != http.StatusOK {
-			t.Fatalf("stats = %d, body %s", response.Code, response.Body.String())
+			t.Fatalf("GET %s = %d: %s", path, response.Code, response.Body.String())
 		}
-		var payload AdminStats
-		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		if err := json.Unmarshal(response.Body.Bytes(), target); err != nil {
 			t.Fatal(err)
 		}
-		return payload.Access.Metrics
-	}
-	if got := stats(); got.TotalErrors != 3 || got.TodayErrors != 3 || got.TotalNotFound != 3 {
-		t.Fatalf("before ignore = %+v, want 3 errors", got)
 	}
 
-	// A pasted full URL is normalized to the path-only rule.
-	add := siteAdminRequest(server, token, http.MethodPost, "/api/admin/access-logs/ignores", "1", `{"path":"https://www.example.test/wp-admin/install.php?x=1"}`)
-	if add.Code != http.StatusCreated {
-		t.Fatalf("add ignore = %d, body %s", add.Code, add.Body.String())
-	}
-	var added struct {
-		Item AccessLogIgnore `json:"item"`
-	}
-	if err := json.Unmarshal(add.Body.Bytes(), &added); err != nil {
-		t.Fatal(err)
-	}
-	if added.Item.Path != "/wp-admin/install.php" {
-		t.Fatalf("normalized ignore path = %q", added.Item.Path)
-	}
-
-	// Ignored paths disappear from error metrics and grouped errors, including
-	// the trailing-slash variant, while raw rows remain available for audit.
-	if got := stats(); got.TotalErrors != 1 || got.TodayErrors != 1 || got.TotalNotFound != 1 {
-		t.Fatalf("after ignore = %+v, want 1 error", got)
-	}
-	errorResponse := siteAdminRequest(server, token, http.MethodGet, "/api/admin/access-logs/errors?limit=100", "1", "")
-	if errorResponse.Code != http.StatusOK {
-		t.Fatalf("errors = %d, body %s", errorResponse.Code, errorResponse.Body.String())
+	for _, query := range []string{"?window=24h", "?window=24h&include_top=false"} {
+		var stats AdminStats
+		get("/api/admin/stats"+query, &stats)
+		m := stats.Access.Metrics
+		if m.TotalErrors != 2 || m.RecentErrors != 2 || m.TotalNotFound != 2 || m.RecentNotFound != 2 ||
+			m.InternalNotFound != 1 || m.InternalNotFoundPaths != 1 {
+			t.Fatalf("previously ignored errors missing from metrics: %+v", m)
+		}
+		statuses := stats.Access.StatusBreakdown
+		if len(statuses) != 1 || statuses[0] != (AccessLogStatusStat{Status: 404, Hits: 2}) {
+			t.Fatalf("unexpected status distribution: %+v", statuses)
+		}
+		if query == "?window=24h" && len(stats.Access.TopErrors) != 2 {
+			t.Fatalf("previously ignored paths missing from ranking: %+v", stats.Access.TopErrors)
+		}
 	}
 	var groups struct {
-		Items []AccessLogErrorStat `json:"items"`
-		Total int                  `json:"total"`
+		Items []AccessLogErrorStat
+		Total int
 	}
-	if err := json.Unmarshal(errorResponse.Body.Bytes(), &groups); err != nil {
-		t.Fatal(err)
-	}
-	if groups.Total != 1 || len(groups.Items) != 1 || groups.Items[0].Path != "/real-missing" {
-		t.Fatalf("grouped errors = %+v, want only /real-missing", groups)
-	}
-	raw := siteAdminRequest(server, token, http.MethodGet, "/api/admin/access-logs?page_size=100", "1", "")
-	if raw.Code != http.StatusOK {
-		t.Fatalf("raw logs = %d, body %s", raw.Code, raw.Body.String())
-	}
-	var rawBody struct {
-		Total int `json:"total"`
-	}
-	if err := json.Unmarshal(raw.Body.Bytes(), &rawBody); err != nil {
-		t.Fatal(err)
-	}
-	if rawBody.Total != 3 {
-		t.Fatalf("raw rows = %d, want 3", rawBody.Total)
-	}
-
-	list := siteAdminRequest(server, token, http.MethodGet, "/api/admin/access-logs/ignores", "1", "")
-	if list.Code != http.StatusOK {
-		t.Fatalf("list ignores = %d, body %s", list.Code, list.Body.String())
-	}
-	var listed struct {
-		Items []AccessLogIgnore `json:"items"`
-		Total int               `json:"total"`
-	}
-	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil {
-		t.Fatal(err)
-	}
-	if listed.Total != 1 || len(listed.Items) != 1 || listed.Items[0].Path != "/wp-admin/install.php" {
-		t.Fatalf("ignored list = %+v", listed)
-	}
-
-	remove := siteAdminRequest(server, token, http.MethodDelete, "/api/admin/access-logs/ignores?path=/wp-admin/install.php", "1", "")
-	if remove.Code != http.StatusOK {
-		t.Fatalf("remove ignore = %d, body %s", remove.Code, remove.Body.String())
-	}
-	if got := stats(); got.TotalErrors != 3 || got.TotalNotFound != 3 {
-		t.Fatalf("after unignore = %+v, want 3 errors", got)
-	}
-}
-
-func TestNormalizeAccessLogIgnorePath(t *testing.T) {
-	for _, tc := range []struct {
-		in   string
-		want string
-	}{
-		{"/wp-admin/install.php", "/wp-admin/install.php"},
-		{"https://www.example.test/wp-admin/install.php?x=1", "/wp-admin/install.php"},
-		{"wp-admin/install.php/", "/wp-admin/install.php"},
-		{"https://www.example.test", "/"},
-	} {
-		got, err := normalizeAccessLogIgnorePath(tc.in)
-		if err != nil || got != tc.want {
-			t.Errorf("normalizeAccessLogIgnorePath(%q) = %q, %v, want %q", tc.in, got, err, tc.want)
-		}
-	}
-	if _, err := normalizeAccessLogIgnorePath("  "); err == nil {
-		t.Fatal("empty ignore path accepted")
+	get("/api/admin/access-logs/errors?window=24h", &groups)
+	if groups.Total != 2 || len(groups.Items) != 2 {
+		t.Fatalf("previously ignored paths missing from grouped errors: %+v", groups)
 	}
 }

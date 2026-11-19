@@ -103,13 +103,10 @@ Go 侧统一为 4xx/5xx 设置 `Cache-Control: no-store`；Nginx 侧移除 `uplo
 - “错误与死链”和“热门页面”卡片内部固定最大高度，滚动到底部自动加载下一页。
 - “错误类型”统计从错误列表下方移到错误卡片右侧的窄栏，列表不再被状态徽章挤压。
 
-### 7. 忽略路径
+### 7. 错误来源 IP
 
-- 新增 `gocms_access_log_ignore`，按 `site_id + path` 保存规则，不保存 host，因此规则对站点所有域名生效；启动时 `EnsureAccessLogIgnore` 自动建表，无需手工迁移。
-- 完整 URL 会规范化为路径（去掉协议、域名、查询串和尾斜杠）；例如 `https://www.example.com/wp-admin/install.php` 保存为 `/wp-admin/install.php`。
-- 忽略后不再进入错误总数、404/站内死链、错误类型分布和错误归并列表；原始访问明细保留。
-- API：`GET/POST/DELETE /api/admin/access-logs/ignores`。
-- 仪表盘错误表格最后一列 hover 显示忽略图标；“错误与死链”右侧提供忽略列表入口，可取消忽略。
+- 错误列表显示每组最近一次请求的来源 IP。有安全管理权限的用户可以将该 IP 加入当前站点黑名单。启用 Nginx 同步后，规则会自动同步。
+- 升级后已有路径忽略规则失效，保留期内的相关错误会重新计入统计。
 
 ## 部署顺序
 
@@ -127,7 +124,7 @@ python3 scripts/seed-access-logs.py --reset
 python3 scripts/seed-access-logs.py --site 2 --hosts test.local,www.test.local --reset
 ```
 
-默认写入站点 1 的 287 条记录（182 条页面访问、105 条错误、46 个错误路径），并预置 `/xmlrpc.php` 到忽略列表，便于测试滚动加载、域名列、错误类型、忽略与取消忽略。
+默认写入站点 1 的 287 条记录（182 条页面访问、105 条错误、46 个错误路径），便于测试滚动加载、请求域名、来源 IP 和错误类型。
 
 ## 验证清单
 

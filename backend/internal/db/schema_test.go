@@ -41,7 +41,6 @@ func TestCreateSchemaContainsOnlyRuntimeTables(t *testing.T) {
 		"gocms_admin_group":             false,
 		"gocms_admin_operation":         false,
 		"gocms_access_log":              false,
-		"gocms_access_log_ignore":       false,
 		"gocms_redirect":                false,
 		"gocms_admin_login":             false,
 		"gocms_user_event":              false,

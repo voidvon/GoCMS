@@ -1,9 +1,6 @@
 package site
 
-import (
-	"net/http"
-	"strings"
-)
+import "net/http"
 
 // adminAccessLogs serves the per-site public access log: a paginated raw list
 // (GET) and a filtered clear action (DELETE). Both are scoped to the active
@@ -111,58 +108,4 @@ func (s *Server) adminAccessLogPages(response http.ResponseWriter, request *http
 		"limit":   limit,
 		"site_id": siteID,
 	})
-}
-
-// adminAccessLogIgnores manages path-only suppressions used by the error
-// statistics. Rules are scoped to the active site but match every host, so a
-// scanner path such as /wp-admin/install.php is hidden on the main domain and
-// on every language/alias domain at once.
-func (s *Server) adminAccessLogIgnores(response http.ResponseWriter, request *http.Request) {
-	user := s.currentAdmin(request)
-	siteID, err := s.resolveSiteID(request, user)
-	if err != nil || siteID <= 0 {
-		writeJSON(response, http.StatusForbidden, map[string]string{"error": "无权访问该站点统计"})
-		return
-	}
-	switch request.Method {
-	case http.MethodGet:
-		items, err := s.listAccessLogIgnores(request.Context(), siteID)
-		if err != nil {
-			accountError(response, err)
-			return
-		}
-		writeJSON(response, http.StatusOK, map[string]any{
-			"items":   items,
-			"total":   len(items),
-			"site_id": siteID,
-		})
-	case http.MethodPost:
-		var payload struct {
-			Path string `json:"path"`
-		}
-		if err := decodeRequest(request, &payload); err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "请求格式无效"})
-			return
-		}
-		item, err := s.addAccessLogIgnore(request.Context(), siteID, payload.Path)
-		if err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(response, http.StatusCreated, map[string]any{"ok": true, "item": item, "site_id": siteID})
-	case http.MethodDelete:
-		pathValue := strings.TrimSpace(request.URL.Query().Get("path"))
-		if pathValue == "" {
-			writeJSON(response, http.StatusBadRequest, map[string]string{"error": "请指定要取消忽略的路径"})
-			return
-		}
-		removed, err := s.removeAccessLogIgnore(request.Context(), siteID, pathValue)
-		if err != nil {
-			writeJSON(response, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		writeJSON(response, http.StatusOK, map[string]any{"ok": true, "removed": removed, "site_id": siteID})
-	default:
-		methodNotAllowed(response)
-	}
 }

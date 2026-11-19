@@ -40,14 +40,9 @@ func TestAccessLogErrorHitSortAcrossPages(t *testing.T) {
 		insert(1, "a.test", path, 404, 1, now.Add(-10*time.Minute))
 		low = append(low, "a.test"+path+":404:1")
 	}
-	// Higher counts outside this site's selected window, or explicitly ignored,
-	// must never become the top result.
+	// Higher counts outside the selected site or window must stay excluded.
 	insert(1, "a.test", "/outside", 404, 50, now.Add(-48*time.Hour))
 	insert(2, "a.test", "/other-site", 404, 50, now)
-	insert(1, "a.test", "/ignored", 404, 50, now)
-	if _, err := server.addAccessLogIgnore(t.Context(), 1, "/ignored"); err != nil {
-		t.Fatal(err)
-	}
 	ties := []string{"a.test/a-tie:404:4", "a.test/a-tie:500:4", "a.test/b-tie:404:4", "b.test/a-tie:404:4"}
 	lows := append([]string{"a.test/new-low:404:1"}, low...)
 	descending := append([]string{"a.test/old-top:404:30", "a.test/second:404:12"}, ties...)
@@ -95,5 +90,51 @@ func TestAccessLogErrorHitSortAcrossPages(t *testing.T) {
 				t.Fatalf("sort across pages = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAccessLogErrorLatestIP(t *testing.T) {
+	server, database, token, _ := newSiteAdminTestServer(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	insert := func(ip, agent string, at time.Time) {
+		t.Helper()
+		if _, err := database.Exec(`INSERT INTO gocms_access_log
+			(site_id, host, path, status, kind, ip, agent_kind, visited_at)
+			VALUES (1, 'a.test', '/missing', 404, 'error', ?, ?, ?)`,
+			ip, agent, at.Format("2006-01-02 15:04:05")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("192.0.2.1", "browser", now.Add(-time.Minute))
+	insert("2001:db8::2", "browser", now.Add(-time.Minute))
+	insert("192.0.2.3", "browser", now.Add(-time.Hour))
+	insert("192.0.2.4", "bot", now)
+
+	response := siteAdminRequest(server, token, http.MethodGet,
+		"/api/admin/access-logs/errors?window=24h&agent_kind=browser", "1", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("errors endpoint = %d: %s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Items []AccessLogErrorStat
+		Total int
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || len(result.Items) != 1 {
+		t.Fatalf("expected one error group: %+v", result)
+	}
+	item := result.Items[0]
+	if item.LastIP != "2001:db8::2" || item.Hits != 3 || item.LastVisitedAt != now.Add(-time.Minute).Format(time.RFC3339) {
+		t.Fatalf("unexpected latest error and counts: %+v", item)
+	}
+
+	summary, err := server.accessLogSummaryForWindow(t.Context(), 1, true, "24h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary.TopErrors) != 1 || summary.TopErrors[0].LastIP != "192.0.2.4" {
+		t.Fatalf("unexpected error summary: %+v", summary.TopErrors)
 	}
 }

@@ -317,8 +317,6 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminAccessLogErrors(response, request)
 	case "/api/admin/access-logs/pages":
 		s.adminAccessLogPages(response, request)
-	case "/api/admin/access-logs/ignores":
-		s.adminAccessLogIgnores(response, request)
 	case "/api/admin/content":
 		s.adminContent(response, request)
 	case "/api/admin/media":

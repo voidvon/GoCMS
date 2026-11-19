@@ -9,12 +9,6 @@ import (
 // dashboard. Rows are pruned by the access log maintenance loop.
 const AccessLogTable = "gocms_access_log"
 
-// AccessLogIgnoreTable stores path-only suppressions for the dashboard error
-// statistics. Rules are scoped to one site but apply to every domain/alias of
-// that site, which is what operators expect for scanner paths such as
-// /wp-admin/install.php.
-const AccessLogIgnoreTable = "gocms_access_log_ignore"
-
 // EnsureAccessLog creates the public access log table. The table is
 // deliberately site-scoped: every dashboard query filters by site_id, so the
 // same database can host many independent public sites.
@@ -62,21 +56,6 @@ func EnsureAccessLog(ctx context.Context, database *sql.DB) error {
 		if _, err := database.ExecContext(ctx, statement); err != nil {
 			return err
 		}
-	}
-	return EnsureAccessLogIgnore(ctx, database)
-}
-
-// EnsureAccessLogIgnore creates the per-site ignored-path table. Ignore rules
-// are independent of the access log retention window: they survive log cleanup
-// so an ignored scanner path does not reappear after three days.
-func EnsureAccessLogIgnore(ctx context.Context, database *sql.DB) error {
-	if _, err := database.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS "`+AccessLogIgnoreTable+`" (
-		"site_id" INTEGER NOT NULL DEFAULT 1,
-		"path" TEXT NOT NULL,
-		"created_at" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		PRIMARY KEY ("site_id", "path")
-	)`); err != nil {
-		return err
 	}
 	return nil
 }
