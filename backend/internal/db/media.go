@@ -42,7 +42,6 @@ func EnsureMedia(ctx context.Context, database *sql.DB) error {
 		return fmt.Errorf("create media reference table: %w", err)
 	}
 	for _, statement := range []string{
-		`CREATE INDEX IF NOT EXISTS idx_gocms_media_site ON "gocms_media" ("site_id", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_media_kind_status ON "gocms_media" ("kind", "status", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_media_created ON "gocms_media" ("created_at", "id")`,
 		`CREATE INDEX IF NOT EXISTS idx_gocms_media_ref_content ON "gocms_media_ref" ("content_id", "field_name")`,
@@ -52,8 +51,30 @@ func EnsureMedia(ctx context.Context, database *sql.DB) error {
 			return fmt.Errorf("create media index: %w", err)
 		}
 	}
-	if err := ensureTableColumn(ctx, database, mediaTable, "site_id", "INTEGER NOT NULL DEFAULT 0"); err != nil {
-		return err
+	for _, column := range []struct{ name, definition string }{
+		{"site_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"storage_provider", "TEXT NOT NULL DEFAULT 'local'"},
+		{"shared_storage", "INTEGER NOT NULL DEFAULT 0"},
+		{"language", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := ensureTableColumn(ctx, database, mediaTable, column.name, column.definition); err != nil {
+			return err
+		}
 	}
-	return nil
+	_, err := database.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS gocms_media_storage (
+		site_id INTEGER PRIMARY KEY REFERENCES gocms_site(id) ON DELETE CASCADE,
+		enabled INTEGER NOT NULL, images INTEGER NOT NULL,
+		endpoint TEXT NOT NULL, bucket TEXT NOT NULL, public_url TEXT NOT NULL,
+		access_key TEXT NOT NULL, secret_ciphertext TEXT NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS gocms_platform_media_storage (
+		id INTEGER PRIMARY KEY CHECK (id=1),
+		enabled INTEGER NOT NULL, images INTEGER NOT NULL,
+		endpoint TEXT NOT NULL, bucket TEXT NOT NULL, public_url TEXT NOT NULL,
+		access_key TEXT NOT NULL, secret_ciphertext TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_gocms_media_site ON gocms_media(site_id, id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_gocms_media_pdf_digest
+		ON gocms_media(site_id, sha256) WHERE kind='pdf' AND status='active' AND sha256<>'';`)
+	return err
 }

@@ -241,6 +241,18 @@ func (s *Server) adminSiteItem(w http.ResponseWriter, r *http.Request, idStr str
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "站点不存在"})
 			return
 		}
+		s.mediaStorageMu.Lock()
+		defer s.mediaStorageMu.Unlock()
+		var hasR2Attachments bool
+		if err := s.database.QueryRowContext(r.Context(), `SELECT EXISTS (
+			SELECT 1 FROM gocms_media WHERE site_id=? AND storage_provider='r2')`, id).Scan(&hasR2Attachments); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "检查站点附件失败"})
+			return
+		}
+		if hasR2Attachments {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "本站还有 R2 附件，请先处理附件再删除站点"})
+			return
+		}
 		if err := db.DeleteSite(r.Context(), s.database, id); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return

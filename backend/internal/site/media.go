@@ -21,6 +21,8 @@ import (
 	"strings"
 	"time"
 
+	nethtml "golang.org/x/net/html"
+
 	"gocms/internal/db"
 	"gocms/internal/imageopt"
 	"gocms/internal/timestamps"
@@ -34,19 +36,23 @@ const (
 var contentImageSource = regexp.MustCompile(`(?is)<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))`)
 
 type MediaAsset struct {
-	ID           int64  `json:"id"`
-	SiteID       int64  `json:"site_id"`
-	Kind         string `json:"kind"`
-	URL          string `json:"url"`
-	OriginalName string `json:"original_name"`
-	MimeType     string `json:"mime_type"`
-	SizeBytes    int64  `json:"size_bytes"`
-	Width        int    `json:"width"`
-	Height       int    `json:"height"`
-	SHA256       string `json:"sha256"`
-	Status       string `json:"status"`
-	UploadedBy   string `json:"uploaded_by"`
-	CreatedAt    string `json:"created_at"`
+	ID            int64  `json:"id"`
+	SiteID        int64  `json:"site_id"`
+	Kind          string `json:"kind"`
+	URL           string `json:"url"`
+	OriginalName  string `json:"original_name"`
+	MimeType      string `json:"mime_type"`
+	SizeBytes     int64  `json:"size_bytes"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	SHA256        string `json:"sha256"`
+	Status        string `json:"status"`
+	UploadedBy    string `json:"uploaded_by"`
+	CreatedAt     string `json:"created_at"`
+	Storage       string `json:"storage"`
+	Language      string `json:"language,omitempty"`
+	storagePath   string
+	sharedStorage bool
 }
 
 type MediaPage struct {
@@ -66,7 +72,14 @@ func (s *Server) adminMedia(response http.ResponseWriter, request *http.Request)
 		return
 	}
 	if request.Method == http.MethodPost {
-		s.uploadMedia(response, request)
+		switch request.URL.Query().Get("kind") {
+		case "pdf":
+			s.uploadPDF(response, request)
+		case "", "image":
+			s.uploadMedia(response, request)
+		default:
+			http.Error(response, "不支持的附件类型", http.StatusBadRequest)
+		}
 		return
 	}
 	s.listMedia(response, request)
@@ -96,7 +109,11 @@ func (s *Server) adminMediaItem(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	user := s.currentAdmin(request)
-	if user != nil && !user.CanManageSite(asset.SiteID) {
+	assetSiteID := asset.SiteID
+	if assetSiteID == 0 {
+		assetSiteID = 1
+	}
+	if user != nil && (!user.CanManageSite(assetSiteID) || !user.HasPermissionInSite(assetSiteID, "media")) {
 		http.Error(response, "无权管理该站点的附件", http.StatusForbidden)
 		return
 	}
@@ -110,6 +127,10 @@ func (s *Server) adminMediaItem(response http.ResponseWriter, request *http.Requ
 			MediaAsset
 			References []MediaReference `json:"references"`
 		}{asset, references})
+		return
+	}
+	if asset.Storage == "r2" || asset.Kind == "pdf" {
+		s.deleteStoredMedia(response, request, asset)
 		return
 	}
 	s.deleteMedia(response, request, asset)
@@ -194,6 +215,25 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 	mimeType, extension, _ := mediaImageFormat(optimized.Format)
 	data = optimized.Data
 
+	s.mediaStorageMu.Lock()
+	storageConfig, err := s.loadMediaStorage(request.Context())
+	if err != nil {
+		s.mediaStorageMu.Unlock()
+		http.Error(response, "读取文件存储配置失败", http.StatusInternalServerError)
+		return
+	}
+	if storageConfig.Enabled && storageConfig.Images {
+		defer s.mediaStorageMu.Unlock()
+		digest := sha256.Sum256(data)
+		s.saveMediaFile(response, request, MediaAsset{
+			SiteID: siteID, Kind: "image", OriginalName: mediaOriginalName(header.Filename),
+			MimeType: mimeType, SizeBytes: int64(len(data)), SHA256: hex.EncodeToString(digest[:]),
+			Width: optimized.Width, Height: optimized.Height,
+		}, extension, bytes.NewReader(data), storageConfig, true)
+		return
+	}
+	s.mediaStorageMu.Unlock()
+
 	monthPath := time.Now().UTC().Format("2006/01")
 	uploadDirectory := filepath.Join(s.assetsRoot, siteIDStr, "uploads", filepath.FromSlash(monthPath))
 	if err := os.MkdirAll(uploadDirectory, 0o755); err != nil {
@@ -252,10 +292,7 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 		}
 	}()
 
-	originalName := path.Base(strings.ReplaceAll(header.Filename, "\\", "/"))
-	if originalName == "." {
-		originalName = ""
-	}
+	originalName := mediaOriginalName(header.Filename)
 	uploadedBy, _ := s.adminUsername(request)
 	createdAt := time.Now().UTC().Format(time.RFC3339)
 	publicPath := "/assets/" + storagePath
@@ -280,7 +317,7 @@ func (s *Server) uploadMedia(response http.ResponseWriter, request *http.Request
 		"asset": MediaAsset{
 			ID: id, SiteID: siteID, Kind: "image", URL: publicPath, OriginalName: originalName,
 			MimeType: mimeType, SizeBytes: written, Width: optimized.Width, Height: optimized.Height,
-			SHA256: hex.EncodeToString(hasher.Sum(nil)), Status: "active", UploadedBy: uploadedBy, CreatedAt: createdAt,
+			SHA256: hex.EncodeToString(hasher.Sum(nil)), Status: "active", UploadedBy: uploadedBy, CreatedAt: createdAt, Storage: "local",
 		},
 	})
 }
@@ -307,7 +344,7 @@ func (s *Server) listMedia(response http.ResponseWriter, request *http.Request) 
 	if kind == "" {
 		kind = "image"
 	}
-	if kind != "image" {
+	if kind != "image" && kind != "pdf" {
 		http.Error(response, "invalid media kind", http.StatusBadRequest)
 		return
 	}
@@ -327,7 +364,10 @@ func (s *Server) listMedia(response http.ResponseWriter, request *http.Request) 
 	}
 	contentID := parseIntOrZero(request.URL.Query().Get("content_id"))
 	search := strings.TrimSpace(request.URL.Query().Get("q"))
-	where := `"status" = 'active' AND "kind" = ?`
+	where := `"status"='active' AND "kind"=?`
+	if request.URL.Query().Get("include_deleting") == "1" {
+		where = `"status" IN ('active','deleting') AND "kind"=?`
+	}
 	args := []any{kind}
 	if siteID == 1 {
 		where += ` AND ("site_id" = 1 OR "site_id" = 0)`
@@ -350,9 +390,8 @@ func (s *Server) listMedia(response http.ResponseWriter, request *http.Request) 
 		return
 	}
 	listArgs := append(append([]any{}, args...), pageSize, (page-1)*pageSize)
-	rows, err := s.database.QueryContext(request.Context(), `
-		SELECT "id", COALESCE("site_id", 1), "kind", "public_path", "original_name", "mime_type", "size_bytes", "width", "height", "sha256", "status", "uploaded_by", "created_at"
-		FROM "gocms_media" WHERE `+where+` ORDER BY "id" DESC LIMIT ? OFFSET ?`, listArgs...)
+	rows, err := s.database.QueryContext(request.Context(), mediaColumns+
+		` WHERE `+where+` ORDER BY "id" DESC LIMIT ? OFFSET ?`, listArgs...)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -374,6 +413,9 @@ func (s *Server) listMedia(response http.ResponseWriter, request *http.Request) 
 	writeJSON(response, http.StatusOK, MediaPage{Page: page, PageSize: pageSize, Total: total, Items: items})
 }
 
+const mediaColumns = `SELECT id, COALESCE(site_id, 1), kind, public_path, original_name, mime_type, size_bytes,
+	width, height, sha256, status, uploaded_by, created_at, storage_provider, language, storage_path, shared_storage FROM gocms_media`
+
 type mediaScanner interface {
 	Scan(...any) error
 }
@@ -383,15 +425,14 @@ func scanMedia(scanner mediaScanner) (MediaAsset, error) {
 	err := scanner.Scan(
 		&asset.ID, &asset.SiteID, &asset.Kind, &asset.URL, &asset.OriginalName, &asset.MimeType, &asset.SizeBytes,
 		&asset.Width, &asset.Height, &asset.SHA256, &asset.Status, &asset.UploadedBy, &asset.CreatedAt,
+		&asset.Storage, &asset.Language, &asset.storagePath, &asset.sharedStorage,
 	)
 	asset.CreatedAt = timestamps.UTC(asset.CreatedAt)
 	return asset, err
 }
 
 func (s *Server) readMedia(ctx context.Context, id int64) (MediaAsset, error) {
-	return scanMedia(s.database.QueryRowContext(ctx, `
-		SELECT "id", COALESCE("site_id", 1), "kind", "public_path", "original_name", "mime_type", "size_bytes", "width", "height", "sha256", "status", "uploaded_by", "created_at"
-		FROM "gocms_media" WHERE "id" = ?`, id))
+	return scanMedia(s.database.QueryRowContext(ctx, mediaColumns+` WHERE id=?`, id))
 }
 
 func (s *Server) deleteMedia(response http.ResponseWriter, request *http.Request, asset MediaAsset) {
@@ -465,47 +506,78 @@ func (s *Server) mediaDiskPath(publicPath string) (string, error) {
 	return target, nil
 }
 
-type mediaReferenceStore interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-func syncContentMediaRefs(ctx context.Context, store mediaReferenceStore, contentID int64, body, cover string) error {
-	if contentID < 1 {
-		return nil
-	}
-	if _, err := store.ExecContext(ctx, `DELETE FROM "gocms_media_ref" WHERE "content_id" = ?`, contentID); err != nil {
+func syncContentMediaRefs(ctx context.Context, tx *sql.Tx, contentID int64, body, cover string) error {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM gocms_media_ref WHERE content_id=?`, contentID); err != nil {
 		return err
 	}
-	fields := map[string][]string{
-		"body":        contentImageURLs(body),
-		"cover_image": {normalizeMediaURL(cover)},
+	var siteID int64
+	var savedBody string
+	if err := tx.QueryRowContext(ctx, `SELECT site_id, COALESCE(body, '') FROM gocms_content WHERE id=?`, contentID).Scan(&siteID, &savedBody); err != nil {
+		return err
 	}
-	for field, values := range fields {
+	pdfLinks := contentPDFURLs(savedBody)
+	rows, err := tx.QueryContext(ctx, `SELECT body FROM gocms_content_translation WHERE content_id=?`, contentID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var translatedBody string
+		if err := rows.Scan(&translatedBody); err != nil {
+			rows.Close()
+			return err
+		}
+		pdfLinks = append(pdfLinks, contentPDFURLs(translatedBody)...)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, field := range []struct {
+		name, kind string
+		urls       []string
+	}{
+		{"body", "image", contentImageURLs(body)},
+		{"cover_image", "image", []string{normalizeMediaURL(cover)}},
+		{"body", "pdf", pdfLinks},
+	} {
 		seen := make(map[string]bool)
-		for _, value := range values {
+		for _, value := range field.urls {
 			if value == "" || seen[value] {
 				continue
 			}
 			seen[value] = true
-			var mediaID int64
-			err := store.QueryRowContext(ctx, `
-				SELECT "id" FROM "gocms_media"
-				WHERE "public_path" = ? AND "kind" = 'image' AND "status" = 'active'`, value).Scan(&mediaID)
-			if err == sql.ErrNoRows {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			if _, err := store.ExecContext(ctx, `
-				INSERT OR IGNORE INTO "gocms_media_ref" ("media_id", "content_id", "field_name")
-				VALUES (?, ?, ?)`, mediaID, contentID, field); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO gocms_media_ref (media_id, content_id, field_name)
+				SELECT id, ?, ? FROM gocms_media WHERE public_path=? AND kind=? AND status='active'
+				AND (site_id=? OR (site_id=0 AND ?=1))`,
+				contentID, field.name, value, field.kind, siteID, siteID); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+func contentPDFURLs(body string) []string {
+	var result []string
+	tokens := nethtml.NewTokenizer(strings.NewReader(body))
+	for {
+		switch tokens.Next() {
+		case nethtml.ErrorToken:
+			return result
+		case nethtml.StartTagToken:
+			token := tokens.Token()
+			if token.Data != "a" {
+				continue
+			}
+			for _, attr := range token.Attr {
+				if attr.Key == "href" {
+					if value := normalizeMediaURL(attr.Val); strings.HasPrefix(value, mediaFilePrefix) {
+						result = append(result, value)
+					}
+				}
+			}
+		}
+	}
 }
 
 func contentImageURLs(body string) []string {
@@ -526,15 +598,21 @@ func contentImageURLs(body string) []string {
 
 func normalizeMediaURL(value string) string {
 	parsed, err := url.Parse(strings.TrimSpace(value))
-	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.Scheme != "" || parsed.Path == "" {
+	if err != nil || parsed.Path == "" {
 		return ""
+	}
+	if parsed.IsAbs() || parsed.Host != "" {
+		if (parsed.Scheme != "https" && parsed.Scheme != "http") || !strings.HasPrefix(parsed.Path, mediaFilePrefix) {
+			return ""
+		}
 	}
 	imagePath := parsed.Path
 	if !strings.HasPrefix(imagePath, "/") {
 		imagePath = "/" + imagePath
 	}
 	imagePath = path.Clean(imagePath)
-	if !strings.HasPrefix(imagePath, "/images/") && !strings.HasPrefix(imagePath, "/assets/") && !strings.HasPrefix(imagePath, "/uploads/") {
+	if !strings.HasPrefix(imagePath, "/images/") && !strings.HasPrefix(imagePath, "/assets/") &&
+		!strings.HasPrefix(imagePath, "/uploads/") && !strings.HasPrefix(imagePath, mediaFilePrefix) {
 		return ""
 	}
 	return imagePath

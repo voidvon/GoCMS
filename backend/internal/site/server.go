@@ -29,6 +29,10 @@ import (
 )
 
 type Server struct {
+	mediaStorageMu     sync.Mutex
+	mediaStorageKey    string
+	mediaStorageClient *http.Client
+
 	security       *security.Service
 	resetJobs      chan struct{}
 	mailSend       func(context.Context, membermail.Config, string, string, string, string) error
@@ -158,6 +162,10 @@ func (s *Server) Handler() http.Handler {
 }
 
 func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) {
+	if strings.HasPrefix(request.URL.Path, mediaFilePrefix) {
+		s.serveMediaFile(response, request)
+		return
+	}
 	if strings.HasPrefix(request.URL.Path, "/api/geography/") {
 		s.publicGeography(response, request)
 		return
@@ -315,6 +323,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminContent(response, request)
 	case "/api/admin/media":
 		s.adminMedia(response, request)
+	case "/api/admin/media-storage", "/api/admin/media-storage/test":
+		s.adminMediaStorage(response, request, lowerAdminPath == "/api/admin/media-storage/test")
 	case "/api/admin/messages", "/api/admin/feedback":
 		s.adminFeedbacks(response, request)
 	case "/api/admin/messages/webhook", "/api/admin/feedback/webhook":

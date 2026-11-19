@@ -408,7 +408,7 @@ function viewMeta(view: AdminView): { parent?: string; title: string; descriptio
     case "api-keys":
       return { parent: "平台管理", title: "API Key", description: "管理用于外部系统调用接口的 API凭据" }
     case "media":
-      return { title: "附件管理", description: "管理全站上传图片及内容引用" }
+      return { title: "附件管理", description: "管理全站图片、PDF 和内容引用" }
     case "publish":
       return { title: "网站发布", description: "生成并发布公开站点" }
     case "theme":

@@ -375,9 +375,38 @@ export type ContentInput = Omit<Content, "id" | "route_key"> & {
   translations?: Record<string, ContentTranslationItem>
 }
 
+export type MediaStorageSettings = {
+  enabled: boolean
+  images: boolean
+  endpoint: string
+  bucket: string
+  public_url: string
+  access_key: string
+  has_secret: boolean
+}
+
+export const getMediaStorage = () =>
+  request<MediaStorageSettings>("/api/admin/media-storage")
+
+export const saveMediaStorage = (input: MediaStorageSettings & { secret: string }) =>
+  request<MediaStorageSettings>("/api/admin/media-storage", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  })
+
+export const testMediaStorage = (input: MediaStorageSettings & { secret: string }) =>
+  request<{ ok: boolean }>("/api/admin/media-storage/test", {
+    method: "POST",
+    body: JSON.stringify(input),
+  })
+
+export type MediaKind = "image" | "pdf"
+
 export type MediaAsset = {
   id: number
-  kind: "image"
+  kind: MediaKind
+  storage: "local" | "r2"
+  language?: string
   url: string
   original_name: string
   mime_type: string
@@ -913,9 +942,18 @@ export function uploadMedia(file: File) {
   })
 }
 
-export function getMedia(page = 1, pageSize = 20, search = "", contentID = 0) {
+export function uploadPDF(file: File, language: string) {
+  const body = new FormData()
+  body.append("file", file)
+  return request<{ ok: boolean; asset: MediaAsset; reused?: boolean }>(
+    `/api/admin/media${query({ kind: "pdf", language })}`,
+    { method: "POST", body },
+  )
+}
+
+export function getMedia(page = 1, pageSize = 20, search = "", contentID = 0, kind: MediaKind = "image", includeDeleting = false) {
   return request<MediaPage>(
-    `/api/admin/media${query({ page, page_size: pageSize, q: search, content_id: contentID || undefined })}`,
+    `/api/admin/media${query({ page, page_size: pageSize, q: search, content_id: contentID || undefined, kind, include_deleting: includeDeleting ? 1 : undefined })}`,
   )
 }
 

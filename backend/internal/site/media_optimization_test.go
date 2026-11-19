@@ -79,7 +79,9 @@ func TestMediaOptimizationStorageAndSiteSettings(t *testing.T) {
 			t.Fatalf("stored metadata mismatch: %+v %v", asset, err)
 		}
 		persisted, err := s.readMedia(context.Background(), asset.ID)
-		if err != nil || persisted != asset {
+		storagePath := persisted.storagePath
+		persisted.storagePath = ""
+		if err != nil || persisted != asset || storagePath != strings.TrimPrefix(asset.URL, "/assets/") {
 			t.Fatalf("database metadata mismatch: %+v %v", persisted, err)
 		}
 		public := httptest.NewRecorder()

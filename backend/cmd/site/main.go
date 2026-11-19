@@ -136,6 +136,9 @@ func main() {
 	if err := server.ConfigureStorefront(*storefront, *storefrontDev, bundledStorefront); err != nil {
 		log.Fatalf("invalid storefront configuration: %v", err)
 	}
+	if err := server.ConfigureMediaStorage(*data); err != nil {
+		log.Fatal(err)
+	}
 	if err := server.ConfigureMemberLoginKey(*data); err != nil {
 		log.Fatal(err)
 	}

@@ -5,6 +5,7 @@
 /data/theme*.json
 payment.key
 member-login.key
+media-storage.key
 .private-key-*
 .payment-key-*
 /bin/

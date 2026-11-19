@@ -1,6 +1,7 @@
 import { useDialogState } from "@/lib/use-dialog-state"
 import { useState } from "react"
 import {
+  Database,
   Globe,
   LoaderCircle,
   Pencil,
@@ -45,6 +46,7 @@ import {
 } from "@/components/ui/table"
 import { ConfirmDialog, InlineAlert } from "@/components/app/app-ui"
 import { showError, showSuccess } from "@/components/app/admin-notifications"
+import { MediaStorageDialog } from "@/components/app/media-storage-dialog"
 import { ImageOptimizationFields } from "@/components/app/image-optimization-fields"
 import { ConsentSettingsDialog } from "@/components/app/consent-settings-dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -85,6 +87,7 @@ export function SitesPage() {
   const [deleting, setDeleting] = useState(false)
 
   // Site Settings Dialog state
+  const [storageOpen, setStorageOpen] = useState(false)
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false)
   const [settingsSite, setSettingsSite] = useState<Site | null>(null)
   const [settingsLoading, setSettingsLoading] = useState(false)
@@ -271,7 +274,11 @@ export function SitesPage() {
             管理系统中的各个独立网站，配置独立域名、主题绑定及生成目录。
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setStorageOpen(true)}>
+            <Database />
+            文件存储
+          </Button>
           <Button variant="outline" size="sm" onClick={() => void refreshSites()} disabled={loading}>
             <RefreshCw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
             刷新
@@ -592,6 +599,8 @@ export function SitesPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {storageOpen && <MediaStorageDialog onClose={() => setStorageOpen(false)} />}
 
       {/* Site Parameters / Global Settings Dialog */}
       <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>

@@ -2,9 +2,11 @@ import { showError, showSuccess } from "@/components/app/admin-notifications"
 import { getErrorMessage } from "@/lib/errors"
 import { mediaImageAccept } from "@/lib/media"
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { Copy, ImageIcon, LoaderCircle, RefreshCw, Trash2, Upload } from "lucide-react"
+import { Copy, FileText, ImageIcon, LoaderCircle, RefreshCw, Trash2, Upload } from "lucide-react"
 
-import { deleteMedia, getMedia, getMediaItem, uploadMedia, type MediaAsset, type MediaDetail } from "@/lib/api"
+import { deleteMedia, getMedia, getMediaItem, uploadMedia, uploadPDF, type MediaAsset, type MediaDetail, type MediaKind } from "@/lib/api"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -13,6 +15,7 @@ import { PaginatedTable } from "@/components/app/paginated-table"
 import { TimeText } from "@/components/app/time-text"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useDialogState } from "@/lib/use-dialog-state"
+import { useSite } from "@/lib/site-context"
 
 const pageSize = 20
 
@@ -32,6 +35,8 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
   const [retry, setRetry] = useState(0)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const { activeSite } = useSite()
+  const publicURL = new URL(asset.url, activeSite?.domain ? `https://${activeSite.domain}` : window.location.origin).href
 
   useEffect(() => {
     let active = true
@@ -45,7 +50,7 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
 
   async function copyURL() {
     try {
-      await navigator.clipboard.writeText(new URL(asset.url, window.location.origin).href)
+      await navigator.clipboard.writeText(publicURL)
       showSuccess("链接已复制")
     } catch {
       showError("复制失败，请手动复制下方地址")
@@ -74,27 +79,32 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
       <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-2xl">
         <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-4 pr-2">
           <DialogHeader>
-            <DialogTitle className="break-all pr-6">{asset.original_name || "未命名图片"}</DialogTitle>
+            <DialogTitle className="break-all pr-6">{asset.original_name || "未命名附件"}</DialogTitle>
             <DialogDescription>附件详情与内容引用</DialogDescription>
           </DialogHeader>
-          <div className="flex min-h-40 items-center justify-center rounded-lg border bg-muted/40 p-3">
-            <img src={asset.url} alt={asset.original_name} className="max-h-72 max-w-full object-contain" />
-          </div>
+          {asset.kind === "pdf" ? (
+            <Button variant="outline" render={<a href={asset.url} target="_blank" rel="noreferrer" />}><FileText />打开 PDF</Button>
+          ) : (
+            <div className="flex min-h-40 items-center justify-center rounded-lg border bg-muted/40 p-3">
+              <img src={asset.url} alt={asset.original_name} className="max-h-72 max-w-full object-contain" />
+            </div>
+          )}
           {error ? <InlineAlert>{error}</InlineAlert> : null}
           <dl className="grid grid-cols-2 gap-3 text-sm">
             <div><dt className="text-muted-foreground">格式 / 大小</dt><dd>{asset.mime_type} · {fileSize(asset.size_bytes)}</dd></div>
-            <div><dt className="text-muted-foreground">尺寸</dt><dd>{asset.width} × {asset.height}</dd></div>
+            <div><dt className="text-muted-foreground">{asset.kind === "pdf" ? "文档语言" : "尺寸"}</dt><dd>{asset.kind === "pdf" ? asset.language : `${asset.width} × ${asset.height}`}</dd></div>
+            <div><dt className="text-muted-foreground">存储位置</dt><dd>{asset.storage === "r2" ? "Cloudflare R2" : "本地磁盘"}</dd></div>
             <div><dt className="text-muted-foreground">上传人</dt><dd className="break-all">{asset.uploaded_by || "未知"}</dd></div>
             <div><dt className="text-muted-foreground">上传时间</dt><dd><TimeText value={asset.created_at} /></dd></div>
           </dl>
           <div className="space-y-2">
             <p className="text-sm font-medium">访问地址</p>
-            <p className="select-all break-all rounded-md bg-muted p-2 text-xs">{new URL(asset.url, window.location.origin).href}</p>
+            <p className="select-all break-all rounded-md bg-muted p-2 text-xs">{publicURL}</p>
             <Button variant="outline" size="sm" onClick={() => void copyURL()}><Copy />复制链接</Button>
           </div>
           <div className="space-y-2 border-t pt-4">
             <p className="text-sm font-medium">资源引用{detail ? `（${detail.references.length} 处）` : ""}</p>
-            <p className="text-xs text-muted-foreground">记录正文、封面、售卖项和订单图片的引用；无记录不代表全站未使用。</p>
+            <p className="text-xs text-muted-foreground">显示本站已记录的正文、封面、商品和订单引用。</p>
             {!detail ? (
               error ? <Button variant="outline" onClick={() => { setError(""); setRetry((value) => value + 1) }}>重试加载详情</Button>
                 : <p role="status" className="text-sm text-muted-foreground">正在加载引用…</p>
@@ -123,7 +133,7 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
           </div>
         </ScrollArea>
         <ConfirmDialog open={confirmOpen} onOpenChange={(open) => { if (!deleting) setConfirmOpen(open) }}
-          title="删除附件？" description="将永久删除该图片文件和附件记录。请确认它未被其他页面或外部链接使用。"
+          title="删除附件？" description="将永久删除文件和附件记录。请确认外部链接已移除。"
           confirmLabel="确认删除" pending={deleting} onConfirm={() => void remove()} />
       </DialogContent>
     </Dialog>
@@ -131,6 +141,8 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
 }
 
 export function MediaPage() {
+  const [kind, setKind] = useState<MediaKind>("image")
+  const [language, setLanguage] = useState("")
   const [assets, setAssets] = useState<MediaAsset[]>([])
   const [search, setSearch] = useState("")
   const [appliedSearch, setAppliedSearch] = useState("")
@@ -142,12 +154,12 @@ export function MediaPage() {
   const [uploading, setUploading] = useState(false)
   const [selected, setSelected, selectedDialog] = useDialogState<MediaAsset>()
   const fileInput = useRef<HTMLInputElement>(null)
-  const requestKey = JSON.stringify([page, appliedSearch, revision])
+  const requestKey = JSON.stringify([kind, page, appliedSearch, revision])
   const loading = loadedKey !== requestKey
 
   useEffect(() => {
     let active = true
-    getMedia(page, pageSize, appliedSearch).then((response) => {
+    getMedia(page, pageSize, appliedSearch, 0, kind, true).then((response) => {
       if (!active) return
       const lastPage = Math.max(1, Math.ceil(response.total / pageSize))
       if (page > lastPage) { setPage(lastPage); return }
@@ -162,7 +174,7 @@ export function MediaPage() {
       setLoadedKey(requestKey)
     })
     return () => { active = false }
-  }, [page, appliedSearch, requestKey])
+  }, [kind, page, appliedSearch, requestKey])
 
   function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -173,16 +185,28 @@ export function MediaPage() {
 
   async function upload(file: File) {
     setError("")
-    if (file.size > 10 * 1024 * 1024) { showError("图片不能超过 10 MB"); return }
+    const maxMiB = kind === "pdf" ? 64 : 10
+    if (file.size > maxMiB * 1024 * 1024) {
+      showError(`文件不能超过 ${maxMiB} MiB`)
+      return
+    }
+    if (kind === "pdf" && !language.trim()) {
+      showError("请输入文档语言代码")
+      return
+    }
     setUploading(true)
     try {
-      const result = await uploadMedia(file)
+      const result = kind === "pdf" ? await uploadPDF(file, language.trim()) : await uploadMedia(file)
       setSearch("")
       setAppliedSearch("")
       setPage(1)
       setRevision((value) => value + 1)
       const saved = file.size - result.asset.size_bytes
-      showSuccess(saved > 0 ? `图片上传成功，节省 ${fileSize(saved)}` : "图片上传成功")
+      if (kind === "pdf") {
+        showSuccess("reused" in result && result.reused ? `已复用 PDF：${result.asset.original_name}` : "PDF 已保存")
+      } else {
+        showSuccess(saved > 0 ? `图片上传成功，节省 ${fileSize(saved)}` : "图片上传成功")
+      }
     } catch (err) {
       showError(err, "上传失败")
     } finally {
@@ -193,9 +217,28 @@ export function MediaPage() {
   return (
     <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:space-y-0 lg:gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={uploading} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}{uploading ? "上传中…" : "上传图片"}</Button>
+        <div className="flex gap-1" role="group" aria-label="附件类型">
+          {(["image", "pdf"] as const).map((type) => (
+            <Button key={type} size="sm" variant={kind === type ? "secondary" : "ghost"} aria-pressed={kind === type} disabled={uploading} onClick={() => {
+              setKind(type)
+              setSearch("")
+              setAppliedSearch("")
+              setPage(1)
+            }}>
+              {type === "image" ? "图片" : "PDF"}
+            </Button>
+          ))}
+        </div>
+        {kind === "pdf" ? (
+          <div className="flex items-center gap-2">
+            <Label htmlFor="pdf-language">文档语言</Label>
+            <Input id="pdf-language" className="h-8 w-28" placeholder="de-DE" value={language} disabled={uploading}
+              onChange={(event) => setLanguage(event.target.value)} />
+          </div>
+        ) : null}
+        <Button size="sm" disabled={uploading || (kind === "pdf" && !language.trim())} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}{uploading ? "上传中…" : kind === "pdf" ? "上传 PDF" : "上传图片"}</Button>
         <Button size="sm" variant="outline" disabled={loading || uploading} onClick={() => setRevision((value) => value + 1)}><RefreshCw className={loading ? "animate-spin" : ""} />刷新</Button>
-        <input ref={fileInput} type="file" accept={mediaImageAccept} className="hidden" aria-label="选择上传图片" onChange={(event) => {
+        <input ref={fileInput} type="file" accept={kind === "pdf" ? ".pdf,application/pdf" : mediaImageAccept} className="hidden" aria-label="选择上传附件" onChange={(event) => {
           const file = event.target.files?.[0]
           event.target.value = ""
           if (file) void upload(file)
@@ -220,7 +263,7 @@ export function MediaPage() {
         {loading ? (
           <div role="status" className="flex h-48 items-center justify-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-5 animate-spin" />加载附件…</div>
         ) : assets.length === 0 ? (
-          <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"><ImageIcon className="size-7" />{error ? "附件暂时无法显示" : appliedSearch ? "没有匹配的附件" : "暂无附件，上传图片后即可在这里管理"}</div>
+          <div className="flex h-48 flex-col items-center justify-center gap-2 text-sm text-muted-foreground"><ImageIcon className="size-7" />{error ? "附件暂时无法显示" : appliedSearch ? "没有匹配的附件" : "暂无附件"}</div>
         ) : (
           <Table>
             <TableHeader>
@@ -228,7 +271,7 @@ export function MediaPage() {
                 <TableHead className="pl-4">附件</TableHead>
                 <TableHead>格式</TableHead>
                 <TableHead>大小</TableHead>
-                <TableHead>尺寸</TableHead>
+                <TableHead>{kind === "pdf" ? "文档语言" : "尺寸"}</TableHead>
                 <TableHead>上传人</TableHead>
                 <TableHead>上传时间</TableHead>
                 <TableHead className="pr-4 text-right">操作</TableHead>
@@ -240,14 +283,14 @@ export function MediaPage() {
                   <TableCell className="pl-4">
                     <button type="button" onClick={() => setSelected(asset)} className="flex items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`查看附件：${asset.original_name}`}>
                       <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted/40 p-1">
-                        <img loading="lazy" src={asset.url} alt="" className="size-full object-contain" />
+                        {asset.kind === "pdf" ? <FileText className="size-5 text-muted-foreground" /> : <img loading="lazy" src={asset.url} alt="" className="size-full object-contain" />}
                       </span>
-                      <span className="max-w-48 truncate font-medium sm:max-w-72" title={asset.original_name}>{asset.original_name || "未命名图片"}</span>
+                      <span className="max-w-48 truncate font-medium sm:max-w-72" title={asset.original_name}>{asset.original_name || "未命名附件"}{asset.status === "deleting" ? "（待完成删除）" : ""}</span>
                     </button>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{asset.mime_type.replace("image/", "").toUpperCase()}</TableCell>
+                  <TableCell className="text-muted-foreground">{asset.kind === "pdf" ? "PDF" : asset.mime_type.replace("image/", "").toUpperCase()}</TableCell>
                   <TableCell className="text-muted-foreground">{fileSize(asset.size_bytes)}</TableCell>
-                  <TableCell className="text-muted-foreground">{asset.width} × {asset.height}</TableCell>
+                  <TableCell className="text-muted-foreground">{asset.kind === "pdf" ? asset.language : `${asset.width} × ${asset.height}`}</TableCell>
                   <TableCell className="max-w-40 truncate text-muted-foreground" title={asset.uploaded_by}>{asset.uploaded_by || "未知"}</TableCell>
                   <TableCell className="text-muted-foreground"><TimeText value={asset.created_at} /></TableCell>
                   <TableCell className="pr-4 text-right">

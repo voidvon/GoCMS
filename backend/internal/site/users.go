@@ -150,6 +150,13 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 	if module == "session" || (module == "sites" && r.Method == http.MethodGet) {
 		return true
 	}
+	if module == "media-storage" {
+		if u.IsSuper {
+			return true
+		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "文件存储仅允许超级管理员配置"})
+		return false
+	}
 	if module == "geography" {
 		if u.IsSuper {
 			return true
