@@ -181,19 +181,12 @@ func (b *databaseBackupService) createAndUploadSnapshot(ctx context.Context, cli
 	}()
 
 	const snapshotName = "snapshot" + backupSQLiteSuffix
-	rawSnapshot := filepath.Join(directory, "raw"+backupSQLiteSuffix)
-	if err := db.Snapshot(ctx, b.database, rawSnapshot); err != nil {
-		return snapshotError, err
-	}
 	snapshot := filepath.Join(directory, snapshotName)
-	if err := db.CompactSnapshot(ctx, rawSnapshot, snapshot); err != nil {
-		return "整理数据库快照失败，请检查磁盘空间和权限", err
-	}
-	if err := os.Remove(rawSnapshot); err != nil {
-		return "清理临时数据库快照失败", err
-	}
-	if err := os.Chmod(snapshot, 0600); err != nil {
-		return "设置备份文件权限失败", err
+	if err := db.Snapshot(ctx, b.database, snapshot); err != nil {
+		if errors.Is(err, db.ErrSnapshotBusy) {
+			return "数据库持续繁忙，未能创建快照，请稍后重试", err
+		}
+		return snapshotError, err
 	}
 	archive := filepath.Join(directory, "snapshot"+backupArchiveSuffix)
 	cmd := exec.CommandContext(ctx, "tar", "-czf", archive, "-C", directory, snapshotName)

@@ -6,11 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
+
+const snapshotBusyWindow = 15 * time.Second
+
+// ErrSnapshotBusy reports that the snapshot could not continue after lock retries.
+var ErrSnapshotBusy = errors.New("SQLite snapshot remains busy")
 
 func EnsureDatabaseBackup(ctx context.Context, database *sql.DB) error {
 	_, err := database.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS gocms_database_backup (
@@ -33,9 +41,10 @@ func EnsureDatabaseBackup(ctx context.Context, database *sql.DB) error {
 	return err
 }
 
-// Snapshot copies the main SQLite database, including committed WAL pages and
-// original rowids. For an on-disk database, use a separate reader connection.
-func Snapshot(ctx context.Context, database *sql.DB, filename string) error {
+// Snapshot creates a compact copy of the main database in a new private file.
+// VACUUM INTO uses a consistent read transaction, includes committed WAL
+// pages and preserves implicit rowids.
+func Snapshot(ctx context.Context, database *sql.DB, filename string) (err error) {
 	var sequence int
 	var schema, source string
 	if err := database.QueryRowContext(ctx, "PRAGMA database_list").Scan(&sequence, &schema, &source); err != nil {
@@ -46,7 +55,7 @@ func Snapshot(ctx context.Context, database *sql.DB, filename string) error {
 	}
 	if source != "" {
 		dsn := sqliteFileURL(source)
-		dsn.RawQuery = url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(5000)"}}.Encode()
+		dsn.RawQuery = url.Values{"mode": {"ro"}, "_pragma": {"busy_timeout(1000)"}}.Encode()
 		reader, err := sql.Open("sqlite", dsn.String())
 		if err != nil {
 			return err
@@ -54,56 +63,58 @@ func Snapshot(ctx context.Context, database *sql.DB, filename string) error {
 		defer reader.Close()
 		database = reader
 	}
-	filename, err := filepath.Abs(filename)
+	filename, err = filepath.Abs(filename)
 	if err != nil {
 		return err
 	}
-	dest := sqliteFileURL(filename)
-	conn, err := database.Conn(ctx)
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
-	return conn.Raw(func(driverConn any) (err error) {
-		source, ok := driverConn.(interface {
-			NewBackup(string) (*sqlite.Backup, error)
-		})
-		if !ok {
-			return errors.New("SQLite online backup is unavailable")
-		}
-		backup, err := source.NewBackup(dest.String())
+	defer func() {
 		if err != nil {
+			err = errors.Join(err, os.Remove(filename))
+		}
+	}()
+	if err := file.Close(); err != nil {
+		return err
+	}
+
+	var busyUntil time.Time
+	for {
+		_, err := database.ExecContext(ctx, "VACUUM INTO ?", filename)
+		if err == nil {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
 			return err
 		}
-		defer func() { err = errors.Join(err, backup.Finish()) }()
-		for {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			more, err := backup.Step(512)
-			if err != nil || !more {
-				return err
-			}
+		var sqliteErr *sqlite.Error
+		if !errors.As(err, &sqliteErr) {
+			return err
 		}
-	})
-}
-
-// CompactSnapshot rebuilds a completed, private snapshot into another file.
-// VACUUM INTO keeps implicit rowids, which an in-place VACUUM may renumber.
-func CompactSnapshot(ctx context.Context, snapshot, filename string) error {
-	source, err := filepath.Abs(snapshot)
-	if err != nil {
-		return err
+		code := sqliteErr.Code() & 0xff
+		if code != sqlite3.SQLITE_BUSY && code != sqlite3.SQLITE_LOCKED {
+			return err
+		}
+		if busyUntil.IsZero() {
+			busyUntil = time.Now().Add(snapshotBusyWindow)
+		}
+		remaining := time.Until(busyUntil)
+		if remaining <= 0 {
+			return fmt.Errorf("%w: %w", ErrSnapshotBusy, err)
+		}
+		// VACUUM INTO requires an empty destination and may have created pages
+		// before failing. Only the private file created above is reset here.
+		if err := os.Truncate(filename, 0); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(min(250*time.Millisecond, remaining)):
+		}
 	}
-	dsn := sqliteFileURL(source)
-	dsn.RawQuery = "mode=ro&immutable=1"
-	copied, err := sql.Open("sqlite", dsn.String())
-	if err != nil {
-		return err
-	}
-	defer copied.Close()
-	_, err = copied.ExecContext(ctx, "VACUUM INTO ?", filename)
-	return err
 }
 
 func sqliteFileURL(filename string) url.URL {
