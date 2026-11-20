@@ -3,6 +3,7 @@ package site
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log"
 	"net/http"
 	"net/netip"
@@ -100,6 +101,10 @@ func (c *accessLogConfig) retention() int {
 	return c.retentionDays
 }
 
+func (c *accessLogConfig) cutoff() string {
+	return time.Now().UTC().AddDate(0, 0, -c.retention()).Format(accessLogTimestampLayout)
+}
+
 func (c *accessLogConfig) loc() *time.Location {
 	if c == nil {
 		return time.Local
@@ -179,7 +184,7 @@ func (s *Server) accessLogMiddleware(next http.Handler) http.Handler {
 }
 
 func (s *Server) recordAccessLog(request *http.Request, result *accessResponse) {
-	if s == nil || s.database == nil || s.accessLogs == nil || request == nil || result == nil {
+	if s == nil || s.accessLogDB() == nil || s.accessLogs == nil || request == nil || result == nil {
 		return
 	}
 	if request.Method != http.MethodGet {
@@ -211,40 +216,32 @@ func (s *Server) recordAccessLog(request *http.Request, result *accessResponse) 
 		// Successful static assets are noise; only HTML pages are counted.
 		return
 	}
-	userAgent := strings.TrimSpace(request.UserAgent())
-	agent := summarizeUserAgent(userAgent)
-	referer := strings.TrimSpace(request.Referer())
-	refererHost := refererHostName(referer)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	siteID, domains, site := s.accessLogSite(ctx, request)
-	if siteID <= 0 {
+	event := accessLogEvent{
+		host: accessLogField(accessLogRequestHost(request), 1024), path: accessLogField(path, 8192),
+		query:  accessLogField(request.URL.RawQuery, accessLogQueryLimit),
+		method: request.Method, contentType: accessLogField(contentType, 256), kind: kind, status: status,
+		ip: clientIP(request), referer: accessLogField(strings.TrimSpace(request.Referer()), 8192),
+		userAgent: accessLogField(strings.TrimSpace(request.UserAgent()), 2048),
+		fetchSite: accessLogField(strings.TrimSpace(request.Header.Get("Sec-Fetch-Site")), 32), visited: time.Now(),
+	}
+	if s.accessLogWriter != nil {
+		s.accessLogWriter.enqueue(event)
 		return
 	}
-	refererKind := s.classifyAccessLogReferer(ctx, request, site, siteID, domains, refererHost, referer, status)
-	query := request.URL.RawQuery
-	if len(query) > accessLogQueryLimit {
-		query = query[:accessLogQueryLimit]
-	}
-	now := time.Now()
-	host := accessLogRequestHost(request)
-	_, err := s.database.ExecContext(ctx, `INSERT INTO "`+db.AccessLogTable+`"
-		("site_id", "host", "day_key", "path", "query", "method", "status", "kind", "content_type", "ip",
-		 "referer", "referer_host", "referer_kind", "user_agent", "agent_kind", "agent_label", "device_kind", "visited_at")
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		siteID, host, s.accessLogs.dayKey(now), path, query, request.Method, status, kind, contentType, clientIP(request),
-		referer, refererHost, refererKind, userAgent, agent.Kind, agent.Label, agent.Device, now.UTC().Format(accessLogTimestampLayout))
-	if err != nil {
-		log.Printf("record access log: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if args := s.accessLogEventArgs(ctx, event); args != nil {
+		if _, err := s.accessLogDB().ExecContext(ctx, insertAccessLog, args...); err != nil {
+			log.Printf("record access log: %v", err)
+		}
 	}
 }
 
 // accessLogSite resolves the public site for a request and returns the set of
 // hosts that belong to it. Results are cached briefly so that logging costs at
 // most one lookup per host per cache window.
-func (s *Server) accessLogSite(ctx context.Context, request *http.Request) (int64, map[string]bool, *db.Site) {
-	host := normalizeAccessLogHost(requestHost(request))
+func (s *Server) accessLogSite(ctx context.Context, requestDomain string) (int64, map[string]bool, *db.Site) {
+	host := normalizeAccessLogHost(requestDomain)
 	cache := s.accessLogs
 	if cache == nil {
 		return 0, nil, nil
@@ -260,7 +257,7 @@ func (s *Server) accessLogSite(ctx context.Context, request *http.Request) (int6
 	}
 
 	site, err := db.GetSiteByHost(ctx, s.database, host)
-	if err != nil || site == nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		site, err = db.GetDefaultSite(ctx, s.database)
 	}
 	if err != nil || site == nil {
@@ -307,7 +304,11 @@ func (s *Server) accessLogRefererSiteID(ctx context.Context, host string) int64 
 	}
 
 	var siteID int64
-	if site, err := db.GetSiteByHost(ctx, s.database, host); err == nil && site != nil {
+	site, err := db.GetSiteByHost(ctx, s.database, host)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0
+	}
+	if site != nil {
 		siteID = site.ID
 	}
 
@@ -397,15 +398,15 @@ func accessLogRequestHost(request *http.Request) string {
 //
 // Successful page views skip the filesystem check: they are not part of the
 // broken-link dashboard and the extra stat on every request would be wasteful.
-func (s *Server) classifyAccessLogReferer(ctx context.Context, request *http.Request, site *db.Site, siteID int64, domains map[string]bool, refererHost, referer string, status int) string {
+func (s *Server) classifyAccessLogReferer(ctx context.Context, requestDomain, fetchSite string, site *db.Site, siteID int64, domains map[string]bool, refererHost, referer string, status int) string {
 	if refererHost == "" {
 		return "none"
 	}
-	fetchSite := strings.ToLower(strings.TrimSpace(request.Header.Get("Sec-Fetch-Site")))
+	fetchSite = strings.ToLower(fetchSite)
 	if fetchSite == "cross-site" {
 		return "external"
 	}
-	internalHost := refererHost == normalizeAccessLogHost(requestHost(request)) || domains[refererHost]
+	internalHost := refererHost == normalizeAccessLogHost(requestDomain) || domains[refererHost]
 	if !internalHost && s.accessLogRefererSiteID(ctx, refererHost) != siteID {
 		return "external"
 	}
@@ -787,6 +788,10 @@ func escapeAccessLogLike(value string) string {
 // buildAccessLogWhere renders the shared WHERE clause. The site id is always
 // the first condition, so no query can leak rows across sites.
 func (s *Server) buildAccessLogWhere(siteID int64, filter AccessLogFilter) (string, []any) {
+	return s.buildAccessLogWhereAt(siteID, filter, time.Now())
+}
+
+func (s *Server) buildAccessLogWhereAt(siteID int64, filter AccessLogFilter, now time.Time) (string, []any) {
 	clauses := []string{`"site_id" = ?`}
 	args := []any{siteID}
 	switch filter.Kind {
@@ -815,16 +820,14 @@ func (s *Server) buildAccessLogWhere(siteID int64, filter AccessLogFilter) (stri
 	switch filter.Window {
 	case "today":
 		clauses = append(clauses, `"day_key" = ?`)
-		args = append(args, s.accessLogs.dayKey(time.Now()))
+		args = append(args, s.accessLogs.dayKey(now))
 	case "yesterday":
 		clauses = append(clauses, `"day_key" = ?`)
-		args = append(args, time.Now().In(s.accessLogs.loc()).AddDate(0, 0, -1).Format("2006-01-02"))
-	case "1h":
-		clauses = append(clauses, `"visited_at" >= datetime('now', '-1 hours')`)
-	case "24h":
-		clauses = append(clauses, `"visited_at" >= datetime('now', '-24 hours')`)
-	case "3d":
-		clauses = append(clauses, `"visited_at" >= datetime('now', '-3 days')`)
+		args = append(args, now.In(s.accessLogs.loc()).AddDate(0, 0, -1).Format("2006-01-02"))
+	case "1h", "24h", "3d":
+		durations := map[string]time.Duration{"1h": time.Hour, "24h": 24 * time.Hour, "3d": 72 * time.Hour}
+		clauses = append(clauses, `"visited_at" >= ?`)
+		args = append(args, now.UTC().Add(-durations[filter.Window]).Format(accessLogTimestampLayout))
 	}
 	if filter.AgentKind != "" && filter.AgentKind != "all" {
 		clauses = append(clauses, `"agent_kind" = ?`)
@@ -869,6 +872,9 @@ func (s *Server) accessLogSummaryWithTop(ctx context.Context, siteID int64, incl
 // An explicit window scopes every access aggregate and ranking. Without one,
 // preserve the legacy mixture of today's, recent and retained-log metrics.
 func (s *Server) accessLogSummaryForWindow(ctx context.Context, siteID int64, includeTop bool, window string) (AccessLogSummary, error) {
+	if s.accessLogDB() == nil {
+		return AccessLogSummary{}, errors.New("access log database is unavailable")
+	}
 	filter := normalizeAccessLogFilter(AccessLogFilter{Window: window})
 	where, args := s.buildAccessLogWhere(siteID, filter)
 	recent := `"visited_at" >= datetime('now', '-24 hours')`
@@ -917,7 +923,7 @@ func (s *Server) accessLogSummaryForWindow(ctx context.Context, siteID int64, in
 			COUNT(DISTINCT CASE WHEN "kind" = 'page' AND "agent_kind" <> 'bot' AND "ip" <> '' AND "device_kind" = 'mobile' AND ` + recent + ` THEN "ip" END)
 		FROM "` + db.AccessLogTable + `" l WHERE ` + where
 	metricsArgs := append([]any{dayKey, dayKey}, args...)
-	err := s.database.QueryRowContext(ctx, metricsQuery, metricsArgs...).
+	err := s.accessLogDB().QueryRowContext(ctx, metricsQuery, metricsArgs...).
 		Scan(&row.totalRows, &row.todayVisits, &row.todayErrors, &row.recentVisits, &row.recentErrors,
 			&row.totalErrors, &row.totalNotFound, &row.recentNotFound, &row.internalNotF, &row.internalNotFPaths, &row.totalPages,
 			&row.recentUsers, &row.recentPC, &row.recentMobile)
@@ -953,7 +959,7 @@ func (s *Server) accessLogSummaryForWindow(ctx context.Context, siteID int64, in
 		newUserWindow = `MIN("visited_at") >= ? AND MIN("visited_at") < ?`
 		newUserArgs = append(newUserArgs, start.UTC().Format("2006-01-02 15:04:05"), start.AddDate(0, 0, 1).UTC().Format("2006-01-02 15:04:05"))
 	}
-	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM (
+	if err := s.accessLogDB().QueryRowContext(ctx, `SELECT COUNT(*) FROM (
 			SELECT "ip" FROM "`+db.AccessLogTable+`"
 			WHERE "site_id" = ? AND "kind" = 'page' AND "agent_kind" <> 'bot' AND "ip" <> ''
 			GROUP BY "ip" HAVING `+newUserWindow+`
@@ -964,7 +970,7 @@ func (s *Server) accessLogSummaryForWindow(ctx context.Context, siteID int64, in
 
 	if includeTop {
 		pageArgs := append(append([]any{}, args...), accessLogTopPagesLimit)
-		pageRows, err := s.database.QueryContext(ctx, `SELECT "path", COUNT(*), COUNT(DISTINCT "ip"), MAX("visited_at")
+		pageRows, err := s.accessLogDB().QueryContext(ctx, `SELECT "path", COUNT(*), COUNT(DISTINCT "ip"), MAX("visited_at")
 			FROM "`+db.AccessLogTable+`"
 			WHERE `+where+` AND "kind" = 'page' AND "status" = 200 AND "agent_kind" <> 'bot'
 			GROUP BY "path" ORDER BY COUNT(*) DESC, MAX("visited_at") DESC LIMIT ?`, pageArgs...)
@@ -995,7 +1001,7 @@ func (s *Server) accessLogSummaryForWindow(ctx context.Context, siteID int64, in
 		}
 	}
 
-	statusRows, err := s.database.QueryContext(ctx, `SELECT l."status", COUNT(*) FROM "`+db.AccessLogTable+`" l
+	statusRows, err := s.accessLogDB().QueryContext(ctx, `SELECT l."status", COUNT(*) FROM "`+db.AccessLogTable+`" l
 		WHERE `+where+` AND l."status" >= 400
 		GROUP BY l."status" ORDER BY COUNT(*) DESC`, args...)
 	if err != nil {
@@ -1021,12 +1027,12 @@ func (s *Server) listAccessLogs(ctx context.Context, siteID int64, filter Access
 	filter = normalizeAccessLogFilter(filter)
 	where, args := s.buildAccessLogWhere(siteID, filter)
 	var total int64
-	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "`+db.AccessLogTable+`" WHERE `+where, args...).Scan(&total); err != nil {
+	if err := s.accessLogDB().QueryRowContext(ctx, `SELECT COUNT(*) FROM "`+db.AccessLogTable+`" WHERE `+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	offset := (page - 1) * pageSize
 	queryArgs := append(append([]any{}, args...), pageSize, offset)
-	rows, err := s.database.QueryContext(ctx, `SELECT "id", "site_id", "host", "day_key", "path", "query", "method", "status", "kind",
+	rows, err := s.accessLogDB().QueryContext(ctx, `SELECT "id", "site_id", "host", "day_key", "path", "query", "method", "status", "kind",
 			"content_type", "ip", "referer", "referer_host", "referer_kind", "user_agent", "agent_kind", "agent_label", "device_kind", "visited_at"
 		FROM "`+db.AccessLogTable+`" WHERE `+where+` ORDER BY "id" DESC LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
@@ -1064,7 +1070,7 @@ func (s *Server) listAccessLogErrors(ctx context.Context, siteID int64, filter A
 	}
 	var total int64
 	countQuery := `SELECT COUNT(*) FROM (SELECT 1 FROM "` + db.AccessLogTable + `" l WHERE ` + where + ` GROUP BY l."host", l."path", l."status")`
-	if err := s.database.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+	if err := s.accessLogDB().QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	orderBy := `COUNT(*) DESC, MAX(l."visited_at") DESC`
@@ -1087,7 +1093,7 @@ func (s *Server) queryAccessLogErrorGroups(ctx context.Context, siteID int64, wh
 	// The IP and last visit time must come from the same filtered group.
 	queryArgs := append(append([]any{}, args...), args...)
 	queryArgs = append(queryArgs, limit, offset)
-	rows, err := s.database.QueryContext(ctx, `SELECT
+	rows, err := s.accessLogDB().QueryContext(ctx, `SELECT
 			l."host", l."path", l."status", COUNT(*), COUNT(DISTINCT l."ip"),
 			COALESCE(SUM(CASE WHEN l."referer_kind" = 'internal' THEN 1 ELSE 0 END), 0),
 			MAX(l."visited_at"),
@@ -1150,11 +1156,11 @@ func (s *Server) listAccessLogPages(ctx context.Context, siteID int64, filter Ac
 	where, args := s.buildAccessLogWhere(siteID, AccessLogFilter{Window: filter.Window})
 	where += ` AND "kind" = 'page' AND "status" = 200 AND "agent_kind" <> 'bot'`
 	var total int64
-	if err := s.database.QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM "`+db.AccessLogTable+`" WHERE `+where+` GROUP BY "path")`, args...).Scan(&total); err != nil {
+	if err := s.accessLogDB().QueryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM "`+db.AccessLogTable+`" WHERE `+where+` GROUP BY "path")`, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	queryArgs := append(append([]any{}, args...), limit, offset)
-	rows, err := s.database.QueryContext(ctx, `SELECT "path", COUNT(*), COUNT(DISTINCT "ip"), MAX("visited_at")
+	rows, err := s.accessLogDB().QueryContext(ctx, `SELECT "path", COUNT(*), COUNT(DISTINCT "ip"), MAX("visited_at")
 		FROM "`+db.AccessLogTable+`" WHERE `+where+`
 		GROUP BY "path" ORDER BY COUNT(*) DESC, MAX("visited_at") DESC LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
@@ -1177,41 +1183,26 @@ func (s *Server) listAccessLogPages(ctx context.Context, siteID int64, filter Ac
 	return items, total, nil
 }
 
-func (s *Server) clearAccessLogs(ctx context.Context, siteID int64, filter AccessLogFilter) (int64, error) {
-	filter = normalizeAccessLogFilter(filter)
-	where, args := s.buildAccessLogWhere(siteID, filter)
-	result, err := s.database.ExecContext(ctx, `DELETE FROM "`+db.AccessLogTable+`" WHERE `+where, args...)
-	if err != nil {
-		return 0, err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	if affected > 0 {
-		s.dashboardStats.invalidate(siteID)
-	}
-	return affected, nil
-}
-
 // cleanupAccessLogs prunes expired rows in short transactions so requests can
 // use the shared database connection between batches.
 func (s *Server) cleanupAccessLogs(ctx context.Context) (int64, error) {
-	if s == nil || s.database == nil || s.accessLogs == nil {
+	if s == nil || s.accessLogDB() == nil || s.accessLogs == nil {
 		return 0, nil
 	}
-	cutoff := time.Now().UTC().AddDate(0, 0, -s.accessLogs.retention()).Format(accessLogTimestampLayout)
+	deleted, err := pruneAccessLogs(ctx, s.accessLogDB(), s.accessLogs.cutoff())
+	if deleted > 0 {
+		s.dashboardStats.invalidate(0)
+	}
+	return deleted, err
+}
+
+func pruneAccessLogs(ctx context.Context, database *sql.DB, cutoff string) (int64, error) {
 	var deleted int64
 	batchSize := accessLogCleanupBatchSize
 	successfulBatches := 0
-	defer func() {
-		if deleted > 0 {
-			s.dashboardStats.invalidate(0)
-		}
-	}()
 	for {
 		batchCtx, cancel := context.WithTimeout(ctx, accessLogCleanupBatchTimeout)
-		result, err := s.database.ExecContext(batchCtx, `DELETE FROM "`+db.AccessLogTable+`" WHERE "id" IN (
+		result, err := database.ExecContext(batchCtx, `DELETE FROM "`+db.AccessLogTable+`" WHERE "id" IN (
 			SELECT "id" FROM "`+db.AccessLogTable+`" WHERE "visited_at" < ?
 			ORDER BY "visited_at", "id" LIMIT ?
 		)`, cutoff, batchSize)
@@ -1253,8 +1244,27 @@ func (s *Server) cleanupAccessLogs(ctx context.Context) (int64, error) {
 // StartAccessLogMaintenance prunes expired access log rows on boot and then
 // periodically until the context is cancelled.
 func (s *Server) StartAccessLogMaintenance(ctx context.Context) {
-	if s == nil || s.database == nil || s.accessLogs == nil {
+	if s == nil || s.accessLogDB() == nil || s.accessLogs == nil {
 		return
+	}
+	s.accessLogClear.mu.Lock()
+	s.accessLogClear.ctx = ctx
+	s.accessLogClear.mu.Unlock()
+	if s.accessLogDB() != s.database {
+		// Keep the legacy copy through its retention period for rollback.
+		// It ages out using the same throttled cleanup as the live store.
+		go func() {
+			for ctx.Err() == nil {
+				if _, err := pruneAccessLogs(ctx, s.database, s.accessLogs.cutoff()); err != nil && ctx.Err() == nil {
+					log.Printf("prune legacy access logs: %v", err)
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(accessLogCleanupInterval):
+				}
+			}
+		}()
 	}
 	go func() {
 		for ctx.Err() == nil {

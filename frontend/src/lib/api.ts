@@ -311,9 +311,22 @@ export function getAccessLogPages(filters: Pick<AccessLogFilters, "limit" | "off
   )
 }
 
-export function clearAccessLogs(filters: AccessLogFilters) {
-  return request<{ deleted: number; site_id: number }>(`/api/admin/access-logs${query({ ...filters })}`, {
-    method: "DELETE",
+export type AccessLogClearStatus = {
+  state: "running" | "completed" | "failed"
+  deleted: number
+}
+
+export function clearAccessLogs(filters: AccessLogFilters, siteId: number) {
+  return request<AccessLogClearStatus>(`/api/admin/access-logs/clear${query({ ...filters })}`, {
+    method: "POST",
+    headers: { "X-Site-Id": String(siteId) },
+  })
+}
+
+export function getAccessLogClearStatus(siteId: number, signal: AbortSignal) {
+  return request<AccessLogClearStatus | null>("/api/admin/access-logs/clear", {
+    headers: { "X-Site-Id": String(siteId) },
+    signal,
   })
 }
 

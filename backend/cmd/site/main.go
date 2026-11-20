@@ -150,24 +150,49 @@ func main() {
 	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	migrationCtx, cancelMigration := context.WithTimeout(shutdownCtx, 45*time.Second)
+	if err := server.StartAccessLogWriter(migrationCtx); err != nil {
+		log.Printf("access log database unavailable: %v", err)
+	}
+	cancelMigration()
 	if err := server.ConfigureDatabaseBackup(shutdownCtx, *data, accessLogLocation); err != nil {
 		log.Fatal(err)
 	}
 	server.StartDatabaseBackupMaintenance()
 	server.StartAccessLogMaintenance(shutdownCtx)
+	server.StartAccessLogMetrics(shutdownCtx)
 	server.StartPaymentMaintenance(shutdownCtx)
 	server.StartSecurityMaintenance(shutdownCtx)
 
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-shutdownCtx.Done()
 		timeoutCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		_ = httpServer.Shutdown(timeoutCtx)
+		if err := httpServer.Shutdown(timeoutCtx); err != nil {
+			log.Printf("HTTP shutdown: %v", err)
+			_ = httpServer.Close()
+		}
 	}()
 
 	log.Printf("Go site listening on http://%s", *address)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatal(err)
+		log.Printf("HTTP server: %v", err)
+		stop()
+		<-shutdownDone
+		closeAccessLogWriter(server)
+		os.Exit(1)
+	}
+	<-shutdownDone
+	closeAccessLogWriter(server)
+}
+
+func closeAccessLogWriter(server *site.Server) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.CloseAccessLogWriter(ctx); err != nil {
+		log.Printf("flush access logs on shutdown: %v", err)
 	}
 }
 

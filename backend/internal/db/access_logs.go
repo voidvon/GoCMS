@@ -3,11 +3,111 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
+	"net/url"
+	"os"
 )
 
 // AccessLogTable stores public (front-end) request rows used by the site
 // dashboard. Rows are pruned by the access log maintenance loop.
 const AccessLogTable = "gocms_access_log"
+
+const AccessLogColumns = `"site_id", "host", "day_key", "path", "query", "method", "status", "kind", "content_type", "ip",
+	"referer", "referer_host", "referer_kind", "user_agent", "agent_kind", "agent_label", "device_kind", "visited_at"`
+
+// OpenAccessLogs opens a private database next to the business database and
+// copies retained legacy records once. In-memory databases keep their shared
+// connection for callers that do not have an on-disk installation.
+func OpenAccessLogs(ctx context.Context, business *sql.DB, cutoff string) (_ *sql.DB, err error) {
+	var sequence int
+	var schema, source string
+	if err := business.QueryRowContext(ctx, "PRAGMA database_list").Scan(&sequence, &schema, &source); err != nil {
+		return nil, err
+	}
+	if source == "" {
+		return nil, nil
+	}
+	filename := source + ".access-logs.db"
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err == nil {
+		if err := file.Close(); err != nil {
+			return nil, err
+		}
+	} else if !errors.Is(err, os.ErrExist) {
+		return nil, err
+	}
+	dsn := sqliteFileURL(filename)
+	dsn.RawQuery = url.Values{"_pragma": {"busy_timeout(1000)"}}.Encode()
+	database, err := sql.Open("sqlite", dsn.String())
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = database.Close()
+		}
+	}()
+	database.SetMaxOpenConns(3)
+	database.SetMaxIdleConns(3)
+	var mode string
+	if err := database.QueryRowContext(ctx, "PRAGMA journal_mode = WAL").Scan(&mode); err != nil {
+		return nil, err
+	}
+	if mode != "wal" {
+		return nil, fmt.Errorf("expected access log journal mode WAL, got %q", mode)
+	}
+	if err := EnsureAccessLog(ctx, database); err != nil {
+		return nil, err
+	}
+	if err := importAccessLogs(ctx, database, source, cutoff); err != nil {
+		return nil, fmt.Errorf("import legacy access logs: %w", err)
+	}
+	return database, nil
+}
+
+func importAccessLogs(ctx context.Context, database *sql.DB, source, cutoff string) error {
+	if _, err := database.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS access_log_migration (id INTEGER PRIMARY KEY CHECK (id=1))`); err != nil {
+		return err
+	}
+	var migrated bool
+	if err := database.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM access_log_migration WHERE id=1)`).Scan(&migrated); err != nil || migrated {
+		return err
+	}
+	connection, err := database.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer connection.Close()
+	legacy := sqliteFileURL(source)
+	legacy.RawQuery = "mode=ro"
+	if _, err := connection.ExecContext(ctx, "ATTACH DATABASE ? AS legacy_access", legacy.String()); err != nil {
+		return err
+	}
+	defer func() {
+		_, _ = connection.ExecContext(context.Background(), "DETACH DATABASE legacy_access")
+	}()
+	transaction, err := connection.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	marker, err := transaction.ExecContext(ctx, `INSERT OR IGNORE INTO access_log_migration (id) VALUES (1)`)
+	if err != nil {
+		return err
+	}
+	affected, err := marker.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 1 {
+		if _, err := transaction.ExecContext(ctx, `INSERT INTO main."`+AccessLogTable+`" ("id", `+AccessLogColumns+`)
+			SELECT "id", `+AccessLogColumns+` FROM legacy_access."`+AccessLogTable+`" WHERE "visited_at" >= ?`, cutoff); err != nil {
+			return err
+		}
+	}
+	return transaction.Commit()
+}
 
 // EnsureAccessLog creates the public access log table. The table is
 // deliberately site-scoped: every dashboard query filters by site_id, so the

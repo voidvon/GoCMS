@@ -557,6 +557,11 @@ func TestAccessLogPermissions(t *testing.T) {
 	if response := siteAdminRequest(server, readerToken, http.MethodDelete, "/api/admin/access-logs", "1", ""); response.Code != http.StatusForbidden {
 		t.Fatalf("reader DELETE = %d, want 403", response.Code)
 	}
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		if response := siteAdminRequest(server, readerToken, method, accessLogClearRoute, "1", ""); response.Code != http.StatusForbidden {
+			t.Fatalf("reader %s %s = %d, want 403", method, accessLogClearRoute, response.Code)
+		}
+	}
 	if response := siteAdminRequest(server, cleanerToken, http.MethodDelete, "/api/admin/access-logs?status_mode=404", "1", ""); response.Code != http.StatusOK {
 		t.Fatalf("cleaner DELETE = %d, body %s", response.Code, response.Body.String())
 	}

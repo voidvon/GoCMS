@@ -3,12 +3,15 @@ import { LoaderCircle, RefreshCw, Search, Trash2 } from "lucide-react"
 
 import {
   clearAccessLogs,
+  getAccessLogClearStatus,
   getAccessLogs,
+  type AccessLogClearStatus,
   type AccessLogFilters,
   type AccessLogItem,
   type AdminUser,
 } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
+import { showError, showSuccess } from "@/components/app/admin-notifications"
 import { TimeText } from "@/components/app/time-text"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -107,8 +110,8 @@ function refererLabel(kind: string) {
 }
 
 export function TrafficPage({ user }: { user: AdminUser }) {
-  const { activeSite } = useSite()
-  const canClear = hasPermission(user, "traffic.clear", activeSite?.id)
+  const { activeSite, activeSiteId } = useSite()
+  const canClear = hasPermission(user, "traffic.clear", activeSiteId)
 
   const [timeWindow, setTimeWindow] = useState("today")
   const [kind, setKind] = useState("all")
@@ -125,7 +128,8 @@ export function TrafficPage({ user }: { user: AdminUser }) {
   const [items, setItems] = useState<AccessLogItem[]>([])
   const [total, setTotal] = useState(0)
   const [loadedKey, setLoadedKey] = useState("")
-  const [clearing, setClearing] = useState(false)
+  const [startingClear, setStartingClear] = useState(false)
+  const [clearStatus, setClearStatus] = useState<AccessLogClearStatus | null>(null)
   const [error, setError] = useState("")
 
   const filters = useMemo<AccessLogFilters>(
@@ -175,18 +179,61 @@ export function TrafficPage({ user }: { user: AdminUser }) {
   }, [filters, page, revision, requestKey])
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const clearRunning = clearStatus?.state === "running"
+
+  useEffect(() => {
+    if (!canClear || startingClear) return
+    const controller = new AbortController()
+    let timer: number | undefined
+    let reportedError = false
+
+    async function poll() {
+      try {
+        const status = await getAccessLogClearStatus(activeSiteId, controller.signal)
+        if (controller.signal.aborted) return
+        setClearStatus(status)
+        if (status?.state === "running") {
+          timer = window.setTimeout(poll, 2000)
+        } else if (clearRunning) {
+          setRevision((value) => value + 1)
+          if (status?.state === "completed") {
+            showSuccess(`清理完成，已删除 ${status.deleted.toLocaleString()} 条访问日志`)
+          } else {
+            showError(status ? `清理中断，已删除 ${status.deleted.toLocaleString()} 条访问日志` : "清理任务已中断，请刷新日志后重试")
+          }
+        }
+      } catch (reason) {
+        if (controller.signal.aborted) return
+        if (!reportedError) showError(reason, "无法获取清理进度")
+        reportedError = true
+        if (clearRunning) timer = window.setTimeout(poll, 4000)
+      }
+    }
+
+    timer = window.setTimeout(poll, clearRunning ? 2000 : 0)
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
+  }, [activeSiteId, canClear, clearRunning, startingClear])
 
   async function handleClear() {
     if (!window.confirm("确认清空当前筛选条件下的访问日志吗？该操作不可撤销。")) return
-    setClearing(true)
-    setError("")
+    setStartingClear(true)
     try {
-      await clearAccessLogs(filters)
-      setRevision((value) => value + 1)
+      const status = await clearAccessLogs(filters, activeSiteId)
+      setClearStatus(status)
+      if (status.state === "completed") {
+        showSuccess(`清理完成，已删除 ${status.deleted.toLocaleString()} 条访问日志`)
+        setRevision((value) => value + 1)
+      } else if (status.state === "failed") {
+        showError(`清理中断，已删除 ${status.deleted.toLocaleString()} 条访问日志`)
+        setRevision((value) => value + 1)
+      }
     } catch (clearError) {
-      setError(clearError instanceof Error ? clearError.message : "访问日志清理失败")
+      showError(clearError, "访问日志清理失败")
     } finally {
-      setClearing(false)
+      setStartingClear(false)
     }
   }
 
@@ -281,10 +328,15 @@ export function TrafficPage({ user }: { user: AdminUser }) {
           刷新
         </Button>
         {canClear ? (
-          <Button variant="outline" size="sm" onClick={handleClear} disabled={clearing}>
-            {clearing ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
+          <Button variant="outline" size="sm" onClick={handleClear} disabled={startingClear || clearRunning}>
+            {startingClear || clearRunning ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
             清空{activeFilterCount > 0 ? `（${activeFilterCount} 项筛选）` : "日志"}
           </Button>
+        ) : null}
+        {canClear && clearRunning && clearStatus ? (
+          <span role="status" className="text-xs text-muted-foreground">
+            正在清理，已删除 {clearStatus.deleted.toLocaleString()} 条
+          </span>
         ) : null}
       </div>
 

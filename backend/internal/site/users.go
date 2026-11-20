@@ -247,7 +247,7 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 			module = "members"
 		case "access-logs":
 			// Clearing the traffic log requires the stronger "traffic.clear".
-			if r.Method == http.MethodDelete {
+			if r.Method == http.MethodDelete || strings.EqualFold(r.URL.Path, accessLogClearRoute) {
 				module = "traffic.clear"
 			} else {
 				module = "traffic"

@@ -71,6 +71,9 @@ type Server struct {
 	updateActive               bool
 	captcha                    *captcha.Service
 	accessLogs                 *accessLogConfig
+	accessLogDatabase          *sql.DB
+	accessLogWriter            *accessLogWriter
+	accessLogClear             accessLogClearJobs
 	dashboardStats             dashboardStatsCache
 	legacyPrefixes             *legacyPrefixCache
 	// feishuClient overrides the HTTP client used for Feishu webhook pushes
@@ -134,13 +137,14 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		return nil, fmt.Errorf("create captcha service: %w", err)
 	}
 	server := &Server{
-		resetJobs:      make(chan struct{}, 4),
-		database:       database,
-		siteRoot:       siteRoot,
-		fileServe:      http.FileServer(http.Dir(siteRoot)),
-		captcha:        captSvc,
-		accessLogs:     newAccessLogConfig(),
-		legacyPrefixes: newLegacyPrefixCache(),
+		resetJobs:         make(chan struct{}, 4),
+		database:          database,
+		siteRoot:          siteRoot,
+		fileServe:         http.FileServer(http.Dir(siteRoot)),
+		captcha:           captSvc,
+		accessLogs:        newAccessLogConfig(),
+		accessLogDatabase: database,
+		legacyPrefixes:    newLegacyPrefixCache(),
 	}
 	if err := server.configurePayments(); err != nil {
 		return nil, err
@@ -319,6 +323,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminAccessLogErrors(response, request)
 	case "/api/admin/access-logs/pages":
 		s.adminAccessLogPages(response, request)
+	case accessLogClearRoute:
+		s.adminAccessLogClear(response, request)
 	case "/api/admin/content":
 		s.adminContent(response, request)
 	case "/api/admin/media":
