@@ -3,7 +3,6 @@ package site
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"log"
 	"net/http"
 	"net/netip"
@@ -28,6 +27,12 @@ import (
 const (
 	defaultAccessLogRetentionDays = 3
 	accessLogCleanupInterval      = 30 * time.Minute
+	accessLogCleanupBatchSize     = 200
+	accessLogCleanupBatchTimeout  = 2 * time.Second
+	accessLogCleanupBatchPause    = 250 * time.Millisecond
+	accessLogCleanupRetryPause    = time.Second
+	accessLogCleanupRecoveryRuns  = 8
+	accessLogTimestampLayout      = "2006-01-02 15:04:05"
 	accessLogSiteCacheTTL         = 5 * time.Minute
 	accessLogSiteCacheLimit       = 64
 	accessLogQueryLimit           = 200
@@ -119,7 +124,7 @@ func (c *accessLogConfig) formatVisited(raw string) string {
 	if trimmed == "" {
 		return ""
 	}
-	parsed, err := time.ParseInLocation("2006-01-02 15:04:05", trimmed, time.UTC)
+	parsed, err := time.ParseInLocation(accessLogTimestampLayout, trimmed, time.UTC)
 	if err != nil {
 		return trimmed
 	}
@@ -229,7 +234,7 @@ func (s *Server) recordAccessLog(request *http.Request, result *accessResponse) 
 		 "referer", "referer_host", "referer_kind", "user_agent", "agent_kind", "agent_label", "device_kind", "visited_at")
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		siteID, host, s.accessLogs.dayKey(now), path, query, request.Method, status, kind, contentType, clientIP(request),
-		referer, refererHost, refererKind, userAgent, agent.Kind, agent.Label, agent.Device, now.UTC().Format("2006-01-02 15:04:05"))
+		referer, refererHost, refererKind, userAgent, agent.Kind, agent.Label, agent.Device, now.UTC().Format(accessLogTimestampLayout))
 	if err != nil {
 		log.Printf("record access log: %v", err)
 	}
@@ -1189,25 +1194,60 @@ func (s *Server) clearAccessLogs(ctx context.Context, siteID int64, filter Acces
 	return affected, nil
 }
 
-// cleanupAccessLogs drops rows older than the retention window.
+// cleanupAccessLogs prunes expired rows in short transactions so requests can
+// use the shared database connection between batches.
 func (s *Server) cleanupAccessLogs(ctx context.Context) (int64, error) {
 	if s == nil || s.database == nil || s.accessLogs == nil {
 		return 0, nil
 	}
-	days := s.accessLogs.retention()
-	result, err := s.database.ExecContext(ctx, `DELETE FROM "`+db.AccessLogTable+`" WHERE "visited_at" < datetime('now', ?)`,
-		fmt.Sprintf("-%d days", days))
-	if err != nil {
-		return 0, err
+	cutoff := time.Now().UTC().AddDate(0, 0, -s.accessLogs.retention()).Format(accessLogTimestampLayout)
+	var deleted int64
+	batchSize := accessLogCleanupBatchSize
+	successfulBatches := 0
+	defer func() {
+		if deleted > 0 {
+			s.dashboardStats.invalidate(0)
+		}
+	}()
+	for {
+		batchCtx, cancel := context.WithTimeout(ctx, accessLogCleanupBatchTimeout)
+		result, err := s.database.ExecContext(batchCtx, `DELETE FROM "`+db.AccessLogTable+`" WHERE "id" IN (
+			SELECT "id" FROM "`+db.AccessLogTable+`" WHERE "visited_at" < ?
+			ORDER BY "visited_at", "id" LIMIT ?
+		)`, cutoff, batchSize)
+		batchTimedOut := batchCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil
+		cancel()
+		pause := accessLogCleanupBatchPause
+		if err == nil {
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return deleted, err
+			}
+			deleted += affected
+			if affected < int64(batchSize) {
+				return deleted, nil
+			}
+			if batchSize < accessLogCleanupBatchSize {
+				successfulBatches++
+				if successfulBatches == accessLogCleanupRecoveryRuns {
+					batchSize = min(accessLogCleanupBatchSize, batchSize*2)
+					successfulBatches = 0
+				}
+			}
+		} else if batchTimedOut {
+			// A slow disk or a busy connection can exhaust the batch's time budget.
+			batchSize = max(1, batchSize/2)
+			successfulBatches = 0
+			pause = accessLogCleanupRetryPause
+		} else {
+			return deleted, err
+		}
+		select {
+		case <-ctx.Done():
+			return deleted, ctx.Err()
+		case <-time.After(pause):
+		}
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	if affected > 0 {
-		s.dashboardStats.invalidate(0)
-	}
-	return affected, nil
 }
 
 // StartAccessLogMaintenance prunes expired access log rows on boot and then
@@ -1217,31 +1257,19 @@ func (s *Server) StartAccessLogMaintenance(ctx context.Context) {
 		return
 	}
 	go func() {
-		run := func() {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			deleted, err := s.cleanupAccessLogs(cleanupCtx)
-			if err != nil {
-				log.Printf("prune access logs: %v", err)
-				return
-			}
+		for ctx.Err() == nil {
+			deleted, err := s.cleanupAccessLogs(ctx)
 			if deleted > 0 {
 				log.Printf("pruned %d expired access log rows", deleted)
 			}
-		}
-		run()
-		ticker := time.NewTicker(accessLogCleanupInterval)
-		defer ticker.Stop()
-		for {
+			if err != nil && ctx.Err() == nil {
+				log.Printf("prune access logs: %v", err)
+			}
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
-				run()
+			case <-time.After(accessLogCleanupInterval):
 			}
 		}
 	}()
 }
-
-// StartAccessLogMaintenance prunes expired access log rows on boot and then
-// periodically until the context is cancelled.

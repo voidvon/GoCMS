@@ -3,6 +3,7 @@ package site
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -576,31 +577,149 @@ func TestAccessLogPermissions(t *testing.T) {
 func TestAccessLogCleanup(t *testing.T) {
 	server, database, _, _ := newSiteAdminTestServer(t)
 	now := time.Now()
-	insert := func(visitedAt string) {
+	insert := func(visitedAt string, count int) {
 		t.Helper()
-		if _, err := database.Exec(`INSERT INTO "`+db.AccessLogTable+`"
+		if _, err := database.Exec(`WITH RECURSIVE rows(n) AS (
+			VALUES (1) UNION ALL SELECT n + 1 FROM rows WHERE n < ?
+		)
+		INSERT INTO "`+db.AccessLogTable+`"
 			("site_id", "day_key", "path", "status", "kind", "ip", "visited_at")
-			VALUES (1, ?, '/cleanup', 404, 'error', '203.0.113.40', ?)`,
-			now.In(time.Local).Format("2006-01-02"), visitedAt); err != nil {
+			SELECT 1, ?, '/cleanup', 404, 'error', '203.0.113.40', ? FROM rows`,
+			count, now.In(time.Local).Format(time.DateOnly), visitedAt); err != nil {
 			t.Fatal(err)
 		}
 	}
-	insert(now.AddDate(0, 0, -10).UTC().Format("2006-01-02 15:04:05"))
-	insert(now.Add(-time.Hour).UTC().Format("2006-01-02 15:04:05"))
+	const expiredRows = 2*accessLogCleanupBatchSize + 1
+	recent := now.Add(-time.Hour).UTC().Format(accessLogTimestampLayout)
+	insert(recent, 1)
+	insert(now.AddDate(0, 0, -10).UTC().Format(accessLogTimestampLayout), expiredRows)
 
 	deleted, err := server.cleanupAccessLogs(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if deleted != 1 {
-		t.Fatalf("cleanup deleted = %d, want 1", deleted)
+	if deleted != expiredRows {
+		t.Fatalf("cleanup deleted = %d, want %d", deleted, expiredRows)
 	}
-	var remaining int64
-	if err := database.QueryRow(`SELECT COUNT(*) FROM "` + db.AccessLogTable + `"`).Scan(&remaining); err != nil {
+	var remaining string
+	if err := database.QueryRow(`SELECT visited_at FROM "` + db.AccessLogTable + `"`).Scan(&remaining); err != nil {
 		t.Fatal(err)
 	}
-	if remaining != 1 {
-		t.Fatalf("remaining rows = %d, want 1", remaining)
+	if remaining != recent {
+		t.Fatalf("remaining visit = %s, want %s", remaining, recent)
+	}
+}
+
+func TestAccessLogCleanupYieldsToPublicRequests(t *testing.T) {
+	dir := t.TempDir()
+	database, err := db.Open(filepath.Join(dir, "site.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := db.CreateSchema(ctx, database); err != nil {
+		t.Fatal(err)
+	}
+	siteDir := t.TempDir()
+	const home = "<html><body>home</body></html>"
+	if err := os.WriteFile(filepath.Join(siteDir, "index.html"), []byte(home), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(database, siteDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const backlog = 50_000
+	if _, err := database.ExecContext(ctx, `WITH RECURSIVE rows(n) AS (
+		VALUES (1) UNION ALL SELECT n + 1 FROM rows WHERE n < ?
+	)
+	INSERT INTO "`+db.AccessLogTable+`" ("path", "visited_at")
+		SELECT '/expired/' || n, '2000-01-01 00:00:00' FROM rows`, backlog); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanupCtx, stopCleanup := context.WithCancel(ctx)
+	var deleted int64
+	var cleanupErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		deleted, cleanupErr = server.cleanupAccessLogs(cleanupCtx)
+	}()
+	defer func() {
+		stopCleanup()
+		<-done
+	}()
+	countExpired := func() int64 {
+		t.Helper()
+		var remaining int64
+		if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "`+
+			db.AccessLogTable+`" WHERE "visited_at" = '2000-01-01 00:00:00'`).Scan(&remaining); err != nil {
+			t.Fatal(err)
+		}
+		return remaining
+	}
+	for countExpired() == backlog {
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil).WithContext(ctx)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, req)
+	if response.Code != http.StatusOK || response.Body.String() != home {
+		t.Fatalf("home during cleanup = %d, body %q", response.Code, response.Body.String())
+	}
+	remaining := countExpired()
+	if remaining <= 0 || remaining >= backlog {
+		t.Fatalf("remaining expired rows after serving home = %d, want an in-progress cleanup", remaining)
+	}
+	stopCleanup()
+	<-done
+	if !errors.Is(cleanupErr, context.Canceled) || deleted != backlog-countExpired() {
+		t.Fatalf("cleanup after cancellation = (%d, %v), want the committed row count and context.Canceled", deleted, cleanupErr)
+	}
+}
+
+func TestAccessLogCleanupRetriesAfterConnectionTimeout(t *testing.T) {
+	server, database, _, _ := newSiteAdminTestServer(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	if _, err := database.ExecContext(ctx, `INSERT INTO "`+db.AccessLogTable+`" (visited_at) VALUES ('2000-01-01 00:00:00')`); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := database.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	waitBefore := database.Stats().WaitDuration
+	done := make(chan error, 1)
+	go func() {
+		_, err := server.cleanupAccessLogs(ctx)
+		done <- err
+	}()
+	// Keep the only connection until the first batch times out in the pool.
+	for database.Stats().WaitDuration == waitBefore {
+		if err := ctx.Err(); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	var remaining int
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM "`+db.AccessLogTable+`"`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("remaining expired rows = %d, want 0", remaining)
 	}
 }
 
