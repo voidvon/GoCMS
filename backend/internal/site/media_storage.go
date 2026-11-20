@@ -5,13 +5,11 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -44,13 +42,22 @@ type mediaStorageSettings struct {
 }
 
 func (s *Server) ConfigureMediaStorage(data string) error {
-	root, err := filepath.EvalSymlinks(data)
+	keyPath, err := s.platformPrivateKeyPath(data, "media-storage.key")
 	if err != nil {
 		return err
 	}
-	keyPath, err := filepath.Abs(filepath.Join(root, "media-storage.key"))
+	s.mediaStorageKey = keyPath
+	return nil
+}
+
+func (s *Server) platformPrivateKeyPath(data, name string) (string, error) {
+	root, err := filepath.EvalSymlinks(data)
 	if err != nil {
-		return err
+		return "", err
+	}
+	keyPath, err := filepath.Abs(filepath.Join(root, name))
+	if err != nil {
+		return "", err
 	}
 	for _, public := range []string{s.siteRoot, s.assetsRoot, s.frontendRoot, s.storefrontRoot} {
 		if public == "" {
@@ -61,39 +68,17 @@ func (s *Server) ConfigureMediaStorage(data string) error {
 		}
 		absolute, err := filepath.Abs(public)
 		if err != nil {
-			return err
+			return "", err
 		}
 		if relative, err := filepath.Rel(absolute, keyPath); err == nil && filepath.IsLocal(relative) {
-			return errors.New("文件存储密钥必须位于公开目录之外")
+			return "", errors.New("平台凭据密钥必须位于公开目录之外")
 		}
 	}
-	s.mediaStorageKey = keyPath
-	return nil
+	return keyPath, nil
 }
 
 func (s *Server) mediaStorageCipher(create bool) (*payment.Cipher, error) {
-	if s.mediaStorageKey == "" {
-		return nil, errors.New("服务端文件存储密钥目录不可用")
-	}
-	info, err := os.Lstat(s.mediaStorageKey)
-	if errors.Is(err, os.ErrNotExist) && create {
-		raw := make([]byte, 32)
-		if _, err := rand.Read(raw); err != nil {
-			return nil, err
-		}
-		if err := savePrivateKey(s.mediaStorageKey, base64.StdEncoding.EncodeToString(raw)); err != nil && !errors.Is(err, os.ErrExist) {
-			return nil, err
-		}
-		info, err = os.Lstat(s.mediaStorageKey)
-	}
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 || info.Size() > 256 {
-		return nil, errors.New("文件存储密钥不可用")
-	}
-	raw, err := os.ReadFile(s.mediaStorageKey)
-	if err != nil {
-		return nil, err
-	}
-	return payment.NewCipher(strings.TrimSpace(string(raw)))
+	return localCredentialCipher(s.mediaStorageKey, create)
 }
 
 func scanMediaStorage(row *sql.Row, scope string) (mediaStorageSettings, error) {
@@ -132,18 +117,25 @@ func (s *Server) r2Client(config mediaStorageSettings) (*s3.Client, error) {
 			return nil, err
 		}
 	}
-	httpClient := s.mediaStorageClient
+	return newObjectStorageClient(config.Endpoint, "auto", config.AccessKey, config.Secret, s.mediaStorageClient), nil
+}
+
+func newObjectStorageClient(endpoint, region, accessKey, secret string, httpClient *http.Client) *s3.Client {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 120 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		}}
+		httpClient = objectStorageHTTPClient(120 * time.Second)
 	}
 	return s3.New(s3.Options{
-		BaseEndpoint: aws.String(config.Endpoint), Region: "auto", UsePathStyle: true, HTTPClient: httpClient,
-		Credentials:                aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(config.AccessKey, config.Secret, "")),
+		BaseEndpoint: aws.String(endpoint), Region: region, UsePathStyle: true, HTTPClient: httpClient,
+		Credentials:                aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(accessKey, secret, "")),
 		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
 		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenRequired,
-	}), nil
+	})
+}
+
+func objectStorageHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
 }
 
 func validateMediaStorage(config *mediaStorageSettings) error {

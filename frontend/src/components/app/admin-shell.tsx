@@ -23,6 +23,7 @@ import {
   Users,
   UserCheck,
   CreditCard,
+  DatabaseBackup,
   Truck,
   ShieldCheck,
 } from "lucide-react"
@@ -66,6 +67,7 @@ import { DashboardPage } from "@/components/app/dashboard-page"
 const MailSettings = lazy(() => import("@/components/app/mail-settings").then((module) => ({ default: module.MailSettings })))
 const SecurityPage = lazy(() => import("@/components/app/security-page").then((module) => ({ default: module.SecurityPage })))
 const GeographyPage = lazy(() => import("@/components/app/geography-page").then((module) => ({ default: module.GeographyPage })))
+const DatabaseBackupPage = lazy(() => import("@/components/app/database-backup-page").then((module) => ({ default: module.DatabaseBackupPage })))
 const MembersPage = lazy(() => import("@/components/app/member-login-settings").then((module) => ({ default: module.MembersPage })))
 const MemberLoginSettings = lazy(() => import("@/components/app/member-login-settings").then((module) => ({ default: module.MemberLoginSettings })))
 const OrdersPage = lazy(() => import("@/components/app/orders-page").then((module) => ({ default: module.OrdersPage })))
@@ -127,6 +129,7 @@ const platformNavItems: NavigationItem[] = [
   { id: "mail", label: "邮件设置", icon: Mail },
   { id: "member-login", label: "第三方登录", icon: KeyRound },
   { id: "geography", label: "地址数据", icon: Globe },
+  { id: "database-backup", label: "备份", icon: DatabaseBackup },
   { id: "sites", label: "多站点", icon: Globe },
   { id: "users", label: "用户管理", icon: Users },
   { id: "models", label: "系统模型", icon: Boxes },
@@ -135,7 +138,7 @@ const platformNavItems: NavigationItem[] = [
 ]
 
 function canView(user: AdminUser, view: AdminView, activeSiteId?: number) {
-  if (view === "mail" || view === "member-login" || view === "geography" || view === "sites" || view === "users") return user.is_super
+  if (view === "mail" || view === "member-login" || view === "geography" || view === "database-backup" || view === "sites" || view === "users") return user.is_super
   if (user.is_super) return true
   if (activeSiteId && user.site_ids && user.site_ids.length > 0 && !user.site_ids.includes(activeSiteId)) {
     return false
@@ -387,6 +390,8 @@ function viewMeta(view: AdminView): { parent?: string; title: string; descriptio
       return { parent: "平台管理", title: "第三方登录", description: "统一配置所有站点共享的第三方登录凭据、开关与加密密钥" }
     case "geography":
       return { parent: "平台管理", title: "地址数据", description: "维护所有站点共享的国家、行政区与城市目录" }
+    case "database-backup":
+      return { parent: "平台管理", title: "备份", description: "将全平台 SQLite 数据库的快照保存到 Cloudflare R2 或兼容 S3 的存储桶" }
     case "orders":
       return {title: "订单管理", description: "管理站点订单、分批发货、物流与交付记录"}
     case "payments":
@@ -440,6 +445,8 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
       return <MemberLoginSettings />
     case "geography":
       return <GeographyPage />
+    case "database-backup":
+      return <DatabaseBackupPage />
     case "orders":
       return <OrdersPage user={user} key={activeSite?.id} />
     case "payments":

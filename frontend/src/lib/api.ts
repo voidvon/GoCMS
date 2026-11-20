@@ -1453,6 +1453,43 @@ export const resetSiteUserPassword = (id: number, password: string, siteId?: num
 export type GeographyDataset = { id: number; version: string; created_at: string; countries: number; regions: number; cities: number; active: boolean }
 export type GeographyStatus = { datasets: GeographyDataset[]; job: { running: boolean; stage: string; error?: string }; source: string; license: string }
 export const getGeographyStatus = () => request<GeographyStatus>("/api/admin/geography")
+export type DatabaseBackupSettings = {
+  endpoint: string
+  bucket: string
+  region: string
+  access_key: string
+  automatic: boolean
+  daily_at: string
+  time_zone: string
+}
+export type DatabaseBackupStatus = DatabaseBackupSettings & {
+  has_secret: boolean
+  prefix: string
+  running: boolean
+  last_run: { at: string; source: "manual" | "automatic" | ""; state: "success" | "warning" | "failed" | ""; message: string }
+}
+export type DatabaseBackupObject = { key: string; at: string; size: number; recent: boolean; monthly: boolean }
+export type DatabaseBackupObjectList = { items: DatabaseBackupObject[]; target: string }
+type DatabaseBackupObjectSelection = { key: string; target: string }
+const backupObjectsPath = "/api/admin/database-backup/objects"
+
+export const getDatabaseBackup = () => request<DatabaseBackupStatus>("/api/admin/database-backup")
+export const saveDatabaseBackup = (input: DatabaseBackupSettings & { secret: string }) =>
+  request<DatabaseBackupStatus>("/api/admin/database-backup", { method: "PUT", body: JSON.stringify(input) })
+export const testDatabaseBackup = (input: DatabaseBackupSettings & { secret: string }) =>
+  request<{ ok: boolean }>("/api/admin/database-backup/test", { method: "POST", body: JSON.stringify(input) })
+export const runDatabaseBackup = () =>
+  request<{ running: boolean }>("/api/admin/database-backup/run", { method: "POST", body: "{}" })
+export const getDatabaseBackupObjects = () =>
+  request<DatabaseBackupObjectList>(backupObjectsPath)
+export const deleteDatabaseBackupObject = (selection: DatabaseBackupObjectSelection) =>
+  request<{ ok: boolean }>(backupObjectsPath, { method: "DELETE", body: JSON.stringify(selection) })
+export async function prepareDatabaseBackupDownload(selection: DatabaseBackupObjectSelection) {
+  const path = `${backupObjectsPath}/download`
+  await request<{ ok: boolean }>(path, { method: "POST", body: JSON.stringify(selection) })
+  return endpoint(`${path}${query(selection)}`)
+}
+
 export const downloadGeography = () => request("/api/admin/geography/download", { method: "POST", body: "{}" })
 export const uploadGeography = (body: FormData) => request("/api/admin/geography/import", { method: "POST", body })
 export const activateGeography = (id: number) => request("/api/admin/geography/activate", { method: "POST", body: JSON.stringify({ id }) })

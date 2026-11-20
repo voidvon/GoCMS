@@ -32,6 +32,7 @@ type Server struct {
 	mediaStorageMu     sync.Mutex
 	mediaStorageKey    string
 	mediaStorageClient *http.Client
+	databaseBackup     *databaseBackupService
 
 	security       *security.Service
 	resetJobs      chan struct{}
@@ -225,7 +226,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 			return
 		}
 		s.renewAdminSession(response, request)
-		if request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodPatch || request.Method == http.MethodDelete {
+		mutation := request.Method == http.MethodPost || request.Method == http.MethodPut || request.Method == http.MethodPatch || request.Method == http.MethodDelete
+		if (lowerAdminPath == backupDownloadRoute && request.Method == http.MethodGet) || (lowerAdminPath != backupDownloadRoute && mutation) {
 			user, _ := request.Context().Value(contentScopeKey{}).(*AdminUser)
 			if user != nil {
 				capture := &operationResponse{ResponseWriter: response}
@@ -323,6 +325,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminMedia(response, request)
 	case "/api/admin/media-storage", "/api/admin/media-storage/test":
 		s.adminMediaStorage(response, request, lowerAdminPath == "/api/admin/media-storage/test")
+	case databaseBackupRoute, databaseBackupRoute + "/test", databaseBackupRoute + "/run", backupObjectsRoute, backupDownloadRoute:
+		s.adminDatabaseBackup(response, request, lowerAdminPath)
 	case "/api/admin/messages", "/api/admin/feedback":
 		s.adminFeedbacks(response, request)
 	case "/api/admin/messages/webhook", "/api/admin/feedback/webhook":

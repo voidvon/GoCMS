@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 
-export type AdminView = "security" | "redirects" | "commerce-dimensions" | "orders" | "mail" | "member-login" | "geography" | "sites" | "payments" | "members" | "overview" | "content" | "categories" | "models" | "languages" | "messages" | "publish" | "theme" | "api-keys" | "media" | "users" | "logs" | "traffic"
+export type AdminView = "security" | "redirects" | "commerce-dimensions" | "orders" | "mail" | "member-login" | "geography" | "database-backup" | "sites" | "payments" | "members" | "overview" | "content" | "categories" | "models" | "languages" | "messages" | "publish" | "theme" | "api-keys" | "media" | "users" | "logs" | "traffic"
 
 const adminPaths: Record<AdminView, string> = {
   security: "/admin/security",
@@ -10,6 +10,7 @@ const adminPaths: Record<AdminView, string> = {
   mail: "/admin/mail",
   "member-login": "/admin/member-login",
   geography: "/admin/geography",
+  "database-backup": "/admin/database-backup",
   payments: "/admin/payments",
   sites: "/admin/sites",
   members: "/admin/members",

@@ -49,7 +49,8 @@ func (s *Server) recordOperation(username string, r *http.Request, result *opera
 	route := strings.ToLower(r.URL.Path)
 	platformSecurity := strings.HasPrefix(route, "/api/admin/security/") &&
 		(strings.HasPrefix(route, "/api/admin/security/platform") || strings.HasPrefix(route, "/api/admin/security/nginx") || r.URL.Query().Get("scope") == "global")
-	if platformSecurity || route == "/api/admin/media-storage" || route == "/api/admin/media-storage/test" {
+	if platformSecurity || route == "/api/admin/media-storage" || route == "/api/admin/media-storage/test" ||
+		route == databaseBackupRoute || strings.HasPrefix(route, databaseBackupRoute+"/") {
 		siteID = 0
 	}
 	// Never persist passwords, API keys, request bodies, or query strings.

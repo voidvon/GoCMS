@@ -150,6 +150,10 @@ func main() {
 	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if err := server.ConfigureDatabaseBackup(shutdownCtx, *data, accessLogLocation); err != nil {
+		log.Fatal(err)
+	}
+	server.StartDatabaseBackupMaintenance()
 	server.StartAccessLogMaintenance(shutdownCtx)
 	server.StartPaymentMaintenance(shutdownCtx)
 	server.StartSecurityMaintenance(shutdownCtx)
