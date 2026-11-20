@@ -1,4 +1,5 @@
 import type { ComponentProps, ReactNode } from "react"
+import { useState } from "react"
 import { AlertCircle, ChevronLeft, ChevronRight, Search } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -113,13 +114,30 @@ export function TablePagination({
   loading = false,
   onPageChange,
 }: TablePaginationProps) {
+  const [jumpInput, setJumpInput] = useState("")
+  const trimmedInput = jumpInput.trim()
+  const targetPage = Number(trimmedInput)
+  const validTarget = /^\d+$/.test(trimmedInput) &&
+    Number.isSafeInteger(targetPage) && targetPage >= 1 && targetPage <= totalPages
+  const canJump = validTarget && targetPage !== page && !loading
+  const pageRangeLabel = `跳转页码（1–${totalPages}）`
+
+  function changePage(nextPage: number) {
+    setJumpInput("")
+    onPageChange(nextPage)
+  }
+
+  function jumpToPage() {
+    if (canJump) changePage(targetPage)
+  }
+
   return (
     <div className={cn("flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between", className)}>
       <p className="text-xs text-muted-foreground">
         {total.toLocaleString("zh-CN")} 条记录 · 每页 {pageSize} 条
       </p>
-      <div className="flex items-center justify-between gap-3 sm:justify-end">
-        <span className="text-xs tabular-nums text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 sm:justify-end">
+        <span className="text-xs whitespace-nowrap tabular-nums text-muted-foreground">
           第 {page} / {totalPages} 页
         </span>
         <div className="flex gap-1">
@@ -128,7 +146,7 @@ export function TablePagination({
             size="icon-sm"
             label="上一页"
             disabled={page <= 1 || loading}
-            onClick={() => onPageChange(page - 1)}
+            onClick={() => changePage(page - 1)}
           >
             <ChevronLeft />
           </IconButton>
@@ -137,11 +155,36 @@ export function TablePagination({
             size="icon-sm"
             label="下一页"
             disabled={page >= totalPages || loading}
-            onClick={() => onPageChange(page + 1)}
+            onClick={() => changePage(page + 1)}
           >
             <ChevronRight />
           </IconButton>
         </div>
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <Input
+              size="sm"
+              className="w-16 px-1.5 text-center tabular-nums"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="页码"
+              aria-label={pageRangeLabel}
+              title={pageRangeLabel}
+              aria-invalid={trimmedInput !== "" && !validTarget ? true : undefined}
+              value={jumpInput}
+              disabled={loading}
+              onChange={event => setJumpInput(event.target.value)}
+              onKeyDown={event => {
+                if (event.key !== "Enter" || event.nativeEvent.isComposing) return
+                event.preventDefault()
+                jumpToPage()
+              }}
+            />
+            <Button type="button" variant="outline" size="sm" disabled={!canJump} onClick={jumpToPage}>
+              跳转
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   )

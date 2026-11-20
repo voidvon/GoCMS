@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 
 import { TablePagination } from "@/components/app/app-ui"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 
 type PaginatedTableProps = {
@@ -30,17 +31,13 @@ export function PaginatedTable({
 }: PaginatedTableProps) {
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col rounded-md border bg-background lg:overflow-hidden", className)}>
-      <div
-        className={cn(
-          "relative min-h-0 flex-1 overflow-auto",
-          "[scrollbar-color:color-mix(in_oklab,var(--muted-foreground)_38%,transparent)_transparent] [scrollbar-width:thin]",
-          "[&::-webkit-scrollbar]:size-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/35 [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/55",
-          "[&>[data-slot=table-container]]:overflow-visible [&>[data-slot=table-container]]:static",
-          scrollAreaClassName
-        )}
+      <ScrollArea
+        orientation="both"
+        className={cn("min-h-0 flex-1", scrollAreaClassName)}
+        contentClassName="[&>[data-slot=table-container]]:overflow-visible [&>[data-slot=table-container]]:static"
       >
         {children}
-      </div>
+      </ScrollArea>
       <TablePagination
         className={cn("shrink-0 border-t px-4 py-3", paginationClassName)}
         page={page}
