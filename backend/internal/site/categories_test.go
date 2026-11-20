@@ -145,7 +145,7 @@ func TestContentDetailURLUsesCategoryRoute(t *testing.T) {
 		VALUES (9, '自定义分类', 0, 9, 'catalog', '{id}.html', 'category_list.html', 'content-detail', 'item-{id}.htm', 'content_detail.html')`); err != nil {
 		t.Fatal(err)
 	}
-	url, err := server.contentDetailURL(context.Background(), 9, "185")
+	url, err := server.contentDetailURL(context.Background(), 9, "", 185)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,11 +390,9 @@ func TestCustomRouteIDAndRouteKey(t *testing.T) {
 	}
 
 	// 5. Verify illegal route_key rejected
-	invalidPayload := `{"title":"非法路径文章","category_id":` + strconv.FormatInt(catID, 10) + `,"route_key":"bad/key"}`
+	invalidPayload := `{"title":"非法路径文章","category_id":` + strconv.FormatInt(catID, 10) + `,"route_key":"../bad/key"}`
 	invalidResp := categoryRequest(t, server, token, http.MethodPost, "/api/admin/content", invalidPayload)
 	if invalidResp.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 Bad Request for illegal route_key, got %d", invalidResp.Code)
 	}
 }
-
-

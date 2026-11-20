@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"gocms/internal/sitehost"
+
+	"gocms/internal/routing"
 )
 
 type sourceRow map[string]string
@@ -482,7 +484,7 @@ func insertContent(ctx context.Context, transaction *sql.Tx, item contentInput) 
 		INSERT INTO "gocms_content"
 		("category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.CategoryID, item.RouteKey, item.Title, item.Code, item.Summary, item.Body, item.Image, item.Published,
+		item.CategoryID, routing.LegacyDetailFilename(routing.DefaultDetailPattern, item.RouteKey), item.Title, item.Code, item.Summary, item.Body, item.Image, item.Published,
 		item.Source, item.Description, item.OrderID, item.Featured, item.Visible, modelID, extraData)
 	if err != nil {
 		return 0, err

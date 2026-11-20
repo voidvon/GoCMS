@@ -42,11 +42,11 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 		INSERT INTO "gocms_content"
 			("id", "category_id", "route_key", "title", "summary", "body", "sort_order", "visible")
 		VALUES
-			(10, 1, 'first', '第一条', '摘要一', '<p>正文一</p>', 1, 1),
-			(11, 1, 'second', '第二条', '摘要二', '<p>正文二</p>', 2, 1),
-			(12, 1, 'third', '第三条', '摘要三', '<p>正文三</p>', 3, 1),
-			(20, 2, 'other', '其他内容', '其他摘要', '<p>其他正文</p>', 1, 1),
-			(30, 1, 'hidden', '隐藏内容', '', '', 4, 0)`); err != nil {
+			(10, 1, 'first.html', '第一条', '摘要一', '<p>正文一</p>', 1, 1),
+			(11, 1, 'second.html', '第二条', '摘要二', '<p>正文二</p>', 2, 1),
+			(12, 1, 'third.html', '第三条', '摘要三', '<p>正文三</p>', 3, 1),
+			(20, 2, 'item-other.html', '其他内容', '其他摘要', '<p>其他正文</p>', 1, 1),
+			(30, 1, 'hidden.html', '隐藏内容', '', '', 4, 0)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`
@@ -148,7 +148,7 @@ func TestContentURLUsesConfiguredCategoryRoute(t *testing.T) {
 	c := &content{tables: map[string][]Row{
 		"gocms_category": {{"id": "10", "detail_path": "entries", "detail_file_pattern": "item-{id}.html"}},
 	}}
-	if got := c.contentURL(Row{"category_id": "10", "route_key": "185"}); got != "/entries/item-185.html" {
+	if got := c.contentURL(Row{"id": "185", "category_id": "10"}); got != "/entries/item-185.html" {
 		t.Fatalf("content URL = %q", got)
 	}
 }
@@ -336,8 +336,8 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 		INSERT INTO "gocms_content"
 			("id", "category_id", "route_key", "title", "summary", "body", "sort_order", "visible")
 		VALUES
-			(10, 1, 'first', '第一篇中文', '摘要一', '<p>正文一</p>', 1, 1),
-			(11, 1, 'second', '第二篇中文', '摘要二', '<p>正文二</p>', 2, 1)`); err != nil {
+			(10, 1, 'first.html', '第一篇中文', '摘要一', '<p>正文一</p>', 1, 1),
+			(11, 1, 'second.html', '第二篇中文', '摘要二', '<p>正文二</p>', 2, 1)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`
@@ -926,7 +926,7 @@ func TestNavigationCurrentAndActive(t *testing.T) {
 	// Add an article in category 30 (电动球阀)
 	if _, err := database.ExecContext(ctx, `
 		INSERT INTO "gocms_content" ("id", "category_id", "route_key", "title", "summary", "body", "sort_order", "visible")
-		VALUES (100, 30, 'valve-100', '高性能电动球阀', '电动球阀摘要', '<p>正文</p>', 1, 1)`); err != nil {
+		VALUES (100, 30, 'valve-100.html', '高性能电动球阀', '电动球阀摘要', '<p>正文</p>', 1, 1)`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1035,7 +1035,7 @@ func TestStandaloneLanguageSiteGeneration(t *testing.T) {
 		INSERT INTO "gocms_content"
 			("id", "site_id", "category_id", "route_key", "title", "summary", "body", "sort_order", "visible")
 		VALUES
-			(10, 2, 1, 'first', '中文新闻1', '摘要1', '<p>正文1</p>', 1, 1)`); err != nil {
+			(10, 2, 1, 'first.html', '中文新闻1', '摘要1', '<p>正文1</p>', 1, 1)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`
@@ -1285,8 +1285,8 @@ func TestDetailDirectoryFilePattern(t *testing.T) {
 		INSERT INTO "gocms_content"
 			("id", "category_id", "route_key", "title", "summary", "body", "sort_order", "visible")
 		VALUES
-			(900, 181, 'tdlv-thermodynamic-steam-trap', '平', '', '', 1, 1),
-			(901, 182, 'ftgs14-ball-float-steam-trap', '球', '', '', 1, 1)`); err != nil {
+			(900, 181, 'tdlv-thermodynamic-steam-trap.html', '平', '', '', 1, 1),
+			(901, 182, 'ftgs14-ball-float-steam-trap/index.html', '球', '', '', 1, 1)`); err != nil {
 		t.Fatal(err)
 	}
 

@@ -1261,13 +1261,14 @@ function ContentEditor({
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="content-route-key">自定义文件名 (Route Key)</Label>
+                    <Label htmlFor="content-route-key">自定义文件名</Label>
                     <Input
                       id="content-route-key"
                       value={form.route_key || ""}
                       onChange={(e) => update("route_key", e.target.value.trim())}
-                      placeholder="留空为系统ID (如 412)"
+                      placeholder="例如 article、article.html 或 article/index.html"
                     />
+                    <p className="text-xs text-muted-foreground">按填写的路径生成文件，支持多级目录。留空时使用内容编号和栏目规则。</p>
                   </div>
                   <div className="flex items-center justify-between rounded-md border p-2.5">
                     <div>

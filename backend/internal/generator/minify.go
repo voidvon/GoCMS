@@ -30,7 +30,7 @@ func htmlMinifyEnabled(settings map[string]string) bool {
 
 func isHTMLPage(relative string) bool {
 	switch strings.ToLower(path.Ext(relative)) {
-	case ".html", ".htm":
+	case "", ".html", ".htm":
 		return true
 	default:
 		return false

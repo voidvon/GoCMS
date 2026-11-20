@@ -28,6 +28,7 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 		{name: "categories", fn: EnsureUnifiedCategories},
 		{name: "models", fn: EnsureModels},
 		{name: "content", fn: EnsureContent},
+		{name: "detail filenames", fn: migrateDetailFilenames},
 		{name: "commerce", fn: EnsureCommerce},
 		{name: "media", fn: EnsureMedia},
 		{name: "database backup", fn: EnsureDatabaseBackup},

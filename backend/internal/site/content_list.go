@@ -152,10 +152,7 @@ func (s *Server) populateAdminContentURLs(ctx context.Context, siteID int64, ite
 		if err != nil {
 			continue
 		}
-		filename, err := routing.RenderDetailFilenameValue(pattern, key)
-		if err != nil {
-			continue
-		}
+		filename := routing.DetailFilename(pattern, key, id)
 		items[indexes[id]].URL = base + prefix + routing.DetailURL(directory, filename)
 	}
 	return rows.Err()

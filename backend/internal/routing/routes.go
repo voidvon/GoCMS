@@ -228,6 +228,43 @@ func RenderDetailFilenameValue(pattern, value string) (string, error) {
 	return strings.ReplaceAll(pattern, "{id}", value), nil
 }
 
+// NormalizeDetailFilename validates a literal, category-relative output filename.
+func NormalizeDetailFilename(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if !utf8.ValidString(value) || strings.ContainsAny(value, `\?#%`) || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("自定义文件名包含非法字符")
+	}
+	for _, segment := range strings.Split(value, "/") {
+		if segment == "" || segment == "." || segment == ".." || strings.TrimSpace(segment) != segment {
+			return "", fmt.Errorf("自定义文件名必须是有效的栏目内相对文件路径")
+		}
+	}
+	return value, nil
+}
+
+// LegacyDetailFilename reproduces the original generator's detail filename.
+func LegacyDetailFilename(pattern, routeKey string) string {
+	if _, err := NormalizeDetailFilePattern(pattern); err != nil {
+		pattern = DefaultDetailPattern
+	}
+	filename, err := RenderDetailFilenameValue(pattern, routeKey)
+	if err != nil {
+		return routeKey + ".html"
+	}
+	return filename
+}
+
+// DetailFilename uses the category rule only when no custom filename is set.
+func DetailFilename(pattern, filename string, contentID int64) string {
+	if filename != "" {
+		return filename
+	}
+	return LegacyDetailFilename(pattern, strconv.FormatInt(contentID, 10))
+}
+
 func RenderListFilename(pattern string, categoryID int64, page int) (string, error) {
 	pattern, err := NormalizeListFilePattern(pattern)
 	if err != nil {

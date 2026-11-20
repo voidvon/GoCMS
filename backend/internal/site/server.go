@@ -597,6 +597,9 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 				targetFile := filepath.Join(siteDir, filepath.FromSlash(relPath))
 				if stat, err := os.Stat(targetFile); err == nil {
 					if !stat.IsDir() || fileExistsInDir(targetFile, "index.html") {
+						if !stat.IsDir() && path.Ext(relPath) == "" {
+							response.Header().Set("Content-Type", "text/html; charset=utf-8")
+						}
 						http.FileServer(http.Dir(siteDir)).ServeHTTP(response, request)
 						return
 					}

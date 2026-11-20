@@ -53,10 +53,10 @@ func sitemapFilename(format string) (string, bool) {
 }
 
 func publishedURLs(ctx context.Context, web string) ([]string, error) {
-	return publishedURLsExcluding(ctx, web, nil)
+	return publishedURLsExcluding(ctx, web, nil, nil)
 }
 
-func publishedURLsExcluding(ctx context.Context, web string, excluded []string) ([]string, error) {
+func publishedURLsExcluding(ctx context.Context, web string, excluded []string, detailPaths map[string]bool) ([]string, error) {
 	if _, err := os.Stat(web); os.IsNotExist(err) {
 		return []string{}, nil
 	}
@@ -94,7 +94,7 @@ func publishedURLsExcluding(ctx context.Context, web string, excluded []string) 
 			return nil
 		}
 		extension := strings.ToLower(filepath.Ext(relative))
-		if extension != ".html" && extension != ".htm" {
+		if !detailPaths[relative] && extension != ".html" && extension != ".htm" {
 			return nil
 		}
 		urls = append(urls, relative)

@@ -845,7 +845,7 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
                         <div className="space-y-2">
                           <Label htmlFor="category-detail-file-pattern">详情文件名规则</Label>
                           <Input id="category-detail-file-pattern" value={form.detail_file_pattern} onChange={(event) => update("detail_file_pattern", event.target.value)} placeholder="{id}.html" required />
-                          <p className="text-xs text-muted-foreground">使用 {"{id}"} 代表内容编号。</p>
+                          <p className="text-xs text-muted-foreground">内容未填写自定义文件名时使用此规则。{"{id}"} 代表内容编号。</p>
                         </div>
                         <div className="space-y-2 sm:col-span-2">
                           <Label>详情模板</Label>

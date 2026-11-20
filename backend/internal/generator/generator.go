@@ -147,6 +147,7 @@ type content struct {
 	published        *publishedLanguage
 	removed          map[string]bool
 	affected         map[int]bool
+	detailOwners     map[string]string
 }
 
 // ListItem, ListCategory, ListPagination, and NavigationItem are the data
@@ -1202,8 +1203,14 @@ func stagePageUpdate(ctx context.Context, targetWeb string, pages map[string][]b
 			if !safePagePath(relative) {
 				return nil, fmt.Errorf("invalid published page path: %s", relative)
 			}
-			if err = os.Remove(filepath.Join(stage, filepath.FromSlash(relative))); err != nil && !os.IsNotExist(err) {
+			target := filepath.Join(stage, filepath.FromSlash(relative))
+			if err = os.Remove(target); err != nil && !os.IsNotExist(err) {
 				return nil, err
+			}
+			for parent := filepath.Dir(target); parent != stage; parent = filepath.Dir(parent) {
+				if err := os.Remove(parent); err != nil {
+					break
+				}
 			}
 		}
 	}
@@ -1296,6 +1303,9 @@ func (c *content) page(rolePath, role string, row Row) error {
 }
 
 func (c *content) pageTemplate(pagePath, templatePath string, row Row) error {
+	if owner := c.detailOwners[pagePath]; owner != "" && (row["id"] != owner || c.pages[pagePath] != nil) {
+		return fmt.Errorf("详情文件路径冲突: %s", pagePath)
+	}
 	normalized, err := templateconfig.NormalizePath(templatePath)
 	if err != nil {
 		return fmt.Errorf("模板路径无效: %s: %w", templatePath, err)
@@ -1426,17 +1436,6 @@ func (c *content) categoryDetailDir(row Row) string {
 	return routing.DefaultDetailPath
 }
 
-func (c *content) categoryDetailPattern(row Row) string {
-	pattern := strings.TrimSpace(row["detail_file_pattern"])
-	if pattern == "" {
-		pattern = routing.DefaultDetailPattern
-	}
-	if normalized, err := routing.NormalizeDetailFilePattern(pattern); err == nil {
-		return normalized
-	}
-	return routing.DefaultDetailPattern
-}
-
 func (c *content) categoryListURL(row Row, page int) string {
 	if row["id"] == "" {
 		return ""
@@ -1532,10 +1531,7 @@ func publicURL(pagePath string) string {
 // of a content entry.
 func (c *content) contentDetailFilename(row Row) (string, string) {
 	category := c.cat(row.n("category_id"))
-	filename, err := routing.RenderDetailFilenameValue(c.categoryDetailPattern(category), row["route_key"])
-	if err != nil {
-		filename = row["route_key"] + ".html"
-	}
+	filename := routing.DetailFilename(category["detail_file_pattern"], row["route_key"], int64(row.n("id")))
 	return c.categoryDetailDir(category), filename
 }
 
@@ -2331,6 +2327,7 @@ func (c *content) categoryView(category Row, items []Row, page, pageSize int) Ro
 }
 
 func (c *content) buildForLang() error {
+	c.detailOwners = nil
 	homePagePath := "index.html"
 	if c.langPrefix != "" {
 		homePagePath = c.langPrefix + "/index.html"
@@ -2398,6 +2395,21 @@ func (c *content) buildForLang() error {
 	}
 
 	visible := c.visibleContents()
+	c.detailOwners = make(map[string]string, len(visible))
+	for _, item := range visible {
+		pagePath := c.contentPagePath(item)
+		if c.detailOwners[pagePath] != "" || c.pages[pagePath] != nil {
+			return fmt.Errorf("详情文件路径冲突: %s", pagePath)
+		}
+		c.detailOwners[pagePath] = item["id"]
+	}
+	for pagePath := range c.detailOwners {
+		for parent := path.Dir(pagePath); parent != "."; parent = path.Dir(parent) {
+			if c.detailOwners[parent] != "" {
+				return fmt.Errorf("详情文件与目录路径冲突: %s 和 %s", parent, pagePath)
+			}
+		}
+	}
 	byCategory := make(map[int][]Row)
 	positions := make(map[int]int)
 	for _, item := range visible {

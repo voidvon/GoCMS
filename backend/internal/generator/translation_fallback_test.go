@@ -33,9 +33,9 @@ func TestGenerateUsesOnlyConfiguredTranslationFallback(t *testing.T) {
 				INSERT INTO gocms_category_translation (category_id, lang, name, description)
 				VALUES (1, 'en', 'English category', 'English description'), (1, 'fr', 'French category', '');
 				INSERT INTO gocms_content (id, category_id, route_key, model_id, title, summary, body, seo_title, description, visible, extra_data)
-				VALUES (1, 1, 'empty', 2, '旧标题', '旧摘要', '旧正文', '旧SEO', '旧描述', 1, '{"downloads_html":"chinese.pdf","shared":"shared"}'),
-				(2, 1, 'english', 2, '旧标题', '', '', '', '', 1, '{"downloads_html":"chinese.pdf"}'),
-				(3, 1, 'shared', 1, 'Shared title', '', '', '', '', 1, '{"downloads_html":"shared.pdf"}');
+				VALUES (1, 1, 'empty.html', 2, '旧标题', '旧摘要', '旧正文', '旧SEO', '旧描述', 1, '{"downloads_html":"chinese.pdf","shared":"shared"}'),
+				(2, 1, 'english.html', 2, '旧标题', '', '', '', '', 1, '{"downloads_html":"chinese.pdf"}'),
+				(3, 1, 'shared.html', 1, 'Shared title', '', '', '', '', 1, '{"downloads_html":"shared.pdf"}');
 				INSERT INTO gocms_content_translation (content_id, lang, title, extra_data)
 				VALUES (1, 'en', 'English title', '{}'), (1, 'fr', 'French title', '{"downloads_html":" "}'),
 				(1, 'zh-CN', '中文标题', '{"downloads_html":"chinese.pdf"}'),

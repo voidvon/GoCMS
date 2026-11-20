@@ -31,12 +31,12 @@ func incrementalFixture(t *testing.T) Publisher {
 		(93, '任意叶子', 82, 3, 2, 'list', 930, 'feed', 'p-{id}.html', 'custom/list.html', '', 'entries', '{id}/index.html', 'custom/detail.html'),
 		(104, '无关栏目', 0, 0, 2, 'list', 1040, 'feed', 'p-{id}.html', 'custom/other.html', '', 'other', '{id}.html', 'custom/other.html');
 		INSERT INTO gocms_content (id, category_id, route_key, title, visible, sort_order) VALUES
-		(301, 93, 'selected', '原始标题', 1, 1),
-		(302, 93, 'second', '同栏目第二条', 1, 2),
-		(303, 93, 'third', '同栏目第三条', 1, 3),
-		(304, 93, 'fourth', '同栏目第四条', 1, 4),
-		(305, 93, 'fifth', '同栏目第五条', 1, 5),
-		(401, 104, 'unrelated', '无关内容', 1, 6)`); err != nil {
+		(301, 93, 'selected/index.html', '原始标题', 1, 1),
+		(302, 93, 'second/index.html', '同栏目第二条', 1, 2),
+		(303, 93, 'third/index.html', '同栏目第三条', 1, 3),
+		(304, 93, 'fourth/index.html', '同栏目第四条', 1, 4),
+		(305, 93, 'fifth/index.html', '同栏目第五条', 1, 5),
+		(401, 104, 'unrelated.html', '无关内容', 1, 6)`); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
@@ -116,7 +116,7 @@ func TestGenerateContentRemovesOldRoutesAndExcessPages(t *testing.T) {
 			t.Errorf("obsolete page retained: %s (%v)", page, err)
 		}
 	}
-	if _, err := p.DB.Exec(`UPDATE gocms_content SET route_key = 'renamed', category_id = 104 WHERE id = 301`); err != nil {
+	if _, err := p.DB.Exec(`UPDATE gocms_content SET route_key = 'renamed.html', category_id = 104 WHERE id = 301`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.GenerateContent(ctx, 301); err != nil {
@@ -145,7 +145,7 @@ func TestGenerateContentLanguagesAndSiteIsolation(t *testing.T) {
 		UPDATE gocms_language SET domain = 'ru.example.test' WHERE site_id = 1 AND code = 'ru';
 		INSERT INTO gocms_content_translation (content_id, lang, title) VALUES
 		(301, 'zh-CN', '原始标题'), (301, 'en', 'English before'), (301, 'ru', 'Russian before');
-		INSERT INTO gocms_content (id, site_id, category_id, route_key, title, visible) VALUES (901, 2, 93, 'other-site', '其他站点', 1)`); err != nil {
+		INSERT INTO gocms_content (id, site_id, category_id, route_key, title, visible) VALUES (901, 2, 93, 'other-site/index.html', '其他站点', 1)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := p.Generate(ctx); err != nil {
@@ -304,5 +304,32 @@ func TestGenerateContentLinkAncestorAndCustomHome(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(p.Web, "catalog/index.html")); !os.IsNotExist(err) {
 		t.Fatalf("link ancestor generated a static page: %v", err)
+	}
+}
+
+func TestCustomDetailFilenameCanSwitchFromDirectoryToFlatFile(t *testing.T) {
+	p := incrementalFixture(t)
+	ctx := context.Background()
+	if _, err := p.Generate(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, filename := range []string{"selected", "selected.html", "archive/selected/index.html"} {
+		if _, err := p.DB.Exec(`UPDATE gocms_content SET route_key = ? WHERE id = 301`, filename); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.GenerateContent(ctx, 301); err != nil {
+			t.Fatalf("publish %q: %v", filename, err)
+		}
+		if _, err := os.Stat(filepath.Join(p.Web, "entries", filename)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.GenerateSitemap(ctx, SitemapXML); err != nil {
+			t.Fatal(err)
+		}
+		expected := "/entries/" + strings.TrimSuffix(filename, "index.html")
+		if got := readGenerated(t, p.Web, "sitemap.xml"); !strings.Contains(got, expected+"</loc>") {
+			t.Fatalf("sitemap omitted %q", expected)
+		}
 	}
 }

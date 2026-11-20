@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gocms/internal/db"
@@ -124,8 +126,8 @@ func TestAdminPublishContent(t *testing.T) {
 	server.ConfigurePublishing(templates, t.TempDir(), "", "", "")
 	if _, err := database.Exec(`INSERT INTO gocms_category (id, name, list_path, list_file_pattern, list_template, detail_template) VALUES
 		(71, '任意栏目', 'custom', 'index.html', 'category_list.html', 'content_detail.html');
-		INSERT INTO gocms_content (id, category_id, route_key, title, visible) VALUES (301, 71, 'entry', '指定条目', 1);
-		INSERT INTO gocms_content (id, site_id, category_id, route_key, title, visible) VALUES (302, 2, 71, 'other', '其他站点', 1);
+		INSERT INTO gocms_content (id, category_id, route_key, title, visible) VALUES (301, 71, 'entry.html', '指定条目', 1);
+		INSERT INTO gocms_content (id, site_id, category_id, route_key, title, visible) VALUES (302, 2, 71, 'other.html', '其他站点', 1);
 		INSERT INTO gocms_admin_group (name, permissions) VALUES ('editor', '["content","content.edit"]'), ('publisher', '["content","publish"]');
 		INSERT INTO gocms_admin_user (username, group_id) SELECT 'editor', id FROM gocms_admin_group WHERE name = 'editor';
 		INSERT INTO gocms_admin_user (username, group_id, category_ids) SELECT 'publisher', id, '[99]' FROM gocms_admin_group WHERE name = 'publisher'`); err != nil {
@@ -171,8 +173,30 @@ func TestAdminPublishContent(t *testing.T) {
 	}
 	web := server.publication.publisher.TargetWeb()
 	body, err := os.ReadFile(filepath.Join(web, "content", "entry.html"))
-	if err != nil || string(body) != "detail 指定条目" {
+	if err != nil || !strings.Contains(string(body), "detail 指定条目") {
 		t.Fatalf("detail: %s %v", body, err)
+	}
+	for _, detail := range []struct {
+		filename, address string
+	}{
+		{"entry", "/content/entry"},
+		{"entry.html", "/content/entry.html"},
+		{"archive/entry/index.html", "/content/archive/entry/"},
+	} {
+		change := categoryRequest(t, server, token, http.MethodPut, "/api/admin/content/301",
+			fmt.Sprintf(`{"title":"指定条目","category_id":71,"visible":1,"route_key":%q}`, detail.filename))
+		if change.Code != http.StatusOK {
+			t.Fatalf("save %s: %d %s", detail.filename, change.Code, change.Body.String())
+		}
+		publish := categoryRequest(t, server, token, http.MethodPost, "/api/admin/publish/content", `{"id":301}`)
+		if publish.Code != http.StatusOK {
+			t.Fatalf("publish %s: %d %s", detail.filename, publish.Code, publish.Body.String())
+		}
+		page := categoryRequest(t, server, token, http.MethodGet, detail.address, "")
+		if page.Code != http.StatusOK || !strings.HasPrefix(page.Header().Get("Content-Type"), "text/html") ||
+			!strings.Contains(page.Body.String(), "detail 指定条目") {
+			t.Fatalf("GET %s: %d %s %s", detail.address, page.Code, page.Header().Get("Content-Type"), page.Body.String())
+		}
 	}
 	server.publication.mu.Lock()
 	server.publication.report.State = "running"

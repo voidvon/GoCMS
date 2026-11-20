@@ -252,6 +252,10 @@ func (p Publisher) generateIndexFiles(ctx context.Context, targetID, format stri
 		body []byte
 	}
 	var pending []pendingIndex
+	published, err := p.readPublishedPages()
+	if err != nil {
+		return err
+	}
 	matched := false
 	for _, target := range targets {
 		if targetID != "all" && target.ID != targetID {
@@ -278,7 +282,17 @@ func (p Publisher) generateIndexFiles(ctx context.Context, targetID, format stri
 				}
 			}
 		}
-		urls, err := publishedURLsExcluding(ctx, web, excluded)
+		detailPaths := make(map[string]bool)
+		for _, language := range target.Languages {
+			if snapshot := published[filepath.Clean(target.web)+":"+language.Code]; snapshot != nil {
+				for _, entry := range snapshot.Contents {
+					for _, detailPath := range entry.Paths {
+						detailPaths[detailPath] = true
+					}
+				}
+			}
+		}
+		urls, err := publishedURLsExcluding(ctx, web, excluded, detailPaths)
 		if err != nil {
 			return err
 		}

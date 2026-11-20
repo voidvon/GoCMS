@@ -25,7 +25,7 @@ func TestConsentGeneratedAcrossConfiguredRoutesLanguagesAndFailures(t *testing.T
 		('fr', 'Français', 'bonjour', 'subdir', '', ''), ('de', 'Deutsch', '', 'standalone', 'de.example.test', 'german');
 		INSERT INTO gocms_category (id, name, page_type, route_id, list_path, list_file_pattern, list_template, detail_path, detail_file_pattern, detail_template, list_page_size)
 		VALUES (1, '任意行业栏目', 'list', 1, 'arbitrary', 'page-{id}.html', 'custom/list.html', 'articles', '{id}.html', 'custom/detail.html', 1);
-		INSERT INTO gocms_content (id, category_id, route_key, title, visible) VALUES (1,1,'first','First',1),(2,1,'second','Second',1)`); err != nil {
+		INSERT INTO gocms_content (id, category_id, route_key, title, visible) VALUES (1,1,'first.html','First',1),(2,1,'second.html','Second',1)`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.SaveSiteSettingsForSite(ctx, database, 1, map[string]string{"consent_config": `{"enabled":false,"languages":{"fr":{"mode":"on","text":{"title":"Votre choix"}},"de":{"mode":"on"}}}`}); err != nil {

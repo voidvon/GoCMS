@@ -51,6 +51,7 @@ func TestCreateSchemaContainsOnlyRuntimeTables(t *testing.T) {
 		"gocms_user_group_member":       false,
 		"gocms_category":                false,
 		"gocms_category_translation":    false,
+		"gocms_schema_migration":        false,
 		"gocms_content":                 false,
 		"gocms_content_translation":     false,
 		"gocms_media":                   false,
