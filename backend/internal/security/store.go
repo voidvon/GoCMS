@@ -225,19 +225,33 @@ func scanEntry(rows interface{ Scan(...any) error }) (Entry, error) {
 
 const entryColumns = `id,site_id,network,kind,reason,source,created_at,expires_at,revoked_at`
 
-func ListEntries(ctx context.Context, database *sql.DB, scope int64, active bool, page int) ([]Entry, int, error) {
-	where := "site_id=?"
-	args := []any{scope}
+// A nil siteID lists entries across the platform. Site ID 0 selects global rules.
+func ListEntries(ctx context.Context, database *sql.DB, siteID *int64, active bool, page int) ([]Entry, int, error) {
+	var filters []string
+	var args []any
+	if siteID != nil {
+		filters = append(filters, "site_id=?")
+		args = append(args, *siteID)
+	}
 	if active {
-		where += " AND revoked_at='' AND (expires_at='' OR expires_at>?)"
+		filters = append(filters, "revoked_at='' AND (expires_at='' OR expires_at>?)")
 		args = append(args, time.Now().UTC().Format(time.RFC3339))
 	}
+	where := ""
+	if len(filters) > 0 {
+		where = " WHERE " + strings.Join(filters, " AND ")
+	}
+	tx, err := database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, 0, err
+	}
+	defer tx.Rollback()
 	var total int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM gocms_security_entry WHERE `+where, args...).Scan(&total); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM gocms_security_entry`+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	args = append(args, 50, (page-1)*50)
-	rows, err := database.QueryContext(ctx, `SELECT `+entryColumns+` FROM gocms_security_entry WHERE `+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, args...)
+	rows, err := tx.QueryContext(ctx, `SELECT `+entryColumns+` FROM gocms_security_entry`+where+` ORDER BY id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, 0, err
 	}

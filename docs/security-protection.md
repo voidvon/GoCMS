@@ -4,12 +4,12 @@
 
 ## 权限与范围
 
-- 超级管理员进入页面默认管理全平台名单，新增名单默认长期有效；站点管理员仅能管理授权站点的名单。
+- 超级管理员进入「黑白名单」默认查看全局和各站点的规则。表格显示每条规则的归属，在「全平台」视图添加的规则对全平台生效。站点管理员仅能管理授权站点的名单。新增名单默认长期有效。
 - 扫描规则按当前站点配置，覆盖数据库中配置的主域名、别名、通配域名及启用的独立语言域名。
 - `security` 为查看权限，`security.manage` 为修改权限，均受用户组的站点授权限制。后台会话和 API Key 权限一致。
 - 超级管理员可管理全局名单和全平台自动封禁，并配置可信代理、Nginx 接入和执行同步。已启用的全平台自动封禁策略仅超级管理员能修改。
 - 优先级：全局白名单 → 全局封禁 → 本站白名单 → 本站封禁。自动封禁默认全平台，也可选择仅封禁当前站点。
-- 名单支持 IPv4、IPv6、CIDR、到期时间和长期规则。禁止手动封禁包含当前操作者 IP 的网段。移除保留历史；安全记录及过期历史保留 30 天。
+- 名单支持 IPv4、IPv6、CIDR、到期时间和长期规则。禁止手动封禁包含当前操作者 IP 的网段。移除规则后保留历史。安全日志及过期历史保留 30 天。
 
 ## 扫描检测
 
@@ -101,8 +101,8 @@ GoCMS 通过受限管理子命令分页读取日志，按所属站点累计检�
 ## 接口
 
 - `GET/PUT /api/admin/security/policy`：本站扫描规则；`ban_scope=global|site` 控制自动封禁范围，默认 `global`；`ban_seconds=0` 表示长期有效（默认），其他值为 60–2592000 秒。
-- `GET/POST /api/admin/security/entries`、`DELETE /api/admin/security/entries/{id}`：名单；筛选 `scope=site|global`、`site_id`、`history=true`、`page`。新增字段为 `network`、`kind=allow|deny`、`reason`、可选 RFC3339 `expires_at`。
-- `GET /api/admin/security/events`：同一范围的安全记录，每页 50 条。
+- `GET/POST /api/admin/security/entries`、`DELETE /api/admin/security/entries/{id}` 提供名单管理，支持 `scope=site|global`、`site_id`、`history=true` 和 `page`。超级管理员读取名单时可组合 `scope=global&include_sites=true`，在同一分页查看全局和各站点的规则。新增字段为 `network`、`kind=allow|deny`、`reason` 和可选的 RFC3339 `expires_at`。
+- `GET /api/admin/security/events` 按 `scope=site|global` 查询安全日志，每页 50 条。
 - `GET/PUT /api/admin/security/platform`：平台可信代理、Nginx 路径及 `run_user` 系统运行用户。
 - `GET /api/admin/security/nginx`：同步状态、`setup` 初始化授权状态、`init_command` 实际初始化命令和待同步配置预览。
 - `POST /api/admin/security/nginx/sync`：同步并等待确认。

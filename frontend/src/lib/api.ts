@@ -24,7 +24,8 @@ export const getSecurityPolicy = () => request<SecurityPolicy>("/api/admin/secur
 export const saveSecurityPolicy = (input: SecurityPolicy) => request("/api/admin/security/policy", { method: "PUT", body: JSON.stringify(input) })
 export const getSecurityPlatform = () => request<SecurityPlatform>("/api/admin/security/platform")
 export const saveSecurityPlatform = (input: SecurityPlatform) => request("/api/admin/security/platform", { method: "PUT", body: JSON.stringify(input) })
-export const getSecurityEntries = (scope: string, history: boolean, page: number) => request<{ items: SecurityEntry[]; total: number }>(`/api/admin/security/entries?scope=${scope}&history=${history}&page=${page}`)
+export const getSecurityEntries = (scope: string, history: boolean, page: number) =>
+  request<{ items: SecurityEntry[]; total: number }>(`/api/admin/security/entries${query({ scope, history: String(history), page, include_sites: scope === "global" ? "true" : undefined })}`)
 export function addSecurityEntry(
   scope: string,
   input: Pick<SecurityEntry, "network" | "kind" | "reason" | "expires_at">,
@@ -36,7 +37,8 @@ export function addSecurityEntry(
     body: JSON.stringify(input),
   })
 }
-export const revokeSecurityEntry = (scope: string, id: number) => request(`/api/admin/security/entries/${id}?scope=${scope}`, { method: "DELETE" })
+export const revokeSecurityEntry = (id: number, siteId: number) =>
+  request(`/api/admin/security/entries/${id}${query({ scope: siteId === 0 ? "global" : "site", site_id: siteId || undefined })}`, { method: "DELETE" })
 export const getSecurityEvents = (scope: string, page: number) => request<{ items: SecurityEvent[]; total: number }>(`/api/admin/security/events?scope=${scope}&page=${page}`)
 export const getSecurityNginx = () => request<SecurityNginx>("/api/admin/security/nginx")
 export const getSecurityNginxFile = () => request<SecurityNginxFile>("/api/admin/security/nginx/config")

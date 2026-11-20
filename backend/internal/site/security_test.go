@@ -17,6 +17,7 @@ import (
 
 func TestSecurityTenantIsolationAndLifecycle(t *testing.T) {
 	s, database, token, _ := newSiteAdminTestServer(t)
+	firstSite := int64(1)
 	if _, err := database.Exec(`UPDATE gocms_site SET domain='alpha.example.test',aliases='["alias.example.test"]' WHERE id=1`); err != nil {
 		t.Fatal(err)
 	}
@@ -59,14 +60,14 @@ func TestSecurityTenantIsolationAndLifecycle(t *testing.T) {
 	if w := public("beta.example.test", "/ordinary", ip); w.Code == 403 {
 		t.Fatal("site ban leaked across tenants")
 	}
-	items, total, err := security.ListEntries(context.Background(), database, 1, true, 1)
+	items, total, err := security.ListEntries(context.Background(), database, &firstSite, true, 1)
 	if err != nil || total != 1 || items[0].Source != "automatic" || items[0].Network != "203.0.113.25/32" || items[0].ExpiresAt == "" {
 		t.Fatalf("automatic ban: %+v %d %v", items, total, err)
 	}
 	for i := 0; i < 10; i++ {
 		public("alpha.example.test", "/normal-missing-page", "203.0.113.26")
 	}
-	_, total, _ = security.ListEntries(context.Background(), database, 1, true, 1)
+	_, total, _ = security.ListEntries(context.Background(), database, &firstSite, true, 1)
 	if total != 1 {
 		t.Fatal("ordinary 404 caused a ban")
 	}
@@ -157,7 +158,8 @@ func TestSecurityGlobalPermanentDefaults(t *testing.T) {
 			t.Fatalf("probe: %d", got)
 		}
 	}
-	entries, total, err := security.ListEntries(ctx, database, 0, true, 1)
+	globalSite := int64(0)
+	entries, total, err := security.ListEntries(ctx, database, &globalSite, true, 1)
 	if err != nil || total != 1 || entries[0].ExpiresAt != "" || entries[0].Source != "automatic" {
 		t.Fatalf("permanent global ban: %+v %d %v", entries, total, err)
 	}
@@ -194,6 +196,62 @@ func TestSecurityGlobalPermanentDefaults(t *testing.T) {
 	}
 }
 
+func TestSecurityPlatformEntryListIncludesSites(t *testing.T) {
+	s, database, token, _ := newSiteAdminTestServer(t)
+	ctx := context.Background()
+	other, err := db.CreateSite(ctx, database, &db.Site{Name: "Second", Code: "second", Domain: "beta.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	add := func(siteID int64, network, kind string) security.Entry {
+		t.Helper()
+		entry, err := security.AddEntry(ctx, database, security.Entry{SiteID: siteID, Network: network, Kind: kind, Reason: "test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return entry
+	}
+	global := add(0, "192.0.2.1", "allow")
+	first := add(1, "198.51.100.1", "deny")
+	var last security.Entry
+	for i := 1; i <= 49; i++ {
+		last = add(other.ID, fmt.Sprintf("203.0.113.%d", i), "deny")
+	}
+	list := func(query string, wantTotal, wantLength int) []security.Entry {
+		t.Helper()
+		w := siteAdminRequest(s, token, "GET", "/api/admin/security/entries?"+query, "1", "")
+		var response struct {
+			Items []security.Entry
+			Total int
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); w.Code != 200 || err != nil || response.Total != wantTotal || len(response.Items) != wantLength {
+			t.Fatalf("list %s: HTTP %d, total %d, items %d, error %v", query, w.Code, response.Total, len(response.Items), err)
+		}
+		return response.Items
+	}
+	const allSites = "scope=global&include_sites=true"
+	if items := list(allSites, 51, 50); items[0].ID != last.ID || items[0].SiteID != other.ID || items[49].ID != first.ID {
+		t.Fatal("first page did not include both sites in descending order")
+	}
+	if items := list(allSites+"&page=2", 51, 1); items[0].ID != global.ID || items[0].SiteID != 0 {
+		t.Fatal("second page did not include the global rule")
+	}
+	list("scope=global", 1, 1)
+	list("scope=site&include_sites=true", 1, 1)
+
+	path := fmt.Sprintf("/api/admin/security/entries/%d?scope=site", last.ID)
+	if w := siteAdminRequest(s, token, "DELETE", path, "1", ""); w.Code != 404 {
+		t.Fatalf("revoke at the wrong site: %d %s", w.Code, w.Body.String())
+	}
+	if w := siteAdminRequest(s, token, "DELETE", fmt.Sprintf("%s&site_id=%d", path, other.ID), "1", ""); w.Code != 200 {
+		t.Fatalf("revoke at the owning site: %d %s", w.Code, w.Body.String())
+	}
+	list(allSites, 50, 50)
+	if items := list(allSites+"&history=true", 51, 50); items[0].ID != last.ID || items[0].RevokedAt == "" {
+		t.Fatal("revoked rule missing from platform history")
+	}
+}
+
 func TestSecurityPermissionsAndPlatformBoundary(t *testing.T) {
 	s, database, root, _ := newSiteAdminTestServer(t)
 	if _, err := database.Exec(`INSERT INTO gocms_site(id,name,code,status) VALUES(2,'Second','second','active'); INSERT INTO gocms_admin_group(name,site_permissions) VALUES('security-editor','{"1":["security"],"2":["security","security.manage"]}'); INSERT INTO gocms_admin_user(username,group_id) SELECT 'security-editor',id FROM gocms_admin_group WHERE name='security-editor'`); err != nil {
@@ -208,6 +266,7 @@ func TestSecurityPermissionsAndPlatformBoundary(t *testing.T) {
 		want                      int
 	}{
 		{"GET", "/api/admin/security/entries", "1", "", 200},
+		{"GET", "/api/admin/security/entries?scope=global&include_sites=true", "2", "", 403},
 		{"POST", "/api/admin/security/entries", "1", `{"network":"203.0.113.8","kind":"deny","reason":"test"}`, 403},
 		{"POST", "/api/admin/security/entries", "2", `{"network":"203.0.113.8","kind":"deny","reason":"test"}`, 201},
 		{"GET", "/api/admin/security/entries", "999", "", 403},

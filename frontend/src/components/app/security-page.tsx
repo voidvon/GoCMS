@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog, TablePagination } from "./app-ui"
@@ -31,7 +32,7 @@ function Field({ label, id, hint, children }: { label: string; id: string; hint?
 }
 
 export function SecurityPage({ user }: { user: AdminUser }) {
-  const { activeSite, activeSiteId } = useSite()
+  const { activeSite, activeSiteId, sites } = useSite()
   const permissions = user.site_permissions?.[activeSiteId] ?? user.permissions
   const canManage = user.is_super || permissions.includes("*") || permissions.includes("security.manage")
   const [scope, setScope] = useState(user.is_super ? "global" : "site")
@@ -66,19 +67,25 @@ export function SecurityPage({ user }: { user: AdminUser }) {
     const current = ++sequence.current
     return Promise.all([getSecurityEntries(scope, history, page), getSecurityEvents(scope, eventPage)]).then(([entryData, eventData]) => {
       if (!mounted.current || sequence.current !== current) return
+      const lastPage = Math.max(1, Math.ceil(entryData.total / 50))
+      if (page > lastPage) {
+        setLoading(true)
+        setPage(lastPage)
+        return
+      }
       setEntries(entryData.items)
       setTotal(entryData.total)
       setEvents(eventData.items)
       setEventTotal(eventData.total)
       setSnapshotTime(Date.now())
       setFailed(false)
+      setLoading(false)
     }).catch(error => {
       if (mounted.current && sequence.current === current) {
         setFailed(true)
+        setLoading(false)
         showError(error)
       }
-    }).finally(() => {
-      if (mounted.current && sequence.current === current) setLoading(false)
     })
   }, [scope, history, page, eventPage])
 
@@ -150,7 +157,19 @@ export function SecurityPage({ user }: { user: AdminUser }) {
     if (!value || value === scope) return
     setScope(value); setPage(1); setEventPage(1); setEntries([]); setEvents([]); setLoading(true)
   }
-  const loadingState = loading ? "正在读取安全记录…" : failed ? "加载失败，请刷新重试。" : ""
+  function entryScopeLabel(siteId: number) {
+    return siteId === 0 ? "全平台" : sites.find(site => site.id === siteId)?.name ?? `站点 #${siteId}`
+  }
+
+  function confirmRemoval() {
+    if (!removing) return
+    void act(async () => {
+      await revokeSecurityEntry(removing.id, removing.site_id)
+      if (mounted.current) setRemoving(null)
+    }, "规则已移除")
+  }
+
+  const loadingState = loading ? "正在加载…" : failed ? "加载失败，请刷新重试。" : ""
 
   return <>
     <ScrollArea className="h-full" contentClassName="space-y-5 pb-8 pe-2">
@@ -163,25 +182,64 @@ export function SecurityPage({ user }: { user: AdminUser }) {
           </Select>
           {nginx && <Badge variant={nginx.status.state === "failed" ? "destructive" : "outline"}>Nginx · {syncLabels[nginx.status.state]}</Badge>}
         </div>
-        <Button variant="outline" disabled={loading || pending} onClick={() => { setLoading(true); void refreshLists() }}><RefreshCw className="size-4" />刷新记录</Button>
+        <Button variant="outline" disabled={loading || pending} onClick={() => { setLoading(true); void refreshLists() }}><RefreshCw className="size-4" />{tab === "events" ? "刷新日志" : "刷新记录"}</Button>
       </div>
       <Tabs value={tab} onValueChange={value => setTab(String(value))}>
-        <ScrollArea orientation="horizontal" className="w-full"><TabsList><TabsTrigger value="entries">黑白名单</TabsTrigger><TabsTrigger value="policy">扫描防护</TabsTrigger><TabsTrigger value="events">安全记录</TabsTrigger>{user.is_super && <TabsTrigger value="nginx">Nginx 接入</TabsTrigger>}</TabsList></ScrollArea>
+        <ScrollArea orientation="horizontal" className="w-full"><TabsList><TabsTrigger value="entries">黑白名单</TabsTrigger><TabsTrigger value="policy">扫描防护</TabsTrigger><TabsTrigger value="events">安全日志</TabsTrigger>{user.is_super && <TabsTrigger value="nginx">Nginx 接入</TabsTrigger>}</TabsList></ScrollArea>
       </Tabs>
 
       {tab === "entries" && <section className="space-y-4" aria-label="IP 黑白名单">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2"><Switch id="security-history" checked={history} onCheckedChange={value => { setHistory(value); setPage(1); setLoading(true) }} /><Label htmlFor="security-history">显示到期和已移除记录</Label></div>
-          {canManage && <Button disabled={pending || loading || failed} onClick={() => { setDraft(emptyEntry()); setDialog(true) }}><Plus className="size-4" />添加 IP / 网段</Button>}
+          {canManage && <Button disabled={pending || loading || failed} onClick={() => { setDraft(emptyEntry()); setDialog(true) }}><Plus className="size-4" />{scope === "global" ? "添加全平台规则" : "添加 IP / 网段"}</Button>}
         </div>
-        {loadingState ? <p role="status" className="text-sm text-muted-foreground">{loadingState}</p> : !entries.length ? <div className="rounded-xl border border-dashed p-10 text-center"><ShieldCheck className="mx-auto mb-3 size-7 text-muted-foreground" /><p className="text-sm text-muted-foreground">当前范围暂无名单记录</p></div> : entries.map(entry => {
-          const expired = !!entry.expires_at && new Date(entry.expires_at).getTime() <= snapshotTime
-          const inactive = !!entry.revoked_at || expired
-          return <article key={entry.id} className="space-y-3 rounded-xl border bg-card p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex flex-wrap items-center gap-2"><span className="break-all font-mono text-sm">{entry.network}</span><Badge variant={entry.kind === "allow" ? "secondary" : "outline"}>{entry.kind === "allow" ? "白名单" : "封禁"}</Badge><span className="text-xs text-muted-foreground">{entry.revoked_at ? "已移除" : expired ? "已到期" : entry.source === "automatic" ? "自动封禁" : "手动添加"}</span></div>{canManage && !inactive && <Button variant="outline" size="sm" disabled={pending} onClick={() => setRemoving(entry)}><ShieldOff className="size-4" />{entry.kind === "deny" ? "解封" : "移除白名单"}</Button>}</div>
-            <p className="break-words text-sm">{entry.reason}</p><div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground"><span>添加于 <TimeText value={entry.created_at} /></span><span>{entry.expires_at ? <>到期于 <TimeText value={entry.expires_at} /></> : "长期有效"}</span></div>
-          </article>
-        })}
+        <ScrollArea orientation="horizontal" className="w-full rounded-xl border bg-card">
+          <Table aria-label="IP 黑白名单" containerClassName="overflow-visible" className="min-w-[920px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="ps-4">IP / 网段</TableHead>
+                <TableHead>规则归属</TableHead>
+                <TableHead>类型</TableHead>
+                <TableHead>来源</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>原因</TableHead>
+                <TableHead>添加时间</TableHead>
+                <TableHead>到期时间</TableHead>
+                {canManage && <TableHead className="pe-4 text-end">操作</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loadingState || !entries.length ? (
+                <TableRow>
+                  <TableCell colSpan={canManage ? 9 : 8} className="h-24 text-center text-muted-foreground">
+                    <span role="status">{loadingState || "当前范围暂无名单记录"}</span>
+                  </TableCell>
+                </TableRow>
+              ) : entries.map(entry => {
+                const expired = !!entry.expires_at && new Date(entry.expires_at).getTime() <= snapshotTime
+                const inactive = !!entry.revoked_at || expired
+                const allow = entry.kind === "allow"
+                return (
+                  <TableRow key={entry.id}>
+                    <TableCell className="ps-4 font-mono text-xs">{entry.network}</TableCell>
+                    <TableCell className="max-w-44 whitespace-normal wrap-anywhere">{entryScopeLabel(entry.site_id)}</TableCell>
+                    <TableCell><Badge variant={allow ? "secondary" : "outline"}>{allow ? "白名单" : "封禁"}</Badge></TableCell>
+                    <TableCell>{entry.source === "automatic" ? "自动" : "手动"}</TableCell>
+                    <TableCell className="text-muted-foreground">{entry.revoked_at ? "已移除" : expired ? "已到期" : "有效"}</TableCell>
+                    <TableCell className="w-full min-w-36 whitespace-normal wrap-anywhere">{entry.reason}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground"><TimeText value={entry.created_at} /></TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{entry.expires_at ? <TimeText value={entry.expires_at} /> : "长期有效"}</TableCell>
+                    {canManage && <TableCell className="pe-4 text-end">
+                      {!inactive && <Button variant="outline" size="sm" disabled={pending} onClick={() => setRemoving(entry)}>
+                        <ShieldOff className="size-4" />{allow ? "移除白名单" : "解封"}
+                      </Button>}
+                    </TableCell>}
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </Table>
+        </ScrollArea>
         {!loading && !failed && total > 0 && <TablePagination page={page} totalPages={Math.max(1, Math.ceil(total / 50))} total={total} pageSize={50} onPageChange={value => { setPage(value); setLoading(true) }} />}
       </section>}
 
@@ -198,9 +256,40 @@ export function SecurityPage({ user }: { user: AdminUser }) {
         </fieldset>{!user.is_super && policy.ban_scope === "global" && <p className="text-xs text-muted-foreground">全平台自动封禁由超级管理员管理。</p>}{canManagePolicy && <Button type="submit" disabled={pending}>{pending ? "保存中…" : "保存站点防护"}</Button>}</form>}
       </section>}
 
-      {tab === "events" && <section className="space-y-3" aria-label="安全记录">
+      {tab === "events" && <section className="space-y-4" aria-label="安全日志">
         <p className="text-xs leading-5 text-muted-foreground">记录首次路径探测、自动封禁及名单变更，保留 30 天。同一窗口内的重复探测合并计数。</p>
-        {loadingState ? <p role="status" className="text-sm text-muted-foreground">{loadingState}</p> : !events.length ? <p className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">暂无安全记录</p> : events.map(event => <article key={event.id} className="space-y-2 rounded-xl border p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div className="flex flex-wrap items-center gap-2"><Badge variant={event.action === "ban" ? "destructive" : "outline"}>{actionLabels[event.action] ?? event.action}</Badge>{event.ip && <span className="break-all font-mono text-sm">{event.ip}</span>}</div><span className="text-xs text-muted-foreground"><TimeText value={event.created_at} /></span></div>{event.path && <p className="break-all font-mono text-xs text-muted-foreground">{event.host}{event.path}</p>}<p className="text-sm">{event.reason}</p></article>)}
+        <ScrollArea orientation="horizontal" className="w-full rounded-xl border bg-card">
+          <Table aria-label="安全日志" containerClassName="overflow-visible" className="min-w-[840px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead className="ps-4">时间</TableHead>
+                <TableHead>事件</TableHead>
+                <TableHead>IP / 网段</TableHead>
+                <TableHead>域名</TableHead>
+                <TableHead>请求路径</TableHead>
+                <TableHead className="pe-4">原因</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loadingState || !events.length ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                    <span role="status">{loadingState || "当前范围暂无安全日志"}</span>
+                  </TableCell>
+                </TableRow>
+              ) : events.map(event => (
+                <TableRow key={event.id}>
+                  <TableCell className="ps-4 text-xs text-muted-foreground"><TimeText value={event.created_at} mode="datetime" /></TableCell>
+                  <TableCell><Badge variant={event.action === "ban" ? "destructive" : "outline"}>{actionLabels[event.action] ?? event.action}</Badge></TableCell>
+                  <TableCell className="font-mono text-xs">{event.ip || "—"}</TableCell>
+                  <TableCell className="max-w-44 whitespace-normal wrap-anywhere text-xs">{event.host || "—"}</TableCell>
+                  <TableCell className="max-w-80 whitespace-normal wrap-anywhere font-mono text-xs">{event.path || "—"}</TableCell>
+                  <TableCell className="w-full min-w-36 whitespace-normal wrap-anywhere pe-4">{event.reason || "—"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </ScrollArea>
         {!loading && !failed && eventTotal > 0 && <TablePagination page={eventPage} totalPages={Math.max(1, Math.ceil(eventTotal / 50))} total={eventTotal} pageSize={50} onPageChange={value => { setEventPage(value); setLoading(true) }} />}
       </section>}
 
@@ -239,6 +328,6 @@ export function SecurityPage({ user }: { user: AdminUser }) {
       <Field label="有效期" id="security-expiry"><Select value={draft.duration} onValueChange={duration => { if (duration) setDraft({ ...draft, duration }) }}><SelectTrigger id="security-expiry" className="w-full"><SelectValue>{({ "3600": "1 小时", "86400": "24 小时", "604800": "7 天", "0": "长期有效" } as Record<string, string>)[draft.duration]}</SelectValue></SelectTrigger><SelectContent><SelectItem value="0">长期有效</SelectItem><SelectItem value="3600">1 小时</SelectItem><SelectItem value="86400">24 小时</SelectItem><SelectItem value="604800">7 天</SelectItem></SelectContent></Select></Field>
       <Field label="原因" id="security-reason"><Textarea id="security-reason" required maxLength={150} rows={3} value={draft.reason} onChange={e => setDraft({ ...draft, reason: e.target.value })} /></Field>
     </fieldset></form></ScrollArea><DialogFooter><Button variant="outline" disabled={pending} onClick={() => setDialog(false)}>取消</Button><Button form="security-entry-form" type="submit" disabled={pending}>保存规则</Button></DialogFooter></DialogContent></Dialog>
-    <ConfirmDialog open={!!removing} onOpenChange={open => { if (!open && !pending) setRemoving(null) }} title={removing?.kind === "deny" ? "解除封禁" : "移除白名单"} description={`确认移除 ${removing?.network ?? ""} 的规则？Nginx 将在下次同步时应用。`} confirmLabel="确认移除" pending={pending} onConfirm={() => { if (removing) void act(async () => { await revokeSecurityEntry(scope, removing.id); if (mounted.current) setRemoving(null) }, "规则已移除") }} />
+    <ConfirmDialog open={!!removing} onOpenChange={open => { if (!open && !pending) setRemoving(null) }} title={removing?.kind === "deny" ? "解除封禁" : "移除白名单"} description={removing ? `确认移除「${entryScopeLabel(removing.site_id)}」中 ${removing.network} 的规则？Nginx 将在下次同步时应用。` : ""} confirmLabel="确认移除" pending={pending} onConfirm={confirmRemoval} />
   </>
 }

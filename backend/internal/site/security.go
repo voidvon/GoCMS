@@ -199,7 +199,11 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 	case endpoint == "/entries":
 		switch r.Method {
 		case http.MethodGet:
-			items, total, err := security.ListEntries(r.Context(), s.database, scope, r.URL.Query().Get("history") != "true", page)
+			siteFilter := &scope
+			if scope == 0 && r.URL.Query().Get("include_sites") == "true" {
+				siteFilter = nil
+			}
+			items, total, err := security.ListEntries(r.Context(), s.database, siteFilter, r.URL.Query().Get("history") != "true", page)
 			if err != nil {
 				accountError(w, err)
 				return
