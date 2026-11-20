@@ -88,6 +88,24 @@ func Snapshot(ctx context.Context, database *sql.DB, filename string) error {
 	})
 }
 
+// CompactSnapshot rebuilds a completed, private snapshot into another file.
+// VACUUM INTO keeps implicit rowids, which an in-place VACUUM may renumber.
+func CompactSnapshot(ctx context.Context, snapshot, filename string) error {
+	source, err := filepath.Abs(snapshot)
+	if err != nil {
+		return err
+	}
+	dsn := sqliteFileURL(source)
+	dsn.RawQuery = "mode=ro&immutable=1"
+	copied, err := sql.Open("sqlite", dsn.String())
+	if err != nil {
+		return err
+	}
+	defer copied.Close()
+	_, err = copied.ExecContext(ctx, "VACUUM INTO ?", filename)
+	return err
+}
+
 func sqliteFileURL(filename string) url.URL {
 	path := filepath.ToSlash(filename)
 	if !strings.HasPrefix(path, "/") {

@@ -258,7 +258,7 @@ export function DatabaseBackupPage() {
       <Card>
         <CardHeader>
           <CardTitle>备份记录</CardTitle>
-          <CardDescription>保留最新 10 份，以及过去 36 个已结束的自然月各自的最后一份。月份按设置的时区计算。</CardDescription>
+          <CardDescription>手动和自动备份都会先回收快照中的空闲空间，再压缩上传。保留最新 10 份，以及过去 36 个已结束的自然月各自的最后一份。月份按设置的时区计算。</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">

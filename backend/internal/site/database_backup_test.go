@@ -35,7 +35,10 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 	}
 	if _, err := database.Exec(`PRAGMA journal_mode=WAL;
 		CREATE TABLE backup_fixture (value TEXT);
-		INSERT INTO backup_fixture (rowid, value) VALUES (1234,'committed')`); err != nil {
+		INSERT INTO backup_fixture (rowid, value) VALUES (1234,'committed');
+		CREATE TABLE backup_padding (id INTEGER PRIMARY KEY, payload BLOB);
+		INSERT INTO backup_padding (id, payload) VALUES (1, zeroblob(1048576));
+		DELETE FROM backup_padding`); err != nil {
 		t.Fatal(err)
 	}
 	server, err := New(database, t.TempDir())
@@ -285,6 +288,20 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 	}
 	if err := restored.QueryRow(`SELECT value FROM backup_fixture WHERE rowid=1234`).Scan(&result); err != nil || result != "committed" {
 		t.Fatalf("WAL data or rowid missing: %s, %v", result, err)
+	}
+	var restoredFreePages int64
+	if err := restored.QueryRow(`PRAGMA freelist_count`).Scan(&restoredFreePages); err != nil || restoredFreePages != 0 {
+		t.Fatalf("backup contains %d free pages: %v", restoredFreePages, err)
+	}
+	var liveFreePages, livePageCount, livePageSize int64
+	if err := database.QueryRow(`SELECT freelist_count, page_count, page_size
+		FROM pragma_freelist_count(), pragma_page_count(), pragma_page_size()`).
+		Scan(&liveFreePages, &livePageCount, &livePageSize); err != nil {
+		t.Fatal(err)
+	}
+	if liveFreePages == 0 || int64(len(raw)) >= livePageCount*livePageSize {
+		t.Fatalf("expected compact snapshot with the source's free pages still available: %d snapshot bytes, %d live bytes, %d free pages",
+			len(raw), livePageCount*livePageSize, liveFreePages)
 	}
 	backup.runScheduled(now)
 	wait("success", "automatic")
