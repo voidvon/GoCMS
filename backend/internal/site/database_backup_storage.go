@@ -19,9 +19,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
-const backupKeyTime = "20060102T150405.000000000Z"
+const (
+	backupKeyTime       = "20060102T150405.000000000Z"
+	backupArchiveSuffix = ".tar.gz"
+	backupSQLiteSuffix  = ".sqlite3"
+	backupArchiveType   = "application/gzip"
+)
 
-var backupObjectName = regexp.MustCompile(`^(manual-[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[A-Z2-7]{26,}|daily-[0-9]{4}-[0-9]{2}-[0-9]{2})\.sqlite3$`)
+var backupObjectName = regexp.MustCompile(`^(manual-[0-9]{8}T[0-9]{6}\.[0-9]{9}Z-[A-Z2-7]{26,}|daily-[0-9]{4}-[0-9]{2}-[0-9]{2})\.(sqlite3|tar\.gz)$`)
 
 func managedBackupFilename(prefix, key string) (string, bool) {
 	name, underPrefix := strings.CutPrefix(key, prefix)
@@ -78,7 +83,7 @@ func uploadBackupObject(ctx context.Context, client *s3.Client, bucket, key stri
 	if info.Size() <= partSize {
 		_, err := client.PutObject(ctx, &s3.PutObjectInput{
 			Bucket: aws.String(bucket), Key: aws.String(key), Body: file, ContentLength: aws.Int64(info.Size()),
-			ContentType: aws.String("application/vnd.sqlite3"), IfNoneMatch: aws.String("*"),
+			ContentType: aws.String(backupArchiveType), IfNoneMatch: aws.String("*"),
 		})
 		return err
 	}
@@ -89,7 +94,7 @@ func uploadBackupObject(ctx context.Context, client *s3.Client, bucket, key stri
 func uploadBackupParts(ctx context.Context, client *s3.Client, bucket, key string, file *os.File, size, partSize int64) (err error) {
 	target, object := aws.String(bucket), aws.String(key)
 	start, err := client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
-		Bucket: target, Key: object, ContentType: aws.String("application/vnd.sqlite3"),
+		Bucket: target, Key: object, ContentType: aws.String(backupArchiveType),
 	})
 	if err != nil {
 		return err

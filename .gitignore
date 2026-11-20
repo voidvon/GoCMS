@@ -1,5 +1,6 @@
 /data/*.db
 /data/*.db-*
+/data/**/*.sqlite-*
 /data/publish*.json
 /data/publish*.lock
 /data/theme*.json

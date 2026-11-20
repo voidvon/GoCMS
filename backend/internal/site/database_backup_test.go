@@ -1,7 +1,9 @@
 package site
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -63,6 +65,7 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 	}
 	objects := map[string]storedObject{}
 	failUpload, failDelete := false, false
+	temporaryBackups := filepath.Join(data, ".database-backup-*")
 	backup.httpClient = &http.Client{Transport: r2TestTransport(func(request *http.Request) (*http.Response, error) {
 		if request.URL.Host != "object.example.test" || !strings.HasPrefix(request.URL.Path, "/example-backups") ||
 			!strings.Contains(request.Header.Get("Authorization"), "Credential=backup-id/") {
@@ -90,6 +93,9 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 				body = string(content)
 				break
 			}
+			if dirs, err := filepath.Glob(temporaryBackups); err != nil || len(dirs) != 0 {
+				t.Errorf("local backup files remain during S3 listing: %v, %v", dirs, err)
+			}
 			type entry struct {
 				Key          string
 				LastModified string
@@ -110,12 +116,24 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 			}
 			body = string(raw)
 		case http.MethodPut:
+			if backupObjectName.MatchString(filepath.Base(key)) {
+				dirs, err := filepath.Glob(temporaryBackups)
+				if err != nil || len(dirs) != 1 {
+					t.Errorf("expected one backup directory during upload: %v, %v", dirs, err)
+				} else if files, err := os.ReadDir(dirs[0]); err != nil || len(files) != 1 || files[0].Name() != "snapshot.tar.gz" {
+					t.Errorf("expected only the compressed archive during upload: %v, %v", files, err)
+				}
+			}
 			if failUpload {
 				status = http.StatusForbidden
 				break
 			}
 			if request.Header.Get("If-None-Match") != "*" {
 				t.Error("upload could overwrite an existing backup")
+			}
+			if backupObjectName.MatchString(filepath.Base(key)) &&
+				(!strings.HasSuffix(key, ".tar.gz") || request.Header.Get("Content-Type") != "application/gzip" || request.Header.Get("Content-Encoding") != "") {
+				t.Errorf("uploaded backup is not labeled as a gzip archive: %s %v", key, request.Header)
 			}
 			content, err := io.ReadAll(request.Body)
 			if err != nil {
@@ -178,6 +196,20 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 	}
 	otherKey := "other-installation/daily-2000-01-01.sqlite3"
 	objects[otherKey] = storedObject{now.AddDate(-4, 0, 0), []byte("other installation")}
+	t.Run("compression failure keeps remote backups", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		settings, err := backup.loadConfig(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := backup.backup(t.Context(), settings, "")
+		if result.State != "failed" || !strings.Contains(result.Message, "压缩备份失败") || len(objects) != 12 {
+			t.Fatalf("unexpected result after compression failed: %+v", result)
+		}
+		if dirs, err := filepath.Glob(temporaryBackups); err != nil || len(dirs) != 0 {
+			t.Fatalf("compression failure left temporary backups: %v, %v", dirs, err)
+		}
+	})
 	wait := func(state, source string) {
 		t.Helper()
 		backup.gate.Lock()
@@ -185,6 +217,9 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 		current, err := backup.loadConfig(ctx)
 		if err != nil || current.Running || current.LastRun.State != state || current.LastRun.Source != source {
 			t.Fatalf("unexpected backup result %+v, %v", current.LastRun, err)
+		}
+		if dirs, err := filepath.Glob(temporaryBackups); err != nil || len(dirs) != 0 {
+			t.Fatalf("backup left temporary backups: %v, %v", dirs, err)
 		}
 	}
 	failUpload = true
@@ -208,14 +243,36 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 	if _, ok := objects[otherKey]; !ok {
 		t.Fatal("cleanup removed an unrelated object")
 	}
-	snapshot := filepath.Join(t.TempDir(), "downloaded.sqlite3")
-	for _, item := range objects {
-		if bytes.HasPrefix(item.data, []byte("SQLite format 3\x00")) {
-			if err := os.WriteFile(snapshot, item.data, 0600); err != nil {
-				t.Fatal(err)
-			}
+	var archive []byte
+	for key, item := range objects {
+		if strings.Contains(key, "/manual-") && strings.HasSuffix(key, ".tar.gz") {
+			archive = item.data
 			break
 		}
+	}
+	compressed, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatalf("manual backup was not gzip compressed: %v", err)
+	}
+	defer compressed.Close()
+	files := tar.NewReader(compressed)
+	entry, err := files.Next()
+	if err != nil || entry.Name != "snapshot.sqlite3" || entry.Typeflag != tar.TypeReg {
+		t.Fatalf("unexpected backup archive entry: %+v, %v", entry, err)
+	}
+	raw, err := io.ReadAll(files)
+	if err != nil || len(archive) >= len(raw) {
+		t.Fatalf("backup fixture did not compress: %d archive bytes, %d SQLite bytes, %v", len(archive), len(raw), err)
+	}
+	if entry, err := files.Next(); err != io.EOF {
+		t.Fatalf("unexpected extra backup archive entry: %+v, %v", entry, err)
+	}
+	if _, err := io.Copy(io.Discard, compressed); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := filepath.Join(t.TempDir(), "downloaded.sqlite3")
+	if err := os.WriteFile(snapshot, raw, 0600); err != nil {
+		t.Fatal(err)
 	}
 	restored, err := db.Open(snapshot)
 	if err != nil {
@@ -231,9 +288,9 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 	}
 	backup.runScheduled(now)
 	wait("success", "automatic")
-	key := config.Prefix + "daily-" + now.Format(time.DateOnly) + ".sqlite3"
+	key := config.Prefix + "daily-" + now.Format(time.DateOnly) + ".tar.gz"
 	before := len(objects)
-	backup.runScheduled(now.Add(time.Minute))
+	backup.runScheduled(now)
 	wait("success", "automatic")
 	if len(objects[key].data) == 0 || len(objects) != before {
 		t.Fatal("daily backup was missing or ran twice")
@@ -241,6 +298,10 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 	list := call(token, "GET", "/objects", "", http.StatusOK)
 	if !strings.Contains(list, key) || strings.Contains(list, otherKey) {
 		t.Fatal("backup list did not stay in its storage prefix")
+	}
+	legacyKey := config.Prefix + "manual-" + now.Add(-time.Hour).Format(backupKeyTime) + "-ABCDEFGHIJKLMNOPQRSTUVWXYZ.sqlite3"
+	if !strings.Contains(list, legacyKey) {
+		t.Fatal("legacy SQLite backup is missing from the list")
 	}
 	var listing struct {
 		Target string `json:"target"`
@@ -269,7 +330,8 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 	server.Handler().ServeHTTP(download, request)
 	disposition, params, err := mime.ParseMediaType(download.Header().Get("Content-Disposition"))
 	if download.Code != http.StatusOK || err != nil || disposition != "attachment" || params["filename"] != strings.TrimPrefix(key, config.Prefix) ||
-		download.Header().Get("Cache-Control") != "private, no-store" || !bytes.Equal(download.Body.Bytes(), objects[key].data) {
+		download.Header().Get("Cache-Control") != "private, no-store" || download.Header().Get("Content-Type") != "application/gzip" ||
+		!bytes.Equal(download.Body.Bytes(), objects[key].data) {
 		t.Fatal("download did not return the private snapshot as an attachment")
 	}
 	request = httptest.NewRequest(http.MethodGet, fileURL, nil)
@@ -300,6 +362,29 @@ func TestDatabaseBackupAdminAndSnapshot(t *testing.T) {
 		FROM gocms_admin_operation WHERE site_id=0`, backupDownloadRoute, backupObjectsRoute).Scan(&downloads, &deletions)
 	if err != nil || downloads != 2 || deletions == 0 {
 		t.Fatalf("backup operations were not audited: downloads=%d deletions=%d, %v", downloads, deletions, err)
+	}
+
+	legacyURL := backupDownloadRoute + "?" + url.Values{"key": {legacyKey}, "target": {listing.Target}}.Encode()
+	request = httptest.NewRequest(http.MethodGet, legacyURL, nil)
+	request.AddCookie(&http.Cookie{Name: "gocms_admin", Value: token})
+	download = httptest.NewRecorder()
+	server.Handler().ServeHTTP(download, request)
+	if download.Code != http.StatusOK || download.Header().Get("Content-Type") != "application/vnd.sqlite3" ||
+		!bytes.Equal(download.Body.Bytes(), objects[legacyKey].data) {
+		t.Fatal("legacy SQLite backup could not be downloaded")
+	}
+	call(token, "DELETE", "/objects", selectionBody(legacyKey, listing.Target), http.StatusOK)
+	if _, exists := objects[legacyKey]; exists {
+		t.Fatal("legacy SQLite backup could not be deleted")
+	}
+
+	nextDay := now.AddDate(0, 0, 1)
+	nextKey := config.Prefix + "daily-" + nextDay.Format(time.DateOnly)
+	objects[nextKey+".sqlite3"] = storedObject{now, raw}
+	backup.runScheduled(nextDay)
+	wait("success", "automatic")
+	if _, exists := objects[nextKey+".tar.gz"]; exists {
+		t.Fatal("the scheduler duplicated an existing legacy backup for the same day")
 	}
 }
 

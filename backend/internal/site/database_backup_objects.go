@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -108,7 +109,11 @@ func (b *databaseBackupService) downloadBackupObject(w http.ResponseWriter, r *h
 
 	header := w.Header()
 	header.Set("Cache-Control", "private, no-store")
-	header.Set("Content-Type", "application/vnd.sqlite3")
+	contentType := "application/vnd.sqlite3"
+	if strings.HasSuffix(filename, backupArchiveSuffix) {
+		contentType = backupArchiveType
+	}
+	header.Set("Content-Type", contentType)
 	header.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
 	header.Set("X-Content-Type-Options", "nosniff")
 	if object.ContentLength != nil {

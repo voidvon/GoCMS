@@ -198,7 +198,7 @@ export function SecurityPage({ user }: { user: AdminUser }) {
             <TableHeader>
               <TableRow>
                 <TableHead className="ps-4">IP / 网段</TableHead>
-                <TableHead>规则归属</TableHead>
+                <TableHead className="min-w-32">规则归属</TableHead>
                 <TableHead>类型</TableHead>
                 <TableHead>来源</TableHead>
                 <TableHead>状态</TableHead>

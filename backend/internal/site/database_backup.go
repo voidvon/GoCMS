@@ -5,13 +5,18 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"gocms/internal/db"
 )
@@ -112,10 +117,10 @@ func (b *databaseBackupService) start(config backupConfig, day string) {
 
 func (b *databaseBackupService) backup(ctx context.Context, config backupConfig, day string) backupResult {
 	result := backupResult{Source: "manual", State: "failed"}
-	key := config.Prefix + "manual-" + time.Now().UTC().Format(backupKeyTime) + "-" + rand.Text() + ".sqlite3"
+	name := "manual-" + time.Now().UTC().Format(backupKeyTime) + "-" + rand.Text()
 	if day != "" {
 		result.Source = "automatic"
-		key = config.Prefix + "daily-" + day + ".sqlite3"
+		name = "daily-" + day
 	}
 	fail := func(message string, err error) backupResult {
 		log.Printf("database backup: %s: %v", message, err)
@@ -130,28 +135,26 @@ func (b *databaseBackupService) backup(ctx context.Context, config backupConfig,
 	if err != nil {
 		return fail("无法读取已保存的密钥，请重新填写 Secret Access Key", err)
 	}
+	key := config.Prefix + name + backupArchiveSuffix
 	exists, err := backupObjectExists(ctx, client, config.Bucket, key)
 	if err != nil {
 		return fail("检查 S3 备份对象失败，请检查存储配置和读取权限", err)
 	}
+	if !exists && day != "" {
+		// A scheduled upload from an earlier version may have succeeded before its result was saved.
+		legacyKey := config.Prefix + name + backupSQLiteSuffix
+		exists, err = backupObjectExists(ctx, client, config.Bucket, legacyKey)
+		if err != nil {
+			return fail("检查 S3 备份对象失败，请检查存储配置和读取权限", err)
+		}
+		if exists {
+			key = legacyKey
+		}
+	}
 	if !exists {
-		directory, err := os.MkdirTemp(filepath.Dir(b.keyPath), ".database-backup-")
+		message, err := b.createAndUploadSnapshot(ctx, client, config.Bucket, key)
 		if err != nil {
-			return fail("创建数据库快照失败，请检查磁盘空间和权限", err)
-		}
-		defer os.RemoveAll(directory)
-		filename := filepath.Join(directory, "snapshot.sqlite3")
-		if err := db.Snapshot(ctx, b.database, filename); err != nil {
-			return fail("创建数据库快照失败，请检查磁盘空间和权限", err)
-		}
-		file, err := os.Open(filename)
-		if err != nil {
-			return fail("读取数据库快照失败", err)
-		}
-		err = uploadBackupObject(ctx, client, config.Bucket, key, file)
-		file.Close()
-		if err != nil && !hasS3Status(err, http.StatusPreconditionFailed) {
-			return fail("上传数据库快照失败，请检查 S3 连接和写入权限", err)
+			return fail(message, err)
 		}
 	}
 	if err := pruneBackupObjects(ctx, client, config, key, time.Now().In(loc)); err != nil {
@@ -163,6 +166,47 @@ func (b *databaseBackupService) backup(ctx context.Context, config backupConfig,
 	result.State = "success"
 	result.Message = "数据库已备份"
 	return result
+}
+
+func (b *databaseBackupService) createAndUploadSnapshot(ctx context.Context, client *s3.Client, bucket, key string) (string, error) {
+	const snapshotError = "创建数据库快照失败，请检查磁盘空间和权限"
+	directory, err := os.MkdirTemp(filepath.Dir(b.keyPath), ".database-backup-")
+	if err != nil {
+		return snapshotError, err
+	}
+	defer func() {
+		if err := os.RemoveAll(directory); err != nil {
+			log.Printf("clean up temporary database backup: %v", err)
+		}
+	}()
+
+	const snapshotName = "snapshot" + backupSQLiteSuffix
+	snapshot := filepath.Join(directory, snapshotName)
+	if err := db.Snapshot(ctx, b.database, snapshot); err != nil {
+		return snapshotError, err
+	}
+	if err := os.Chmod(snapshot, 0600); err != nil {
+		return "设置备份文件权限失败", err
+	}
+	archive := filepath.Join(directory, "snapshot"+backupArchiveSuffix)
+	cmd := exec.CommandContext(ctx, "tar", "-czf", archive, "-C", directory, snapshotName)
+	// Use the requested archive options and omit macOS AppleDouble metadata.
+	cmd.Env = append(cmd.Environ(), "TAR_OPTIONS=", "GZIP=", "COPYFILE_DISABLE=1")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "压缩备份失败，请检查系统 tar、gzip 和磁盘空间", fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
+	}
+	if err := os.Remove(snapshot); err != nil {
+		log.Printf("remove uncompressed database snapshot: %v", err)
+	}
+	file, err := os.Open(archive)
+	if err != nil {
+		return "读取压缩备份失败", err
+	}
+	defer file.Close()
+	if err := uploadBackupObject(ctx, client, bucket, key, file); err != nil && !hasS3Status(err, http.StatusPreconditionFailed) {
+		return "上传压缩备份失败，请检查 S3 连接和写入权限", err
+	}
+	return "", nil
 }
 
 func hasS3Status(err error, code int) bool {
