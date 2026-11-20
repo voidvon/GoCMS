@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"gocms/internal/security"
 )
 
 func TestAccessLogErrorHitSortAcrossPages(t *testing.T) {
@@ -136,5 +138,82 @@ func TestAccessLogErrorLatestIP(t *testing.T) {
 	}
 	if len(summary.TopErrors) != 1 || summary.TopErrors[0].LastIP != "192.0.2.4" {
 		t.Fatalf("unexpected error summary: %+v", summary.TopErrors)
+	}
+}
+
+func TestAccessLogErrorsReportEffectiveIPBlocks(t *testing.T) {
+	server, database, token, _ := newSiteAdminTestServer(t)
+	if _, err := database.Exec(`INSERT INTO gocms_site (id, name, code) VALUES (2, 'Other', 'other')`); err != nil {
+		t.Fatal(err)
+	}
+	addRule := func(siteID int64, network, kind string) security.Entry {
+		t.Helper()
+		entry, err := security.AddEntry(t.Context(), database, security.Entry{SiteID: siteID, Network: network, Kind: kind, Reason: "test"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return entry
+	}
+	addRule(0, "198.51.100.0/24", "deny")
+	addRule(0, "198.51.100.2", "allow")
+	revoked := addRule(1, "2001:db8::1", "deny")
+	expired := addRule(1, "2001:db8::2", "deny")
+	if _, err := database.Exec(`UPDATE gocms_security_entry SET expires_at = ? WHERE id = ?`, time.Now().Add(-time.Minute).UTC().Format(time.RFC3339), expired.ID); err != nil {
+		t.Fatal(err)
+	}
+	addRule(2, "203.0.113.1", "deny")
+	server.security.Invalidate()
+
+	cases := []struct {
+		path, ip string
+		blocked  bool
+	}{
+		{"/global", "::ffff:198.51.100.1", true},
+		{"/allow", "198.51.100.2", false},
+		{"/site", "2001:db8::1", true},
+		{"/expired", "2001:db8::2", false},
+		{"/other-site", "203.0.113.1", false},
+		{"/missing-ip", "", false},
+	}
+	for _, tc := range cases {
+		if _, err := database.Exec(`INSERT INTO gocms_access_log
+			(site_id, host, path, status, kind, ip, visited_at)
+			VALUES (1, 'a.test', ?, 404, 'error', ?, CURRENT_TIMESTAMP)`, tc.path, tc.ip); err != nil {
+			t.Fatal(err)
+		}
+	}
+	getRows := func() map[string]*bool {
+		t.Helper()
+		res := siteAdminRequest(server, token, http.MethodGet, "/api/admin/access-logs/errors?window=24h", "1", "")
+		if res.Code != http.StatusOK {
+			t.Fatalf("errors endpoint = %d: %s", res.Code, res.Body.String())
+		}
+		var result struct {
+			Items []struct {
+				Path    string `json:"path"`
+				Blocked *bool  `json:"last_ip_blocked"`
+			}
+		}
+		if err := json.Unmarshal(res.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		statuses := make(map[string]*bool, len(result.Items))
+		for _, item := range result.Items {
+			statuses[item.Path] = item.Blocked
+		}
+		return statuses
+	}
+	statuses := getRows()
+	for _, tc := range cases {
+		if got := statuses[tc.path]; got == nil || *got != tc.blocked {
+			t.Errorf("%s expected last_ip_blocked=%v, response status=%v", tc.path, tc.blocked, got)
+		}
+	}
+	res := siteAdminRequest(server, token, http.MethodDelete, fmt.Sprintf("/api/admin/security/entries/%d?scope=site", revoked.ID), "1", "")
+	if res.Code != http.StatusOK {
+		t.Fatalf("revoke entry = %d: %s", res.Code, res.Body.String())
+	}
+	if got := getRows()["/site"]; got == nil || *got {
+		t.Fatal("expected last_ip_blocked=false immediately after revocation")
 	}
 }

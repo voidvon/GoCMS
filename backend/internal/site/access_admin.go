@@ -68,6 +68,7 @@ func (s *Server) adminAccessLogErrors(response http.ResponseWriter, request *htt
 		accountError(response, err)
 		return
 	}
+	response.Header().Set("Cache-Control", "private, no-store")
 	writeJSON(response, http.StatusOK, map[string]any{
 		"items":   items,
 		"total":   total,

@@ -679,6 +679,7 @@ type AccessLogErrorStat struct {
 	InternalHits    int64  `json:"internal_hits"`
 	LastVisitedAt   string `json:"last_visited_at"`
 	LastIP          string `json:"last_ip"`
+	LastIPBlocked   bool   `json:"last_ip_blocked"`
 	LastReferer     string `json:"last_referer"`
 	LastRefererKind string `json:"last_referer_kind"`
 }
@@ -981,7 +982,7 @@ func (s *Server) accessLogSummaryForWindow(ctx context.Context, siteID int64, in
 		}
 		_ = pageRows.Close()
 
-		summary.TopErrors, err = s.queryAccessLogErrorGroups(ctx,
+		summary.TopErrors, err = s.queryAccessLogErrorGroups(ctx, siteID,
 			where+` AND "status" >= 400`, args,
 			`MAX(l."visited_at") DESC, COUNT(*) DESC`, accessLogTopErrorsLimit, 0)
 		if err != nil {
@@ -1070,14 +1071,14 @@ func (s *Server) listAccessLogErrors(ctx context.Context, siteID int64, filter A
 	}
 	// Equal counts and timestamps still need a stable order across pages.
 	orderBy += `, l."host" ASC, l."path" ASC, l."status" ASC`
-	items, err := s.queryAccessLogErrorGroups(ctx, where, args, orderBy, limit, offset)
+	items, err := s.queryAccessLogErrorGroups(ctx, siteID, where, args, orderBy, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
 	return items, total, nil
 }
 
-func (s *Server) queryAccessLogErrorGroups(ctx context.Context, where string, args []any, orderBy string, limit, offset int) ([]AccessLogErrorStat, error) {
+func (s *Server) queryAccessLogErrorGroups(ctx context.Context, siteID int64, where string, args []any, orderBy string, limit, offset int) ([]AccessLogErrorStat, error) {
 	// The IP and last visit time must come from the same filtered group.
 	queryArgs := append(append([]any{}, args...), args...)
 	queryArgs = append(queryArgs, limit, offset)
@@ -1102,6 +1103,7 @@ func (s *Server) queryAccessLogErrorGroups(ctx context.Context, where string, ar
 	}
 	defer rows.Close()
 	items := []AccessLogErrorStat{}
+	var addresses []string
 	for rows.Next() {
 		var item AccessLogErrorStat
 		var last sql.NullString
@@ -1113,11 +1115,21 @@ func (s *Server) queryAccessLogErrorGroups(ctx context.Context, where string, ar
 			item.LastIP = ""
 		} else {
 			item.LastIP = ip.Unmap().String()
+			addresses = append(addresses, item.LastIP)
 		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	if len(addresses) > 0 && s.security != nil {
+		blocked, err := s.security.BlockedIPs(ctx, siteID, addresses)
+		if err != nil {
+			return nil, err
+		}
+		for i := range items {
+			items[i].LastIPBlocked = blocked[items[i].LastIP]
+		}
 	}
 	return items, nil
 }

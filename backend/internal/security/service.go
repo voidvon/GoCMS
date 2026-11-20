@@ -277,6 +277,22 @@ func decision(v *state, siteID int64, ip netip.Addr) string {
 	return ""
 }
 
+// BlockedIPs reports which addresses are currently denied for the site.
+func (s *Service) BlockedIPs(ctx context.Context, siteID int64, addresses []string) (map[string]bool, error) {
+	v, err := s.current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	blocked := make(map[string]bool, len(addresses))
+	for _, address := range addresses {
+		ip, err := netip.ParseAddr(address)
+		if err == nil && ip.Zone() == "" {
+			blocked[address] = decision(v, siteID, ip.Unmap()) == "deny"
+		}
+	}
+	return blocked, nil
+}
+
 func (s *Service) Observe(ctx context.Context, host, pathValue string, ip netip.Addr) (bool, error) {
 	return s.observe(ctx, 0, host, pathValue, ip)
 }

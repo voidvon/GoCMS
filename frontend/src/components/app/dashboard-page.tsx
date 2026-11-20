@@ -36,8 +36,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TimeText } from "@/components/app/time-text"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import {
   Card,
   CardContent,
@@ -84,6 +86,7 @@ export function DashboardPage({ user }: { user: AdminUser }) {
   )
   const [timeWindow, setTimeWindow] = useState<DashboardWindow>("24h")
   const [errorSort, setErrorSort] = useState<ErrorSort>("recent")
+  const [hideBlockedErrors, setHideBlockedErrors] = useState(false)
   const [loading, setLoading] = useState(true)
   const [payload, setPayload] = useState<{ siteId: number; window: DashboardWindow; stats: AdminStats } | null>(null)
   const [error, setError] = useState("")
@@ -97,9 +100,9 @@ export function DashboardPage({ user }: { user: AdminUser }) {
   const [pageLoadingMore, setPageLoadingMore] = useState(false)
   const [errorLoadError, setErrorLoadError] = useState("")
   const [pageLoadError, setPageLoadError] = useState("")
-  const [addedIPs, setAddedIPs] = useState<Set<string>>(() => new Set())
   const [blockBusyIP, setBlockBusyIP] = useState("")
   const [revision, setRevision] = useState(0)
+  const [blockRevision, setBlockRevision] = useState(0)
   const errorMoreRef = useRef(false)
   const pageMoreRef = useRef(false)
   const requestsRef = useRef<AbortController | null>(null)
@@ -182,8 +185,9 @@ export function DashboardPage({ user }: { user: AdminUser }) {
       controller.abort()
       errorRequestsRef.current = null
     }
-  }, [activeSite?.id, revision, timeWindow, errorSort])
+  }, [activeSite?.id, revision, timeWindow, errorSort, blockRevision])
 
+  const visibleErrorRows = hideBlockedErrors ? errorRows.filter((item) => !item.last_ip_blocked) : errorRows
   const errorHasMore = errorRows.length < errorTotal
   const pageHasMore = pageRows.length < pageTotal
 
@@ -258,7 +262,7 @@ export function DashboardPage({ user }: { user: AdminUser }) {
   }
 
   async function handleBlockIP(ip: string) {
-    if (!siteId || !canBlockIP || !ip || blockBusyIP || addedIPs.has(ip)) return
+    if (!siteId || !canBlockIP || !ip || blockBusyIP) return
     setBlockBusyIP(ip)
     try {
       await addSecurityEntry("site", {
@@ -267,7 +271,7 @@ export function DashboardPage({ user }: { user: AdminUser }) {
         reason: "从仪表盘的错误与死链加入",
         expires_at: "",
       }, { headers: { "X-Site-Id": String(siteId) } })
-      setAddedIPs((previous) => new Set(previous).add(ip))
+      setBlockRevision((previous) => previous + 1)
       showSuccess(`${ip} 已加入当前站点黑名单。Nginx 按接入状态同步`)
     } catch (blockError) {
       showError(getErrorMessage(blockError, "加入 IP 黑名单失败"))
@@ -419,6 +423,10 @@ export function DashboardPage({ user }: { user: AdminUser }) {
                   ))}
                 </ScrollArea>
               ) : null}
+              <div className="ms-auto flex shrink-0 items-center gap-2 whitespace-nowrap">
+                <Label htmlFor="hide-blocked-errors" className="text-xs text-muted-foreground">隐藏已封禁</Label>
+                <Switch id="hide-blocked-errors" size="sm" checked={hideBlockedErrors} onCheckedChange={setHideBlockedErrors} />
+              </div>
             </div>
           </CardHeader>
           <CardContent className="flex min-h-0 flex-1 flex-col px-0">
@@ -431,6 +439,8 @@ export function DashboardPage({ user }: { user: AdminUser }) {
               </div>
             ) : errorRows.length === 0 ? (
               <p className="px-6 py-6 text-sm text-muted-foreground">所选时间范围内没有 4xx / 5xx 错误。</p>
+            ) : visibleErrorRows.length === 0 ? (
+              <p className="flex-1 px-6 py-6 text-sm text-muted-foreground">已加载的错误记录均已封禁。</p>
             ) : (
               <ScrollArea
                 className="min-h-0 flex-1"
@@ -455,7 +465,7 @@ export function DashboardPage({ user }: { user: AdminUser }) {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {errorRows.map((item) => {
+                    {visibleErrorRows.map((item) => {
                       const requestHost = item.host || activeSite?.domain || window.location.host
                       const requestAddress = `${requestHost}${item.path}`
                       const requestURL = `${window.location.protocol}//${requestHost}${item.path.split("/").map(encodeURIComponent).join("/")}`
@@ -485,8 +495,8 @@ export function DashboardPage({ user }: { user: AdminUser }) {
                           <TableCell className="text-xs text-muted-foreground"><TimeText value={item.last_visited_at} /></TableCell>
                           {canBlockIP && (
                             <TableCell className="text-right">
-                              {!item.last_ip ? "—" : addedIPs.has(item.last_ip) ? (
-                                <Badge variant="secondary">已加入黑名单</Badge>
+                              {!item.last_ip ? "—" : item.last_ip_blocked ? (
+                                <span className="text-xs text-muted-foreground">已封禁</span>
                               ) : (
                                 <Button
                                   variant="ghost"
@@ -509,7 +519,12 @@ export function DashboardPage({ user }: { user: AdminUser }) {
               </ScrollArea>
             )}
             {!errorLoading && errorRows.length > 0 ? (
-              <ListLoadStatus count={errorRows.length} total={errorTotal} loading={errorLoadingMore} />
+              <ListLoadStatus
+                count={errorRows.length}
+                total={errorTotal}
+                loading={errorLoadingMore}
+                onLoadMore={hideBlockedErrors && errorHasMore ? loadMoreErrors : undefined}
+              />
             ) : null}
           </CardContent>
         </Card>
@@ -605,14 +620,21 @@ export function DashboardPage({ user }: { user: AdminUser }) {
   )
 }
 
-function ListLoadStatus({ count, total, loading }: { count: number; total: number; loading: boolean }) {
+function ListLoadStatus({ count, total, loading, onLoadMore }: { count: number; total: number; loading: boolean; onLoadMore?: () => void }) {
   return (
-    <div role="status" className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-6 pt-3 text-xs text-muted-foreground">
-      <span>已加载 {formatNumber(count)} / {formatNumber(total)} 条</span>
-      <span className="inline-flex items-center gap-1.5">
-        {loading ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-        {loading ? "加载更多…" : count < total ? "下滑加载更多" : "已加载全部"}
-      </span>
+    <div className="flex shrink-0 items-center justify-between gap-2 border-t px-6 pt-3 text-xs text-muted-foreground">
+      <div role="status" className="flex flex-1 flex-wrap items-center justify-between gap-2">
+        <span>已加载 {formatNumber(count)} / {formatNumber(total)} 条</span>
+        {loading || !onLoadMore ? (
+          <span className="inline-flex items-center gap-1.5">
+            {loading ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
+            {loading ? "加载更多…" : count < total ? "下滑加载更多" : "已加载全部"}
+          </span>
+        ) : null}
+      </div>
+      {onLoadMore && !loading && (
+        <Button variant="ghost" size="xs" className="-my-1 -me-2" onClick={onLoadMore}>加载更多</Button>
+      )}
     </div>
   )
 }

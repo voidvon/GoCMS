@@ -231,6 +231,7 @@ export type AccessLogErrorStat = {
   unique_ips: number
   internal_hits: number
   last_ip: string
+  last_ip_blocked: boolean
   // RFC3339 UTC instant; render with the shared TimeText component.
   last_visited_at: string
   last_referer: string
