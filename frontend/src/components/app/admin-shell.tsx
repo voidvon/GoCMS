@@ -547,9 +547,9 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
   )
 
   return (
-    <div className="flex min-h-svh bg-background lg:h-svh lg:overflow-hidden">
+    <div className="flex h-dvh overflow-hidden bg-background">
       <Sidebar activeView={activeView} onNavigate={navigate} user={user} onLogout={handleLogout} collapsed={collapsed} />
-      <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b bg-background/95 px-4 backdrop-blur sm:px-6">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" className="hidden lg:inline-flex"
@@ -613,17 +613,18 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
           </div>
           <HeaderActionsSlot className="flex items-center gap-2" />
         </header>
-        <main className="min-h-0 flex-1 overflow-hidden">
-          <ScrollArea className="h-full" contentClassName="h-full p-4 sm:p-6">
-          <div className="mx-auto h-full w-full max-w-screen-2xl min-h-0">
-            <Suspense key={`${activeView}-${activeSiteId}`} fallback={
-              <div role="status" aria-label="页面加载中" className="flex min-h-64 items-center justify-center text-muted-foreground">
-                <LoaderCircle className="size-5 animate-spin" />
-              </div>
-            }>
-              <ViewContent view={activeView} user={user} />
-            </Suspense>
-          </div>
+        <main className="flex min-h-0 flex-1 flex-col">
+          <ScrollArea key={`${activeView}-${activeSiteId}`} className="flex-1" contentClassName="min-h-full p-4 sm:p-6 lg:h-full">
+            {/* Let vertical swipes continue from inline scroll areas to the page on mobile. */}
+            <div className="mx-auto min-h-0 w-full max-w-screen-2xl max-lg:[&_[data-slot=scroll-area-viewport]]:overscroll-y-auto lg:h-full">
+              <Suspense fallback={
+                <div role="status" aria-label="页面加载中" className="flex min-h-64 items-center justify-center text-muted-foreground">
+                  <LoaderCircle className="size-5 animate-spin" />
+                </div>
+              }>
+                <ViewContent view={activeView} user={user} />
+              </Suspense>
+            </div>
           </ScrollArea>
         </main>
       </div>

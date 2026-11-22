@@ -637,7 +637,7 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
                 </div>
 
                 <TabsContent value="base" className="flex min-h-0 flex-1 flex-col mt-0">
-                  <ScrollArea className="h-0 min-h-0 flex-1 w-full" orientation="vertical">
+                  <ScrollArea className="min-h-0 w-full flex-1 lg:h-0">
                     <div className="grid gap-5 px-4 py-5 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>父分类</Label>
@@ -876,7 +876,7 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
                   const trans = translations[lang.code] || { name: "", seo_title: "", description: "", cover_content: "" }
                   return (
                     <TabsContent key={lang.id} value={lang.code} className="flex min-h-0 flex-1 flex-col mt-0">
-                      <ScrollArea className="h-0 min-h-0 flex-1 w-full" orientation="vertical">
+                      <ScrollArea className="min-h-0 w-full flex-1 lg:h-0">
                         <div className="space-y-4 px-4 py-5">
                           <div className={cn(
                             "rounded-md px-4 py-2.5 text-xs flex items-center gap-2 border",
