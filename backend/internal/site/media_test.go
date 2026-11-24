@@ -86,6 +86,55 @@ func TestAdminMediaUploadRequiresImageAndAdmin(t *testing.T) {
 	}
 }
 
+func TestContentGallerySuppliesCoverAndProtectsImages(t *testing.T) {
+	server, database, token := newCategoryTestServer(t)
+	server.assetsRoot = t.TempDir()
+	first := uploadTestMedia(t, server, token, "first.png")
+	second := uploadTestMedia(t, server, token, "second.png")
+	var tableID int64
+	if err := database.QueryRow(`SELECT table_id FROM gocms_model_field WHERE field_name = 'photo_list'`).Scan(&tableID); err != nil {
+		t.Fatal(err)
+	}
+	model := contentJSONRequest(t, server, token, http.MethodPost, "/api/admin/models", map[string]any{
+		"name": "Gallery items", "table_id": tableID,
+		"entry_fields": []map[string]string{{"field": "photo_list", "label": "Images", "cover_source_sites": "1"}},
+	})
+	var created struct{ ID int64 }
+	if err := json.Unmarshal(model.Body.Bytes(), &created); model.Code != http.StatusCreated || err != nil || created.ID == 0 {
+		t.Fatalf("create model: %d %s, %v", model.Code, model.Body.String(), err)
+	}
+	payload := map[string]any{"title": "Gallery item", "model_id": created.ID, "cover_image": first.URL}
+	if response := contentJSONRequest(t, server, token, http.MethodPost, "/api/admin/content", payload); response.Code != http.StatusOK {
+		t.Fatalf("create content: %d %s", response.Code, response.Body.String())
+	}
+	var id int64
+	var cover, extra string
+	if err := database.QueryRow(`SELECT id, cover_image, extra_data FROM gocms_content WHERE title = 'Gallery item'`).Scan(&id, &cover, &extra); err != nil || cover != first.URL || !strings.Contains(extra, first.URL) {
+		t.Fatalf("legacy cover conversion: %q %s, %v", cover, extra, err)
+	}
+	contentPath := "/api/admin/content/" + strconv.FormatInt(id, 10)
+	payload["extra_data"] = map[string]any{"photo_list": []any{map[string]string{"url": ""}, second.URL, map[string]string{"url": first.URL, "title": "Front"}}}
+	if response := contentJSONRequest(t, server, token, http.MethodPut, contentPath, payload); response.Code != http.StatusOK {
+		t.Fatalf("update content: %d %s", response.Code, response.Body.String())
+	}
+	if err := database.QueryRow(`SELECT cover_image FROM gocms_content WHERE id = ?`, id).Scan(&cover); err != nil || cover != second.URL {
+		t.Fatalf("cover after reorder: %q, %v", cover, err)
+	}
+	if response := mediaItemRequest(t, server, token, http.MethodDelete, first.ID); response.Code != http.StatusConflict {
+		t.Fatalf("delete gallery image: %d %s", response.Code, response.Body.String())
+	}
+	payload["extra_data"] = map[string]any{"photo_list": []any{}}
+	if response := contentJSONRequest(t, server, token, http.MethodPut, contentPath, payload); response.Code != http.StatusOK {
+		t.Fatalf("clear gallery: %d %s", response.Code, response.Body.String())
+	}
+	if err := database.QueryRow(`SELECT cover_image FROM gocms_content WHERE id = ?`, id).Scan(&cover); err != nil || cover != "" {
+		t.Fatalf("cover after clearing gallery: %q, %v", cover, err)
+	}
+	if refs := mediaReferences(t, database, id); len(refs) != 0 {
+		t.Fatalf("media references after clearing gallery: %v", refs)
+	}
+}
+
 func TestContentMediaReferencesFollowContent(t *testing.T) {
 	server, database, token := newCategoryTestServer(t)
 	server.assetsRoot = t.TempDir()

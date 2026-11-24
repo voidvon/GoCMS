@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"gocms/internal/db"
+	"gocms/internal/gallery"
 )
 
 func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
@@ -55,6 +56,10 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 			('item-card', '内容卡片', 'list', '[{{.Title}}]')`); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := database.Exec(`UPDATE gocms_content SET extra_data = ? WHERE id = 10`,
+		`{"pictures":[{"url":"/assets/one.webp","title":"正面"},{"url":"/assets/two.webp","title":"侧面"}]}`); err != nil {
+		t.Fatal(err)
+	}
 
 	templates := filepath.Join(t.TempDir(), "templates")
 	writeTemplate(t, templates, "index.html", `home={{setting "site_name"}} {{label "HOME-BANNER" .}} nav={{range navigation .}}{{.Name}}={{.URL}};{{end}}`)
@@ -62,7 +67,7 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 	writeTemplate(t, templates, "search.html", `search`)
 	writeTemplate(t, templates, "404.html", `not-found lang={{.lang}} home={{.home_url}} is404={{.is_404}} robots={{.seo_robots}} title={{.seo_title}}`)
 	writeTemplate(t, templates, "lists/section.html", `list={{.category_name}} page={{.list_page}}/{{.content_count}} items={{range listItems .}}{{label "item-card" .}}{{.Title}}={{.URL}};{{end}}{{with listPagination .}}pages={{.Pages}} current={{.Page}}{{end}}`)
-	writeTemplate(t, templates, "details/item.html", `detail={{.title}} category={{.category_name}} root={{.category_root_name}} body={{.body}} previous={{.previous_url}} next={{.next_url}} related={{range relatedItems . 2}}{{.Title}}={{.URL}};{{end}}`)
+	writeTemplate(t, templates, "details/item.html", `detail={{.title}} category={{.category_name}} root={{.category_root_name}} body={{.body}} previous={{.previous_url}} next={{.next_url}} related={{range relatedItems . 2}}{{.Title}}={{.URL}};{{end}} gallery={{range morepic .pictures}}{{.URL}}:{{.Title}};{{end}}`)
 	writeTemplate(t, templates, "covers/landing.html", `cover={{.category_name}} children={{range listChildren .}}{{.Name}}={{.URL}};{{end}}`)
 
 	root := t.TempDir()
@@ -74,6 +79,9 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 	}
 	if report.Contents != 4 {
 		t.Fatalf("visible content count = %d, want 4", report.Contents)
+	}
+	if detail := readGenerated(t, web, "entries/first.html"); !strings.Contains(detail, "gallery=/assets/one.webp:正面;/assets/two.webp:侧面;") {
+		t.Fatalf("detail did not render the gallery in order: %s", detail)
 	}
 	for _, relative := range []string{
 		"index.html", "msg.html", "search.html", "404.html", "sections/1.html", "sections/1-1.html", "sections/1-2.html",
@@ -247,21 +255,21 @@ func readGenerated(t *testing.T, root, relative string) string {
 func TestParseMorepicAndMultiValue(t *testing.T) {
 	// 1. JSON array of objects
 	jsonObjs := `[{"url":"/img1.jpg","title":"图1"},{"url":"/img2.jpg","title":"图2"}]`
-	items := parseMorepic(jsonObjs)
+	items := gallery.Parse(jsonObjs)
 	if len(items) != 2 || items[0].URL != "/img1.jpg" || items[0].Title != "图1" || items[0].Order != 1 || items[1].URL != "/img2.jpg" || items[1].Title != "图2" || items[1].Order != 2 {
 		t.Fatalf("unexpected parseMorepic json items: %+v", items)
 	}
 
 	// 2. JSON array of strings
 	jsonStrs := `["/a.jpg", "/b.jpg"]`
-	items2 := parseMorepic(jsonStrs)
+	items2 := gallery.Parse(jsonStrs)
 	if len(items2) != 2 || items2[0].URL != "/a.jpg" || items2[0].Order != 1 || items2[1].URL != "/b.jpg" || items2[1].Order != 2 {
 		t.Fatalf("unexpected parseMorepic json strings: %+v", items2)
 	}
 
 	// 3. EmpireCMS text format
 	empireText := "/big1.jpg::::::/small1.jpg::::::说明一\r\n/big2.jpg::::::说明二\r\n/big3.jpg"
-	items3 := parseMorepic(empireText)
+	items3 := gallery.Parse(empireText)
 	if len(items3) != 3 {
 		t.Fatalf("unexpected parseMorepic empire items count: %d", len(items3))
 	}
@@ -276,7 +284,7 @@ func TestParseMorepicAndMultiValue(t *testing.T) {
 	}
 
 	// 4. Empty / blank input
-	if itemsEmpty := parseMorepic(""); itemsEmpty != nil {
+	if itemsEmpty := gallery.Parse("[]"); itemsEmpty != nil {
 		t.Fatalf("expected nil for empty input, got: %+v", itemsEmpty)
 	}
 

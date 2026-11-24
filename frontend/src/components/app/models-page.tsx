@@ -36,6 +36,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { ConfirmDialog, IconButton, InlineAlert } from "@/components/app/app-ui"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { showError, showSuccess } from "@/components/app/admin-notifications"
+import { useSite } from "@/lib/site-context"
 
 const fieldTypeLabels: Record<string, string> = {
   text: "单行文本 (text)",
@@ -52,6 +54,8 @@ const fieldTypeLabels: Record<string, string> = {
 }
 
 export function ModelsPage() {
+  const { activeSiteId } = useSite()
+  const siteId = String(activeSiteId)
   const [activeTab, setActiveTab] = useState("models")
   const [tables, setTables] = useState<ModelTable[]>([])
   const [fields, setFields] = useState<ModelField[]>([])
@@ -107,6 +111,10 @@ export function ModelsPage() {
     const tid = editingModel.table_id || 1
     return fields.filter((f) => f.table_id === tid)
   }, [fields, editingModel])
+  const coverGalleries = availableFieldsForModel.filter((field) =>
+    field.field_type === "morepic" && field.is_translatable === 0 && field.is_system === 0 &&
+    editingModel?.entry_fields?.some((entry) => entry.field === field.field_name),
+  )
 
   // Handlers for System Models
   function openCreateModel() {
@@ -136,9 +144,10 @@ export function ModelsPage() {
     try {
       await saveSystemModel(editingModel)
       setModelDialogOpen(false)
+      showSuccess("系统模型已保存")
       await loadData()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "保存系统模型失败")
+      showError(err, "保存系统模型失败")
     } finally {
       setModelSaving(false)
     }
@@ -461,6 +470,31 @@ export function ModelsPage() {
 
               <div className="space-y-2 flex-1 flex flex-col min-h-0">
                 <Label className="font-semibold">字段录入项配置 (前后台发布字段)</Label>
+                {coverGalleries.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="model-cover-gallery">本站主图来源</Label>
+                    <Select
+                      value={editingModel.entry_fields?.find((entry) => entry.cover_source_sites?.split(",").includes(siteId))?.field ?? ""}
+                      onValueChange={(value) => setEditingModel({
+                        ...editingModel,
+                        entry_fields: editingModel.entry_fields?.map((entry) => {
+                          const sites = (entry.cover_source_sites?.split(",") ?? []).filter((id) => id !== siteId)
+                          if (entry.field === value) sites.push(siteId)
+                          return { ...entry, cover_source_sites: sites.join(",") || undefined }
+                        }),
+                      })}
+                    >
+                      <SelectTrigger id="model-cover-gallery"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">独立主图</SelectItem>
+                        {coverGalleries.map((field) => (
+                          <SelectItem key={field.id} value={field.field_name}>{field.field_label}的第一张</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">选择图集后，本站使用该模型的内容会从图集取首图，并隐藏独立主图入口。</p>
+                  </div>
+                ) : null}
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
                   <ScrollArea className="min-h-0 flex-1">
                     <Table>

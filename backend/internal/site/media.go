@@ -506,7 +506,7 @@ func (s *Server) mediaDiskPath(publicPath string) (string, error) {
 	return target, nil
 }
 
-func syncContentMediaRefs(ctx context.Context, tx *sql.Tx, contentID int64, body, cover string) error {
+func syncContentMediaRefs(ctx context.Context, tx *sql.Tx, contentID int64, body, cover, galleryField string, galleryURLs []string) error {
 	if _, err := tx.ExecContext(ctx, `DELETE FROM gocms_media_ref WHERE content_id=?`, contentID); err != nil {
 		return err
 	}
@@ -539,9 +539,13 @@ func syncContentMediaRefs(ctx context.Context, tx *sql.Tx, contentID int64, body
 		{"body", "image", contentImageURLs(body)},
 		{"cover_image", "image", []string{normalizeMediaURL(cover)}},
 		{"body", "pdf", pdfLinks},
+		{galleryField, "image", galleryURLs},
 	} {
 		seen := make(map[string]bool)
 		for _, value := range field.urls {
+			if field.name == galleryField {
+				value = normalizeMediaURL(value)
+			}
 			if value == "" || seen[value] {
 				continue
 			}

@@ -21,6 +21,7 @@ import (
 
 	"gocms/internal/consent"
 	"gocms/internal/db"
+	"gocms/internal/gallery"
 	"gocms/internal/routing"
 	"gocms/internal/sitecontacts"
 	"gocms/internal/templateconfig"
@@ -457,13 +458,8 @@ func (c *content) templateFuncs() template.FuncMap {
 		"currentSiteID": func() int64 { return c.siteID },
 		"currentLang":   func() string { return c.lang },
 		"languages":     func(_ ...any) []LanguageInfo { return c.languagesNav() },
-		"morepic": func(val any) []PhotoItem {
-			if val == nil {
-				return nil
-			}
-			return parseMorepic(fmt.Sprint(val))
-		},
-		"homeURL": func() string { return c.homeURL() },
+		"morepic":       gallery.Parse,
+		"homeURL":       func() string { return c.homeURL() },
 		"multiValue": func(val any) []string {
 			if val == nil {
 				return nil
@@ -513,61 +509,6 @@ func (c *content) languagesNav() []LanguageInfo {
 	return res
 }
 
-type PhotoItem struct {
-	URL   string `json:"url"`
-	Title string `json:"title"`
-	Order int    `json:"order,omitempty"`
-}
-
-func parseMorepic(raw string) []PhotoItem {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	if strings.HasPrefix(raw, "[") && strings.HasSuffix(raw, "]") {
-		var items []PhotoItem
-		if err := json.Unmarshal([]byte(raw), &items); err == nil && len(items) > 0 {
-			for i := range items {
-				if items[i].Order == 0 {
-					items[i].Order = i + 1
-				}
-			}
-			return items
-		}
-		var stringUrls []string
-		if err := json.Unmarshal([]byte(raw), &stringUrls); err == nil && len(stringUrls) > 0 {
-			res := make([]PhotoItem, 0, len(stringUrls))
-			for i, u := range stringUrls {
-				res = append(res, PhotoItem{URL: strings.TrimSpace(u), Order: i + 1})
-			}
-			return res
-		}
-	}
-	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
-	items := make([]PhotoItem, 0, len(lines))
-	for i, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.Split(line, "::::::")
-		item := PhotoItem{Order: i + 1}
-		if len(parts) >= 3 {
-			item.URL = strings.TrimSpace(parts[0])
-			item.Title = strings.TrimSpace(parts[2])
-		} else if len(parts) == 2 {
-			item.URL = strings.TrimSpace(parts[0])
-			item.Title = strings.TrimSpace(parts[1])
-		} else {
-			item.URL = strings.TrimSpace(parts[0])
-		}
-		if item.URL != "" {
-			items = append(items, item)
-		}
-	}
-	return items
-}
-
 func parseMultiValue(raw string) []string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -588,6 +529,14 @@ func parseMultiValue(raw string) []string {
 		}
 	}
 	return res
+}
+
+func templateExtraValue(value any) string {
+	if entries, ok := value.([]any); ok {
+		encoded, _ := json.Marshal(entries)
+		return string(encoded)
+	}
+	return fmt.Sprint(value)
 }
 
 func esc(value string) string { return html.EscapeString(value) }
@@ -2280,7 +2229,7 @@ func (c *content) contentView(row Row) Row {
 		if err := json.Unmarshal([]byte(extra), &extraMap); err == nil {
 			for k, v := range extraMap {
 				if _, exists := res[k]; !exists {
-					res[k] = fmt.Sprint(v)
+					res[k] = templateExtraValue(v)
 				}
 			}
 		}

@@ -241,13 +241,17 @@ function MultiImageField({
   value,
   isRequired,
   isMultiLangActive,
+  useAsCover,
   onChange,
+  onUploadingChange,
 }: {
   field: { field_name: string; field_label: string; description?: string; is_translatable?: boolean }
   value: any
   isRequired: boolean
   isMultiLangActive?: boolean
-  onChange: (value: PhotoItem[]) => void
+  useAsCover: boolean
+  onChange: (value: PhotoItem[] | ((current: unknown) => PhotoItem[])) => void
+  onUploadingChange: (uploading: boolean) => void
 }) {
   const photos = useMemo(() => parsePhotos(value), [value])
   const [mediaPickerOpen, setMediaPickerOpen] = useState(false)
@@ -273,28 +277,29 @@ function MultiImageField({
   }
 
   function addItem(url = "", title = "") {
-    onChange([...photos, { url, title }])
+    onChange((current) => [...parsePhotos(current), { url, title }])
   }
 
   async function handleFileUpload(e: ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files
-    if (!files || files.length === 0) return
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = ""
+    if (files.length === 0) return
     setUploading(true)
+    onUploadingChange(true)
+    const added: PhotoItem[] = []
     try {
-      const added: PhotoItem[] = []
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i]
+      for (const file of files) {
         const res = await uploadMedia(file)
         if (res.asset) {
           added.push({ url: res.asset.url, title: res.asset.original_name || "" })
         }
       }
-      onChange([...photos, ...added])
     } catch (err) {
       showError(err, "图片上传失败")
     } finally {
+      if (added.length > 0) onChange((current) => [...parsePhotos(current), ...added])
       setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ""
+      onUploadingChange(false)
     }
   }
 
@@ -308,8 +313,10 @@ function MultiImageField({
             isTranslatable={field.is_translatable}
             isMultiLangActive={isMultiLangActive}
           />
-          {field.description ? (
-            <p className="text-xs text-muted-foreground mt-0.5">{field.description}</p>
+          {useAsCover || field.description ? (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {useAsCover ? "可连续添加多张图片，第一张会作为主图。" : field.description}
+            </p>
           ) : null}
         </div>
         <div className="flex items-center gap-2">
@@ -435,6 +442,8 @@ function MultiImageField({
       <MediaPickerDialog
         open={mediaPickerOpen}
         onOpenChange={setMediaPickerOpen}
+        title={`选择${field.field_label}图片`}
+        description="选择图片后会追加到图集。"
         onSelect={(media) => {
           addItem(media.url, media.original_name || "")
           setMediaPickerOpen(false)
@@ -688,6 +697,7 @@ function ContentEditor({
   saving: boolean
 }) {
   const { languages, defaultLang, fallbackLang } = useLanguage()
+  const { activeSiteId } = useSite()
   const enabledLanguages: Language[] = useMemo(() => {
     const list = languages.filter((l) => l.is_enabled === 1)
     return list.length > 0
@@ -704,6 +714,7 @@ function ContentEditor({
   const [customError, setCustomError] = useState("")
   const categoryOptions = useMemo(() => flattenCategoryTree(categories).filter((c) => c.page_type !== "link"), [categories])
   const [bodyUploading, setBodyUploading] = useState(false)
+  const [pendingGalleryUploads, setPendingGalleryUploads] = useState(0)
   const [pendingAction, setPendingAction] = useState<ContentSaveAction | null>(null)
 
   useEffect(() => {
@@ -743,7 +754,7 @@ function ContentEditor({
       ...current,
       extra_data: {
         ...(current.extra_data || {}),
-        [field]: value,
+        [field]: typeof value === "function" ? value(getBaseFieldValue(field, current)) : value,
       },
     }))
   }
@@ -751,6 +762,12 @@ function ContentEditor({
   const selectedCategory = categoryOptions.find((c) => c.id === form.category_id)
   const currentModelId = selectedCategory?.model_id || form.model_id || 1
   const currentModel = models.find((m) => m.id === currentModelId) || models[0]
+  const coverGalleryField = currentModel?.entry_fields?.find((entry) =>
+    entry.cover_source_sites?.split(",").includes(String(activeSiteId)) && modelFields.some((field) =>
+      field.table_id === currentModel.table_id && field.field_name === entry.field &&
+      field.field_type === "morepic" && field.is_translatable === 0 && field.is_system === 0,
+    ),
+  )?.field
 
   const mustFieldSet = useMemo(() => {
     return new Set(currentModel?.must_fields || ["title"])
@@ -769,7 +786,7 @@ function ContentEditor({
     }
 
     if (currentModel.entry_fields && currentModel.entry_fields.length > 0) {
-      return currentModel.entry_fields.map((ef) => {
+      return currentModel.entry_fields.filter((entry) => !(coverGalleryField && entry.field === "cover_image")).map((ef) => {
         const fieldDef = tableFieldMap.get(ef.field)
         return {
           field_name: ef.field,
@@ -792,7 +809,7 @@ function ContentEditor({
       is_system: f.is_system,
       is_translatable: checkTranslatable(f.field_name, f),
     }))
-  }, [currentModel, modelFields])
+  }, [currentModel, modelFields, coverGalleryField])
 
   const baseFields = useMemo(() => {
     return activeFields.filter((f) => !f.is_translatable)
@@ -802,12 +819,16 @@ function ContentEditor({
     return activeFields.filter((f) => f.is_translatable)
   }, [activeFields])
 
-  function getBaseFieldValue(fieldName: string): any {
-    if (fieldName === "body" || fieldName === "content") return form.content
-    if (fieldName in form && fieldName !== "extra_data") {
-      return (form as any)[fieldName] ?? ""
+  function getBaseFieldValue(fieldName: string, current = form): any {
+    if (fieldName === "body" || fieldName === "content") return current.content
+    if (fieldName in current && fieldName !== "extra_data") {
+      return (current as any)[fieldName] ?? ""
     }
-    return form.extra_data?.[fieldName] ?? ""
+    const value = current.extra_data?.[fieldName]
+    if (value === undefined && fieldName === coverGalleryField && current.cover_image) {
+      return [{ url: current.cover_image, title: "" }]
+    }
+    return value ?? ""
   }
 
   function setBaseFieldValue(fieldName: string, value: any) {
@@ -876,7 +897,7 @@ function ContentEditor({
             ...cur,
             extra_data: {
               ...(cur.extra_data || {}),
-              [fieldName]: value,
+              [fieldName]: typeof value === "function" ? value(cur.extra_data?.[fieldName]) : value,
             },
           },
         }
@@ -901,7 +922,9 @@ function ContentEditor({
           field={field}
           value={val}
           isRequired={isRequired}
+          useAsCover={field.field_name === coverGalleryField}
           onChange={onChange}
+          onUploadingChange={(uploading) => setPendingGalleryUploads((count) => count + (uploading ? 1 : -1))}
         />
       )
     }
@@ -1142,7 +1165,8 @@ function ContentEditor({
   }
 
   const defaultTitle = translations[defaultLang]?.title?.trim() || form.title?.trim() || ""
-  const isSaveDisabled = saving || bodyUploading || !defaultTitle
+  const uploading = bodyUploading || pendingGalleryUploads > 0
+  const isSaveDisabled = saving || uploading || !defaultTitle
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -1154,7 +1178,7 @@ function ContentEditor({
           </Badge>
         </div>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={onCancel} disabled={saving || bodyUploading}>
+          <Button variant="outline" size="sm" onClick={onCancel} disabled={saving || uploading}>
             取消
           </Button>
           <Button variant={canReview ? "outline" : "default"} size="sm" onClick={() => handleSave("save")} disabled={isSaveDisabled}>

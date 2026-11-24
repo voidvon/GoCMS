@@ -540,7 +540,7 @@ export type SystemModel = {
   table_id: number
   table_name?: string
   description: string
-  entry_fields: { field: string; label: string }[]
+  entry_fields: { field: string; label: string; cover_source_sites?: string }[]
   must_fields: string[]
   is_default: number
   sort_order: number

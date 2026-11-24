@@ -331,9 +331,6 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	if payload.ExtraData == nil {
 		payload.ExtraData = make(map[string]any)
 	}
-	extraBytes, _ := json.Marshal(payload.ExtraData)
-	extraDataStr := string(extraBytes)
-
 	requestedLang := strings.TrimSpace(payload.Lang)
 	if requestedLang == "" {
 		requestedLang = strings.TrimSpace(request.URL.Query().Get("lang"))
@@ -343,13 +340,21 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		requestedLang = defaultLang
 	}
 
+	transaction, err := s.database.BeginTx(request.Context(), nil)
+	if err != nil {
+		http.Error(response, "database error", http.StatusInternalServerError)
+		return
+	}
+	defer transaction.Rollback()
+	galleryField, galleryURLs, err := applyCoverGallery(request.Context(), transaction, targetSiteID, modelID, &payload)
+	if err != nil {
+		http.Error(response, "database error", http.StatusInternalServerError)
+		return
+	}
+	extraBytes, _ := json.Marshal(payload.ExtraData)
+	extraDataStr := string(extraBytes)
+
 	if id == 0 {
-		transaction, err := s.database.BeginTx(request.Context(), nil)
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		defer transaction.Rollback()
 		result, err := transaction.ExecContext(request.Context(), `
 			INSERT INTO "gocms_content"
 			("site_id", "category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "seo_title", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
@@ -388,28 +393,8 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 				},
 			})
 		}
-		if err := syncContentMediaRefs(request.Context(), transaction, newID, payload.Content, payload.CoverImage); err != nil {
-			http.Error(response, "media reference error", http.StatusInternalServerError)
-			return
-		}
-		if payload.Commerce != nil {
-			if err := s.commerce.SaveProduct(request.Context(), transaction, targetSiteID, newID, *payload.Commerce); err != nil {
-				contentCommerceError(response, err)
-				return
-			}
-		}
-		if err := transaction.Commit(); err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
+		id = newID
 	} else {
-		transaction, err := s.database.BeginTx(request.Context(), nil)
-		if err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
-		defer transaction.Rollback()
-
 		if payload.Translations != nil && len(payload.Translations) > 0 {
 			_ = s.saveContentTranslations(request.Context(), transaction, id, payload.Translations)
 			if def, ok := payload.Translations[defaultLang]; ok && strings.TrimSpace(def.Title) != "" {
@@ -479,21 +464,20 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 				return
 			}
 		}
-
-		if err := syncContentMediaRefs(request.Context(), transaction, id, payload.Content, payload.CoverImage); err != nil {
-			http.Error(response, "media reference error", http.StatusInternalServerError)
+	}
+	if err := syncContentMediaRefs(request.Context(), transaction, id, payload.Content, payload.CoverImage, galleryField, galleryURLs); err != nil {
+		http.Error(response, "media reference error", http.StatusInternalServerError)
+		return
+	}
+	if payload.Commerce != nil {
+		if err := s.commerce.SaveProduct(request.Context(), transaction, targetSiteID, id, *payload.Commerce); err != nil {
+			contentCommerceError(response, err)
 			return
 		}
-		if payload.Commerce != nil {
-			if err := s.commerce.SaveProduct(request.Context(), transaction, targetSiteID, id, *payload.Commerce); err != nil {
-				contentCommerceError(response, err)
-				return
-			}
-		}
-		if err := transaction.Commit(); err != nil {
-			http.Error(response, "database error", http.StatusInternalServerError)
-			return
-		}
+	}
+	if err := transaction.Commit(); err != nil {
+		http.Error(response, "database error", http.StatusInternalServerError)
+		return
 	}
 	s.contentSaved(response, request)
 }
