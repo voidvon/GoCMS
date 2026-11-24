@@ -146,7 +146,7 @@ const emptyContent: ContentInput = {
   description: "",
   order_id: 0,
   featured: 0,
-  visible: 1,
+  visible: 0,
   model_id: 1,
   extra_data: {},
 }
@@ -164,10 +164,15 @@ function dateTimeValue(value: string) {
   return value ? `${value.replace("T", " ")}:00` : ""
 }
 
-function publicationMessage(result: SaveResponse) {
-  if (!result.publication) return "内容已保存，发布后会更新公开网站。"
+type ContentSaveAction = "save" | "publish"
+
+function publicationMessage(result: SaveResponse, action: ContentSaveAction, visible: number) {
+  if (action === "save") {
+    return visible === 1 ? "内容已保存，公开网站将在下次生成时更新。" : "内容已保存为隐藏。"
+  }
+  if (!result.publication) return "内容已保存，网站尚未更新。"
   return result.publish_started
-    ? "内容已保存，正在生成网站；请在网站发布中查看结果。"
+    ? "内容已保存，正在生成网站。请在网站发布中查看结果。"
     : "内容已保存并加入发布队列，将在当前任务完成后自动生成。"
 }
 
@@ -678,7 +683,7 @@ function ContentEditor({
   categories: CategoryItem[]
   models: SystemModel[]
   modelFields: ModelField[]
-  onSave: (content: ContentInput, publish?: boolean) => void | Promise<void>
+  onSave: (content: ContentInput, action: ContentSaveAction) => void | Promise<void>
   onCancel: () => void
   saving: boolean
 }) {
@@ -692,20 +697,20 @@ function ContentEditor({
 
   const [sale, setSale] = useState(() => commerceDraft(content.commerce))
   const [activeTab, setActiveTab] = useState("base")
-  const [form, setForm] = useState({ ...content, visible: canReview ? content.visible : 0 })
+  const [form, setForm] = useState(content)
   const [translations, setTranslations] = useState<Record<string, ContentTranslationItem>>(() => {
     return buildInitialContentTranslations(content, defaultLang, enabledLanguages)
   })
   const [customError, setCustomError] = useState("")
   const categoryOptions = useMemo(() => flattenCategoryTree(categories).filter((c) => c.page_type !== "link"), [categories])
   const [bodyUploading, setBodyUploading] = useState(false)
-  const [pendingAction, setPendingAction] = useState<"save" | "publish" | null>(null)
+  const [pendingAction, setPendingAction] = useState<ContentSaveAction | null>(null)
 
   useEffect(() => {
-    setForm({ ...content, visible: canReview ? content.visible : 0 })
+    setForm(content)
     setSale(commerceDraft(content.commerce))
     setTranslations(buildInitialContentTranslations(content, defaultLang, enabledLanguages))
-  }, [content, defaultLang, enabledLanguages, canReview])
+  }, [content, defaultLang, enabledLanguages])
 
   useEffect(() => {
     setTranslations((prev) => {
@@ -1069,7 +1074,7 @@ function ContentEditor({
     )
   }
 
-  async function handleSave(publish = false) {
+  async function handleSave(action: ContentSaveAction) {
     for (const f of baseFields) {
       if (mustFieldSet.has(f.field_name)) {
         const val = getBaseFieldValue(f.field_name)
@@ -1114,6 +1119,7 @@ function ContentEditor({
     catch (error) { showError(error); setActiveTab("base"); return }
     const payload: ContentInput = {
       ...form,
+      visible: action === "publish" ? 1 : content.visible,
       commerce: salePayload,
       title: defaultTitle,
       summary: defaultTrans?.summary ?? form.summary,
@@ -1127,9 +1133,9 @@ function ContentEditor({
       },
       translations,
     }
-    setPendingAction(publish ? "publish" : "save")
+    setPendingAction(action)
     try {
-      await onSave(payload, publish)
+      await onSave(payload, action)
     } finally {
       setPendingAction(null)
     }
@@ -1151,14 +1157,16 @@ function ContentEditor({
           <Button variant="outline" size="sm" onClick={onCancel} disabled={saving || bodyUploading}>
             取消
           </Button>
-          <Button size="sm" onClick={() => handleSave(false)} disabled={isSaveDisabled}>
+          <Button variant={canReview ? "outline" : "default"} size="sm" onClick={() => handleSave("save")} disabled={isSaveDisabled}>
             {pendingAction === "save" ? <LoaderCircle className="animate-spin" /> : null}
             仅保存
           </Button>
-          <Button size="sm" onClick={() => handleSave(true)} disabled={isSaveDisabled}>
-            {pendingAction === "publish" ? <LoaderCircle className="animate-spin" /> : null}
-            保存并发布
-          </Button>
+          {canReview ? (
+            <Button size="sm" onClick={() => handleSave("publish")} disabled={isSaveDisabled}>
+              {pendingAction === "publish" ? <LoaderCircle className="animate-spin" /> : null}
+              保存并发布
+            </Button>
+          ) : null}
         </div>
       </DialogHeader>
 
@@ -1270,17 +1278,11 @@ function ContentEditor({
                     />
                     <p className="text-xs text-muted-foreground">按填写的路径生成文件，支持多级目录。留空时使用内容编号和栏目规则。</p>
                   </div>
-                  <div className="flex items-center justify-between rounded-md border p-2.5">
-                    <div>
-                      <p className="text-sm font-medium">公开展示</p>
-                      <p className="text-xs text-muted-foreground">{canReview ? "审核确认后公开，生成页面及链接" : "保存为隐藏内容，由审核人员确认后公开"}</p>
-                    </div>
-                    <Switch
-                      checked={form.visible === 1}
-                      disabled={!canReview}
-                      onCheckedChange={(checked) => update("visible", checked ? 1 : 0)}
-                      aria-label="公开展示"
-                    />
+                  <div className="rounded-md border p-2.5">
+                    <p className="text-sm font-medium">公开状态</p>
+                    <p className="text-xs text-muted-foreground">
+                      {content.visible === 1 ? "公开" : canReview ? "隐藏" : "隐藏，等待审核人员发布"}
+                    </p>
                   </div>
                   <div className="flex items-center justify-between rounded-md border p-2.5">
                     <div>
@@ -1486,13 +1488,14 @@ export function ContentPage({ user }: { user: AdminUser }) {
     setEditorOpen(open)
   }
 
-  async function save(payload: ContentInput, publish = false) {
+  async function save(payload: ContentInput, action: ContentSaveAction) {
     setSaving(true)
     try {
+      const publish = action === "publish"
       const result = editing
         ? await updateContent(editing.id, payload, publish, activeLang)
         : await createContent(payload, publish, activeLang)
-      showSuccess(publicationMessage(result))
+      showSuccess(publicationMessage(result, action, payload.visible))
       closeEditor(false)
       setLoading(true)
       const targetPage = editing ? page : 1

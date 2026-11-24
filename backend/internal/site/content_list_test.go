@@ -133,9 +133,10 @@ func TestAdminContentListTitlesMatchDetail(t *testing.T) {
 
 func TestAdminContentListSearchAndPagination(t *testing.T) {
 	server, database, token := newCategoryTestServer(t)
-	for id := 1; id <= 3; id++ {
-		insertContentTestRow(t, database, fmt.Sprintf("Base %d", id), 0, int64(id))
-	}
+	category := createContentTestCategory(t, server, database, token, "测试栏目", 0)
+	insertContentTestRow(t, database, "Base 1", category, 1)
+	insertContentTestRow(t, database, "Base 2", 0, 2)
+	insertContentTestRow(t, database, "Base 3", category, 3)
 	if _, err := database.Exec(`
 		UPDATE gocms_content SET code = 'CODE-ONLY' WHERE id = 1;
 		UPDATE gocms_content SET body = 'base-body-marker' WHERE id = 2;
@@ -148,23 +149,30 @@ func TestAdminContentListSearchAndPagination(t *testing.T) {
 	}
 	cases := []struct {
 		name, query string
+		categoryID  int64
 		page, size  int
 		wantTotal   int64
 		wantIDs     []int64
 	}{
-		{"first ranked page", "Needle", 1, 2, 3, []int64{2, 1}},
-		{"second ranked page", "Needle", 2, 2, 3, []int64{3}},
-		{"base body", "base-body-marker", 1, 20, 1, []int64{2}},
-		{"translation body", "translation-body-marker", 1, 20, 1, []int64{3}},
-		{"translation summary", "summary-marker", 1, 20, 1, []int64{2}},
-		{"code", "CODE-ONLY", 1, 20, 1, []int64{1}},
-		{"other language excluded", "foreign-title-marker", 1, 20, 0, []int64{}},
-		{"empty query", "", 1, 2, 3, []int64{1, 2}},
-		{"past last page", "", 3, 2, 3, []int64{}},
+		{"first search page by descending ID", "Needle", 0, 1, 2, 3, []int64{3, 2}},
+		{"second search page by descending ID", "Needle", 0, 2, 2, 3, []int64{1}},
+		{"base body", "base-body-marker", 0, 1, 20, 1, []int64{2}},
+		{"translation body", "translation-body-marker", 0, 1, 20, 1, []int64{3}},
+		{"translation summary", "summary-marker", 0, 1, 20, 1, []int64{2}},
+		{"code", "CODE-ONLY", 0, 1, 20, 1, []int64{1}},
+		{"other language excluded", "foreign-title-marker", 0, 1, 20, 0, []int64{}},
+		{"first page by descending ID", "", 0, 1, 2, 3, []int64{3, 2}},
+		{"second page by descending ID", "", 0, 2, 2, 3, []int64{1}},
+		{"category filter by descending ID", "", category, 1, 20, 2, []int64{3, 1}},
+		{"category filter with search by descending ID", "Needle", category, 1, 20, 2, []int64{3, 1}},
+		{"past last page", "", 0, 3, 2, 3, []int64{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path := fmt.Sprintf("/api/admin/content?lang=en&q=%s&page=%d&page_size=%d", url.QueryEscape(tc.query), tc.page, tc.size)
+			if tc.categoryID != 0 {
+				path += fmt.Sprintf("&category_id=%d&include_children=1", tc.categoryID)
+			}
 			response := categoryRequest(t, server, token, http.MethodGet, path, "")
 			if response.Code != http.StatusOK {
 				t.Fatalf("list returned %d: %s", response.Code, response.Body.String())

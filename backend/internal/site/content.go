@@ -519,7 +519,7 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 		lang = defaultLang
 	}
 
-	rows, total, err := s.queryContentRows(ctx, siteID, query, categoryID, includeChildren, lang, page, pageSize, visibleOnly, `
+	rows, total, err := s.queryContentRows(ctx, siteID, query, categoryID, includeChildren, lang, page, pageSize, visibleOnly, true, `
 		"id", COALESCE("route_key", ''), COALESCE("category_id", 0), COALESCE("title", ''),
 		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
 		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("seo_title", ''), COALESCE("description", ''),
@@ -557,10 +557,9 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 	return ContentPage{Query: query, Page: page, PageSize: pageSize, Total: total, Items: items}, nil
 }
 
-// queryContentRows shares filtering, permissions, search ranking and pagination
-// between the compact admin list and full public content queries. Columns are
-// supplied only by these internal callers, never by request parameters.
-func (s *Server) queryContentRows(ctx context.Context, siteID int64, query string, categoryID int64, includeChildren bool, lang string, page, pageSize int, visibleOnly bool, columns string) (*sql.Rows, int64, error) {
+// queryContentRows shares filtering, permissions and pagination between admin
+// and public queries. Public ordering uses sort_order and ranks keyword matches.
+func (s *Server) queryContentRows(ctx context.Context, siteID int64, query string, categoryID int64, includeChildren bool, lang string, page, pageSize int, visibleOnly, publicOrder bool, columns string) (*sql.Rows, int64, error) {
 	where := "1=1" + contentScopeSQL(ctx)
 	var args []any
 	if siteID > 0 {
@@ -606,10 +605,13 @@ func (s *Server) queryContentRows(ctx context.Context, siteID int64, query strin
 	// 搜索时按相关性排序，译文（当前语言）与基准字段同等参与，因为页面展示的就是译文。
 	// 译文列用子查询重命名，避免与基准表的同名列冲突。
 	from := `"gocms_content"`
-	orderBy := `"sort_order" ASC, "id" DESC`
+	orderBy := `"id" DESC`
+	if publicOrder {
+		orderBy = `"sort_order" ASC, ` + orderBy
+	}
 	joinArgs := []any{}
 	orderArgs := []any{}
-	if query != "" {
+	if publicOrder && query != "" {
 		title := `COALESCE(NULLIF(tr."t_title", ''), "gocms_content"."title")`
 		summary := `COALESCE(NULLIF(tr."t_summary", ''), "gocms_content"."summary")`
 		from += ` LEFT JOIN (SELECT "content_id" AS "cid", "title" AS "t_title", "summary" AS "t_summary"` +
@@ -622,7 +624,7 @@ func (s *Server) queryContentRows(ctx context.Context, siteID int64, query strin
 			` WHEN LOWER("code") LIKE LOWER(?) THEN 30` +
 			` WHEN LOWER(` + summary + `) LIKE LOWER(?) THEN 20` +
 			` ELSE 10 END DESC,` +
-			` INSTR(LOWER(` + title + `), LOWER(?)) ASC, "sort_order" ASC, "id" DESC`
+			` INSTR(LOWER(` + title + `), LOWER(?)) ASC, ` + orderBy
 		pattern := "%" + query + "%"
 		joinArgs = append(joinArgs, lang)
 		orderArgs = append(orderArgs, query, query+"%", pattern, pattern, pattern, query)
