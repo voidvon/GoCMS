@@ -202,15 +202,8 @@ func (s *Server) migrateLocalImage(ctx context.Context, client *s3.Client, bucke
 	if err != nil && !hasS3Status(err, http.StatusPreconditionFailed) {
 		return errors.New("上传 R2 失败")
 	}
-	object, err := client.GetObject(ctx, &s3.GetObjectInput{Bucket: objectBucket, Key: objectKey})
-	if err != nil {
-		return errors.New("读取 R2 副本失败")
-	}
-	hasher := sha256.New()
-	size, copyErr := io.Copy(hasher, io.LimitReader(object.Body, int64(len(data))+1))
-	closeErr := object.Body.Close()
-	if copyErr != nil || closeErr != nil || size != int64(len(data)) || !bytes.Equal(hasher.Sum(nil), digest[:]) {
-		return errors.New("R2 副本校验失败")
+	if err := verifyR2Image(ctx, client, bucket, key, int64(len(data)), digest[:]); err != nil {
+		return err
 	}
 	result, err := s.database.ExecContext(ctx, `UPDATE gocms_media SET storage_provider='r2', shared_storage=1,
 		storage_path=?, sha256=?, size_bytes=?, mime_type=?
@@ -221,6 +214,20 @@ func (s *Server) migrateLocalImage(ctx context.Context, client *s3.Client, bucke
 	}
 	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
 		return errors.New("附件已变更，请刷新后重试")
+	}
+	return nil
+}
+
+func verifyR2Image(ctx context.Context, client *s3.Client, bucket, key string, size int64, digest []byte) error {
+	object, err := client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+	if err != nil {
+		return errors.New("读取 R2 副本失败")
+	}
+	hasher := sha256.New()
+	readSize, copyErr := io.Copy(hasher, io.LimitReader(object.Body, size+1))
+	closeErr := object.Body.Close()
+	if copyErr != nil || closeErr != nil || readSize != size || !bytes.Equal(hasher.Sum(nil), digest) {
+		return errors.New("R2 副本校验失败")
 	}
 	return nil
 }
@@ -248,22 +255,22 @@ func removeLocalUpload(root, rel string) error {
 	return err
 }
 
-// Explicit asset URLs keep their existing public scope across site domains.
-func (s *Server) serveMigratedImage(w http.ResponseWriter, r *http.Request) bool {
+// Match the stored canonical path even when the request used an uploads alias.
+func (s *Server) serveMigratedImage(w http.ResponseWriter, r *http.Request, publicPath string) bool {
 	if s.database == nil {
 		return false
 	}
-	rel, ok := strings.CutPrefix(r.URL.Path, "/assets/")
+	rel, ok := strings.CutPrefix(publicPath, "/assets/")
 	if !ok {
 		return false
 	}
 	id, _, _ := strings.Cut(rel, "/")
 	siteID, err := strconv.ParseInt(id, 10, 64)
-	if err != nil || siteID < 1 || localUploadImagePath(r.URL.Path, siteID) == "" {
+	if err != nil || siteID < 1 || localUploadImagePath(publicPath, siteID) == "" {
 		return false
 	}
 	asset, err := scanMedia(s.database.QueryRowContext(r.Context(), mediaColumns+
-		` WHERE public_path=? AND kind='image' AND storage_provider='r2' AND shared_storage=1`, r.URL.Path))
+		` WHERE public_path=? AND kind='image' AND storage_provider='r2' AND shared_storage=1`, publicPath))
 	if err != nil {
 		return false
 	}

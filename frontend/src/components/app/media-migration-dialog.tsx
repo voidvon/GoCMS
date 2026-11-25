@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from "react"
 import { LoaderCircle } from "lucide-react"
 
 import { showError, showSuccess } from "@/components/app/admin-notifications"
+import { ConfirmDialog } from "@/components/app/app-ui"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { getMediaMigration, migrateMediaBatch, type MediaMigrationFailure, type MediaMigrationPreview, type Site } from "@/lib/api"
+import { cleanMediaBatch, getMediaCleanup, getMediaMigration, migrateMediaBatch, type MediaMigrationFailure, type MediaMigrationPreview, type Site } from "@/lib/api"
 
-export function MediaMigrationDialog({ site, onClose, onChanged }: {
+export function MediaMigrationDialog({ site, cleanup, onClose, onChanged }: {
   site: Site
+  cleanup: boolean
   onClose: () => void
   onChanged: () => void
 }) {
@@ -17,11 +19,13 @@ export function MediaMigrationDialog({ site, onClose, onChanged }: {
   const [running, setRunning] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [reload, setReload] = useState(0)
-  const [migrated, setMigrated] = useState(0)
+  const [completed, setCompleted] = useState(0)
+  const [confirmCleanup, setConfirmCleanup] = useState<boolean | null>(null)
   const [failureCount, setFailureCount] = useState(0)
   const [failures, setFailures] = useState<MediaMigrationFailure[]>([])
   const stop = useRef(false)
   const mounted = useRef(false)
+  const verb = cleanup ? "清理" : "迁移"
 
   useEffect(() => {
     mounted.current = true
@@ -33,30 +37,31 @@ export function MediaMigrationDialog({ site, onClose, onChanged }: {
 
   useEffect(() => {
     let active = true
-    getMediaMigration(site.id).then((result) => {
+    const getPreview = cleanup ? getMediaCleanup : getMediaMigration
+    getPreview(site.id).then((result) => {
       if (active) setPreview(result)
     }).catch((error) => {
       if (active) {
         setPreview(null)
-        showError(error, "无法统计待迁移图片")
+        showError(error, `无法统计待${verb}图片`)
       }
     }).finally(() => {
       if (active) setLoading(false)
     })
     return () => { active = false }
-  }, [site.id, reload])
+  }, [site.id, reload, cleanup, verb])
 
   function reloadPreview() {
     setLoading(true)
     setReload((value) => value + 1)
   }
 
-  async function migrate(all: boolean) {
+  async function runBatch(all: boolean) {
     if (!preview?.ready || preview.count === 0 || running) return
     stop.current = false
     setRunning(true)
     setStopping(false)
-    setMigrated(0)
+    setCompleted(0)
     setFailureCount(0)
     setFailures([])
     let afterId = 0
@@ -65,23 +70,24 @@ export function MediaMigrationDialog({ site, onClose, onChanged }: {
     try {
       let more: boolean
       do {
-        const result = await migrateMediaBatch(site.id, afterId, preview.through_id)
-        succeeded += result.migrated
+        const execute = cleanup ? cleanMediaBatch : migrateMediaBatch
+        const result = await execute(site.id, afterId, preview.through_id)
+        succeeded += "removed" in result ? result.removed : result.migrated
         failed += result.failures.length
         afterId = result.after_id
         more = all && result.more
         if (!mounted.current) return
-        setMigrated(succeeded)
+        setCompleted(succeeded)
         setFailureCount(failed)
         setFailures((previous) => [...previous, ...result.failures].slice(0, 20))
       } while (more && !stop.current)
       if (failed > 0) {
-        showError(`已迁移 ${succeeded} 张，${failed} 张失败。修复后可重试。`)
+        showError(`已${verb} ${succeeded} 张，${failed} 张失败。修复后可重试。`)
       } else {
-        showSuccess(stop.current ? `迁移已暂停，已迁移 ${succeeded} 张` : `已迁移 ${succeeded} 张图片`)
+        showSuccess(stop.current ? `${verb}已暂停，已${verb} ${succeeded} 张` : `已${verb} ${succeeded} 张图片`)
       }
     } catch (error) {
-      if (mounted.current) showError(error, "迁移中断，刷新统计后可继续")
+      if (mounted.current) showError(error, `${verb}中断，刷新统计后可继续`)
     } finally {
       if (mounted.current) {
         setRunning(false)
@@ -92,13 +98,20 @@ export function MediaMigrationDialog({ site, onClose, onChanged }: {
     }
   }
 
+  function start(all: boolean) {
+    if (cleanup) setConfirmCleanup(all)
+    else void runBatch(all)
+  }
+
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !running) onClose() }}>
       <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden sm:max-w-lg" showCloseButton={!running}>
         <DialogHeader>
-          <DialogTitle>迁移图片到 R2</DialogTitle>
+          <DialogTitle>{cleanup ? "清理本地图片副本" : "迁移图片到 R2"}</DialogTitle>
           <DialogDescription>
-            {site.name} 的本地上传图片。每张图片通过校验后切换存储，保留原地址和本地副本。
+            {site.name} 的本地上传图片。{cleanup
+              ? "逐张校验本地文件和 R2 对象，通过后移除本地副本。"
+              : "每张图片通过校验后切换存储，保留原地址和本地副本。"}
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="min-h-0 flex-1" contentClassName="space-y-3 text-sm">
@@ -106,14 +119,14 @@ export function MediaMigrationDialog({ site, onClose, onChanged }: {
             <p role="status" className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" />统计图片中…</p>
           ) : preview ? (
             <>
-              <p>待迁移 {preview.count} 张，约 {(preview.bytes / 1024 / 1024).toFixed(1)} MiB。</p>
+              <p>待{verb} {preview.count} 张，约 {(preview.bytes / 1024 / 1024).toFixed(1)} MiB。</p>
               {!preview.ready && <p className="text-muted-foreground">请先在「多站点 → 文件存储」配置 R2。</p>}
             </>
           ) : (
             <Button variant="outline" size="sm" onClick={reloadPreview}>重新统计</Button>
           )}
-          {(running || migrated > 0 || failureCount > 0) && (
-            <p role="status">已迁移 {migrated} 张，失败 {failureCount} 张。{stopping && "当前批次结束后暂停。"}</p>
+          {(running || completed > 0 || failureCount > 0) && (
+            <p role="status">已{verb} {completed} 张，失败 {failureCount} 张。{stopping && "当前批次结束后暂停。"}</p>
           )}
           {failures.length > 0 && (
             <ul className="space-y-1 text-muted-foreground">
@@ -130,11 +143,23 @@ export function MediaMigrationDialog({ site, onClose, onChanged }: {
             }}>暂停</Button>
           ) : (
             <>
-              <Button variant="outline" disabled={loading || !preview?.ready || !preview.count} onClick={() => void migrate(false)}>试迁移一批</Button>
-              <Button disabled={loading || !preview?.ready || !preview.count} onClick={() => void migrate(true)}>迁移剩余图片</Button>
+              <Button variant="outline" disabled={loading || !preview?.ready || !preview.count} onClick={() => start(false)}>{cleanup ? "清理一批" : "试迁移一批"}</Button>
+              <Button disabled={loading || !preview?.ready || !preview.count} onClick={() => start(true)}>{cleanup ? "清理剩余副本" : "迁移剩余图片"}</Button>
             </>
           )}
         </DialogFooter>
+        <ConfirmDialog
+          open={confirmCleanup !== null}
+          onOpenChange={(open) => { if (!open) setConfirmCleanup(null) }}
+          title="清理本地图片副本"
+          description={`将移除 ${site.name} 的${confirmCleanup ? "剩余" : "一批"}本地副本。R2 对象和附件记录会保留。`}
+          confirmLabel="确认清理"
+          onConfirm={() => {
+            const all = confirmCleanup === true
+            setConfirmCleanup(null)
+            void runBatch(all)
+          }}
+        />
       </DialogContent>
     </Dialog>
   )

@@ -333,6 +333,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminContent(response, request)
 	case "/api/admin/media":
 		s.adminMedia(response, request)
+	case mediaCleanupRoute:
+		s.adminMediaCleanup(response, request)
 	case mediaMigrationRoute:
 		s.adminMediaMigration(response, request)
 	case "/api/admin/media-storage", "/api/admin/media-storage/test":

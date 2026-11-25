@@ -147,12 +147,23 @@ func (s *Server) serveResource(w http.ResponseWriter, r *http.Request) bool {
 		methodNotAllowed(w)
 		return true
 	}
-	if s.serveMigratedImage(w, r) {
+	requestPath := strings.ToLower(r.URL.Path)
+	if strings.HasPrefix(requestPath, "/assets/") && s.serveMigratedImage(w, r, "/assets/"+rel) {
 		return true
 	}
-	for _, root := range roots {
+	for i, root := range roots {
 		if root == "" {
 			continue
+		}
+		if strings.HasPrefix(requestPath, "/uploads/") {
+			uploadSiteID := siteID
+			if i > 0 {
+				uploadSiteID = 1
+			}
+			canonical := "/assets/" + strconv.FormatInt(uploadSiteID, 10) + "/uploads/" + rel
+			if s.serveMigratedImage(w, r, canonical) {
+				return true
+			}
 		}
 		f, err := os.OpenInRoot(root, rel)
 		if err != nil {

@@ -143,7 +143,7 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
 
 export function MediaPage({ canMigrate }: { canMigrate: boolean }) {
   const { activeSite } = useSite()
-  const [migrationSite, setMigrationSite] = useState<Site | null>(null)
+  const [storageOperation, setStorageOperation] = useState<{ site: Site; cleanup: boolean } | null>(null)
   const [kind, setKind] = useState<MediaKind>("image")
   const [language, setLanguage] = useState("")
   const [assets, setAssets] = useState<MediaAsset[]>([])
@@ -241,9 +241,14 @@ export function MediaPage({ canMigrate }: { canMigrate: boolean }) {
         ) : null}
         <Button size="sm" disabled={uploading || (kind === "pdf" && !language.trim())} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}{uploading ? "上传中…" : kind === "pdf" ? "上传 PDF" : "上传图片"}</Button>
         {kind === "image" && canMigrate && activeSite && (
-          <Button size="sm" variant="outline" disabled={uploading} onClick={() => setMigrationSite(activeSite)}>
-            <CloudUpload />迁移到 R2
-          </Button>
+          <>
+            <Button size="sm" variant="outline" disabled={uploading} onClick={() => setStorageOperation({ site: activeSite, cleanup: false })}>
+              <CloudUpload />迁移到 R2
+            </Button>
+            <Button size="sm" variant="outline" disabled={uploading} onClick={() => setStorageOperation({ site: activeSite, cleanup: true })}>
+              <Trash2 />清理本地副本
+            </Button>
+          </>
         )}
         <Button size="sm" variant="outline" disabled={loading || uploading} onClick={() => setRevision((value) => value + 1)}><RefreshCw className={loading ? "animate-spin" : ""} />刷新</Button>
         <input ref={fileInput} type="file" accept={kind === "pdf" ? ".pdf,application/pdf" : mediaImageAccept} className="hidden" aria-label="选择上传附件" onChange={(event) => {
@@ -258,10 +263,11 @@ export function MediaPage({ canMigrate }: { canMigrate: boolean }) {
           <Button size="sm" variant="outline" type="submit">搜索</Button>
         </form>
       </div>
-      {migrationSite && (
+      {storageOperation && (
         <MediaMigrationDialog
-          site={migrationSite}
-          onClose={() => setMigrationSite(null)}
+          site={storageOperation.site}
+          cleanup={storageOperation.cleanup}
+          onClose={() => setStorageOperation(null)}
           onChanged={() => setRevision((value) => value + 1)}
         />
       )}

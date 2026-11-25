@@ -160,6 +160,88 @@ func TestLocalImageMigrationPreservesURLAndVerifiesR2(t *testing.T) {
 			t.Fatalf("incorrect migration redirect for %s: %v", method, redirect.Header())
 		}
 	}
+	cleanupURL := mediaCleanupRoute + "?site_id=2"
+	readCleanupPreview := func() imageMigrationPreview {
+		t.Helper()
+		response := contentJSONRequest(t, server, token, http.MethodGet, cleanupURL, nil)
+		check(response, http.StatusOK)
+		var result imageMigrationPreview
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	cleanupPreview := readCleanupPreview()
+	if !cleanupPreview.Ready || cleanupPreview.Count != 1 || cleanupPreview.Bytes != original.SizeBytes ||
+		cleanupPreview.ThroughID != original.ID {
+		t.Fatalf("unexpected cleanup preview: %+v", cleanupPreview)
+	}
+	cleanup := func() imageCleanupBatch {
+		t.Helper()
+		response := contentJSONRequest(t, server, token, http.MethodPost, cleanupURL, map[string]any{"through_id": original.ID})
+		check(response, http.StatusOK)
+		var result imageCleanupBatch
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	corruptRead = true
+	if result := cleanup(); result.Removed != 0 || len(result.Failures) != 1 || result.Failures[0].ID != original.ID {
+		t.Fatalf("corrupt R2 response did not preserve the local image: %+v", result)
+	}
+	corruptRead = false
+	originalBytes, err := os.ReadFile(diskPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modified := bytes.Clone(originalBytes)
+	modified[0] ^= 1
+	if err := os.WriteFile(diskPath, modified, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if result := cleanup(); result.Removed != 0 || len(result.Failures) != 1 {
+		t.Fatalf("changed local file was not held: %+v", result)
+	}
+	if err := os.WriteFile(diskPath, originalBytes, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if result := cleanup(); result.Removed != 1 || result.Bytes != original.SizeBytes || len(result.Failures) != 0 ||
+		result.More || result.AfterID != original.ID {
+		t.Fatalf("cleanup did not remove the verified local copy: %+v", result)
+	}
+	if _, err := os.Stat(diskPath); !os.IsNotExist(err) || len(objects) != 1 {
+		t.Fatalf("unexpected object state after cleanup: %v, cloud=%d", err, len(objects))
+	}
+	if result := cleanup(); result.Removed != 0 || len(result.Failures) != 0 {
+		t.Fatalf("cleanup changed an already removed file: %+v", result)
+	}
+	if result := readCleanupPreview(); result.Count != 0 || result.Bytes != 0 {
+		t.Fatalf("removed local files still appear in preview: %+v", result)
+	}
+	storedAfterCleanup, err := server.readMedia(t.Context(), original.ID)
+	if err != nil || storedAfterCleanup != stored {
+		t.Fatalf("cleanup altered the attachment record: %+v %v", storedAfterCleanup, err)
+	}
+	if otherPath, err := server.mediaDiskPath(other.URL); err != nil {
+		t.Fatal(err)
+	} else if _, err := os.Stat(otherPath); err != nil {
+		t.Fatalf("cleanup touched another site's file: %v", err)
+	}
+	read(http.MethodGet, http.StatusTemporaryRedirect)
+	read(http.MethodHead, http.StatusTemporaryRedirect)
+	alias := "http://second.example.test" + strings.TrimPrefix(original.URL, "/assets/2")
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, httptest.NewRequest(method, alias, nil))
+		check(response, http.StatusTemporaryRedirect)
+		if response.Header().Get("Location") != "https://downloads.example.test/"+stored.storagePath {
+			t.Fatalf("unexpected upload alias redirect after cleanup: %v", response.Header())
+		}
+	}
+
 	check(contentJSONRequest(t, server, token, http.MethodDelete, fmt.Sprintf("/api/admin/media/%d?site_id=2", original.ID), nil), http.StatusOK)
 	read(http.MethodGet, http.StatusNotFound)
 	if _, err := os.Stat(diskPath); !os.IsNotExist(err) || len(objects) != 0 {

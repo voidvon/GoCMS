@@ -418,6 +418,17 @@ export const migrateMediaBatch = (siteId: number, afterId: number, throughId: nu
     body: JSON.stringify({ after_id: afterId, through_id: throughId }),
   })
 
+export type MediaCleanupBatch = Omit<MediaMigrationBatch, "migrated"> & { removed: number; bytes: number }
+
+export const getMediaCleanup = (siteId: number) =>
+  request<MediaMigrationPreview>(`/api/admin/media-storage/cleanup?site_id=${siteId}`)
+
+export const cleanMediaBatch = (siteId: number, afterId: number, throughId: number) =>
+  request<MediaCleanupBatch>(`/api/admin/media-storage/cleanup?site_id=${siteId}`, {
+    method: "POST",
+    body: JSON.stringify({ after_id: afterId, through_id: throughId }),
+  })
+
 export type MediaKind = "image" | "pdf"
 
 export type MediaAsset = {
