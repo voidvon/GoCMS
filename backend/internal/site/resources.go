@@ -147,6 +147,9 @@ func (s *Server) serveResource(w http.ResponseWriter, r *http.Request) bool {
 		methodNotAllowed(w)
 		return true
 	}
+	if s.serveMigratedImage(w, r) {
+		return true
+	}
 	for _, root := range roots {
 		if root == "" {
 			continue

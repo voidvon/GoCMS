@@ -2,9 +2,9 @@ import { showError, showSuccess } from "@/components/app/admin-notifications"
 import { getErrorMessage } from "@/lib/errors"
 import { mediaImageAccept } from "@/lib/media"
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { Copy, FileText, ImageIcon, LoaderCircle, RefreshCw, Trash2, Upload } from "lucide-react"
+import { Copy, FileText, ImageIcon, LoaderCircle, RefreshCw, Trash2, Upload, CloudUpload } from "lucide-react"
 
-import { deleteMedia, getMedia, getMediaItem, uploadMedia, uploadPDF, type MediaAsset, type MediaDetail, type MediaKind } from "@/lib/api"
+import { deleteMedia, getMedia, getMediaItem, uploadMedia, uploadPDF, type MediaAsset, type MediaDetail, type MediaKind, type Site } from "@/lib/api"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import { TimeText } from "@/components/app/time-text"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useDialogState } from "@/lib/use-dialog-state"
 import { useSite } from "@/lib/site-context"
+import { MediaMigrationDialog } from "@/components/app/media-migration-dialog"
 
 const pageSize = 20
 
@@ -140,7 +141,9 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
   )
 }
 
-export function MediaPage() {
+export function MediaPage({ canMigrate }: { canMigrate: boolean }) {
+  const { activeSite } = useSite()
+  const [migrationSite, setMigrationSite] = useState<Site | null>(null)
   const [kind, setKind] = useState<MediaKind>("image")
   const [language, setLanguage] = useState("")
   const [assets, setAssets] = useState<MediaAsset[]>([])
@@ -237,6 +240,11 @@ export function MediaPage() {
           </div>
         ) : null}
         <Button size="sm" disabled={uploading || (kind === "pdf" && !language.trim())} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}{uploading ? "上传中…" : kind === "pdf" ? "上传 PDF" : "上传图片"}</Button>
+        {kind === "image" && canMigrate && activeSite && (
+          <Button size="sm" variant="outline" disabled={uploading} onClick={() => setMigrationSite(activeSite)}>
+            <CloudUpload />迁移到 R2
+          </Button>
+        )}
         <Button size="sm" variant="outline" disabled={loading || uploading} onClick={() => setRevision((value) => value + 1)}><RefreshCw className={loading ? "animate-spin" : ""} />刷新</Button>
         <input ref={fileInput} type="file" accept={kind === "pdf" ? ".pdf,application/pdf" : mediaImageAccept} className="hidden" aria-label="选择上传附件" onChange={(event) => {
           const file = event.target.files?.[0]
@@ -250,6 +258,13 @@ export function MediaPage() {
           <Button size="sm" variant="outline" type="submit">搜索</Button>
         </form>
       </div>
+      {migrationSite && (
+        <MediaMigrationDialog
+          site={migrationSite}
+          onClose={() => setMigrationSite(null)}
+          onChanged={() => setRevision((value) => value + 1)}
+        />
+      )}
       {error ? <InlineAlert>{error}<Button className="ml-2" variant="outline" size="sm" onClick={() => setRevision((value) => value + 1)}>重新加载</Button></InlineAlert> : null}
       <PaginatedTable
         className="lg:overflow-hidden"

@@ -466,7 +466,7 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
     case "users":
       return <UsersPage currentUserID={user.id} />
     case "media":
-      return <MediaPage />
+      return <MediaPage canMigrate={user.is_super} />
     case "publish":
       return <PublishPage />
     case "theme":

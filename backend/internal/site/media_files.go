@@ -264,20 +264,24 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, diskPath)
 		return
 	}
+	if !s.redirectR2Media(w, r, asset) {
+		http.Error(w, "附件暂时不可用", http.StatusServiceUnavailable)
+	}
+}
+
+func (s *Server) redirectR2Media(w http.ResponseWriter, r *http.Request, asset MediaAsset) bool {
 	config, err := s.loadAttachmentStorage(r.Context(), asset)
 	if err != nil || asset.Storage != "r2" || config.Endpoint == "" {
-		http.Error(w, "附件暂时不可用", http.StatusServiceUnavailable)
-		return
+		return false
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
 	if config.PublicURL != "" {
 		http.Redirect(w, r, config.PublicURL+"/"+asset.storagePath, http.StatusTemporaryRedirect)
-		return
+		return true
 	}
 	client, err := s.r2Client(config)
 	if err != nil {
-		http.Error(w, "附件暂时不可用", http.StatusServiceUnavailable)
-		return
+		return false
 	}
 	presign := s3.NewPresignClient(client, func(o *s3.PresignOptions) { o.Expires = 5 * time.Minute })
 	bucket, key := aws.String(config.Bucket), aws.String(asset.storagePath)
@@ -294,16 +298,14 @@ func (s *Server) serveMediaFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if target == "" {
-		http.Error(w, "附件暂时不可用", http.StatusServiceUnavailable)
-		return
+		return false
 	}
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	http.Redirect(w, r, target, http.StatusTemporaryRedirect)
+	return true
 }
 
 func (s *Server) deleteStoredMedia(w http.ResponseWriter, r *http.Request, asset MediaAsset) {
-	s.mediaStorageMu.Lock()
-	defer s.mediaStorageMu.Unlock()
 	ctx := r.Context()
 	// Check references while marking the record, before attempting the object
 	// deletion. An uncertain remote response leaves a retryable record.
@@ -334,6 +336,15 @@ func (s *Server) deleteStoredMedia(w http.ResponseWriter, r *http.Request, asset
 			break
 		}
 		_, err = client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(config.Bucket), Key: aws.String(asset.storagePath)})
+		if err == nil && asset.Kind == "image" {
+			siteID := asset.SiteID
+			if siteID == 0 {
+				siteID = 1
+			}
+			if rel := localUploadImagePath(asset.URL, siteID); rel != "" {
+				err = removeLocalUpload(s.assetsRoot, rel)
+			}
+		}
 	case "local":
 		diskPath, pathErr := s.mediaDiskPath("/assets/" + asset.storagePath)
 		err = pathErr

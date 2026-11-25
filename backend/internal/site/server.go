@@ -333,6 +333,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminContent(response, request)
 	case "/api/admin/media":
 		s.adminMedia(response, request)
+	case mediaMigrationRoute:
+		s.adminMediaMigration(response, request)
 	case "/api/admin/media-storage", "/api/admin/media-storage/test":
 		s.adminMediaStorage(response, request, lowerAdminPath == "/api/admin/media-storage/test")
 	case databaseBackupRoute, databaseBackupRoute + "/test", databaseBackupRoute + "/run", backupObjectsRoute, backupDownloadRoute:

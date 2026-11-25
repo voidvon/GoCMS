@@ -99,6 +99,10 @@ func (s *Server) adminMediaItem(response http.ResponseWriter, request *http.Requ
 		http.Error(response, "invalid media id", http.StatusBadRequest)
 		return
 	}
+	if request.Method == http.MethodDelete {
+		s.mediaStorageMu.Lock()
+		defer s.mediaStorageMu.Unlock()
+	}
 	asset, err := s.readMedia(request.Context(), id)
 	if err == sql.ErrNoRows {
 		http.Error(response, "media not found", http.StatusNotFound)

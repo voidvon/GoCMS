@@ -400,6 +400,24 @@ export const testMediaStorage = (input: MediaStorageSettings & { secret: string 
     body: JSON.stringify(input),
   })
 
+export type MediaMigrationPreview = { count: number; bytes: number; through_id: number; ready: boolean }
+export type MediaMigrationFailure = { id: number; name: string; error: string }
+export type MediaMigrationBatch = {
+  migrated: number
+  failures: MediaMigrationFailure[]
+  after_id: number
+  more: boolean
+}
+
+export const getMediaMigration = (siteId: number) =>
+  request<MediaMigrationPreview>(`/api/admin/media-storage/migrate?site_id=${siteId}`)
+
+export const migrateMediaBatch = (siteId: number, afterId: number, throughId: number) =>
+  request<MediaMigrationBatch>(`/api/admin/media-storage/migrate?site_id=${siteId}`, {
+    method: "POST",
+    body: JSON.stringify({ after_id: afterId, through_id: throughId }),
+  })
+
 export type MediaKind = "image" | "pdf"
 
 export type MediaAsset = {
