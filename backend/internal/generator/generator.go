@@ -788,6 +788,24 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		_ = tx.Rollback()
 		return report, err
 	}
+	var imageLinks publishedImageLinks
+	imageHosts := make(map[string]bool)
+	if strings.EqualFold(strings.TrimSpace(c.settings[publishR2ImageURLs]), "true") {
+		imageLinks, err = loadPublishedImageLinks(ctx, tx, siteID)
+		if err != nil {
+			_ = tx.Rollback()
+			return report, fmt.Errorf("读取 R2 图片链接: %w", err)
+		}
+		rememberImageOrigin(imageHosts, c.mainOrigin)
+		site, err := db.GetSiteByID(ctx, tx, siteID)
+		if err != nil {
+			_ = tx.Rollback()
+			return report, err
+		}
+		for _, alias := range site.Aliases {
+			rememberImageOrigin(imageHosts, db.PublicOrigin(alias))
+		}
+	}
 	c.assignments, err = templateconfig.LoadForSite(ctx, tx, siteID)
 	if err != nil {
 		_ = tx.Rollback()
@@ -862,6 +880,11 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 				Domain:     domain,
 				OutputDir:  outDir,
 			})
+		}
+	}
+	for _, lang := range enabledLanguages {
+		if lang.SiteMode == "standalone" {
+			rememberImageOrigin(imageHosts, db.PublicOrigin(lang.Domain))
 		}
 	}
 	if len(enabledLanguages) == 0 {
@@ -1100,6 +1123,11 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		totalFiles += len(b.pages)
 	}
 	report.Files = totalFiles
+
+	imageLinks.rewritePages(mainPages, imageHosts)
+	for _, build := range standaloneList {
+		imageLinks.rewritePages(build.pages, imageHosts)
+	}
 
 	minifyHTML := htmlMinifyEnabled(c.settings)
 

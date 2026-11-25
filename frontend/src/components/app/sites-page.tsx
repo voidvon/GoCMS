@@ -99,6 +99,7 @@ export function SitesPage() {
     icp_beian: "",
     police_beian: "",
     copyright: "",
+    publish_r2_image_urls: "false",
     image_optimization_enabled: "true",
     image_optimization_quality: "80",
   })
@@ -119,6 +120,7 @@ export function SitesPage() {
         "icp_beian",
         "police_beian",
         "copyright",
+        "publish_r2_image_urls",
         "image_optimization_enabled",
         "image_optimization_quality",
       ])
@@ -129,6 +131,7 @@ export function SitesPage() {
         icp_beian: data.icp_beian || data.icp || "",
         police_beian: data.police_beian || "",
         copyright: data.copyright || "",
+        publish_r2_image_urls: data.publish_r2_image_urls ?? "false",
         image_optimization_enabled: data.image_optimization_enabled ?? "true",
         image_optimization_quality: data.image_optimization_quality ?? "80",
       })
@@ -616,6 +619,17 @@ export function SitesPage() {
             <ScrollArea className="min-h-0 flex-1" contentClassName="pr-1 py-2">
             <form onSubmit={handleSaveSettings} className="space-y-4">
               <ImageOptimizationFields settings={standardSettings} onChange={setStandardSettings} />
+              <div className="flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <Label htmlFor="publish-r2-image-urls">发布时使用 R2 图片直链</Label>
+                  <p className="text-xs text-muted-foreground">使用文件存储中配置的公开域名。保存后重新发布网站即可生效。</p>
+                </div>
+                <Switch
+                  id="publish-r2-image-urls"
+                  checked={standardSettings.publish_r2_image_urls === "true"}
+                  onCheckedChange={(enabled) => setStandardSettings({ ...standardSettings, publish_r2_image_urls: String(enabled) })}
+                />
+              </div>
               <div className="space-y-3 rounded-lg border p-3.5 bg-muted/20">
                 <div className="space-y-1.5">
                   <Label htmlFor="std-site-name" className="text-xs">站点全称 (site_name)</Label>
