@@ -2,7 +2,6 @@ package generator
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -11,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"gocms/internal/db"
 	"gocms/internal/routing"
 )
 
@@ -105,30 +103,6 @@ func publishedURLsExcluding(ctx context.Context, web string, excluded []string, 
 	}
 	sort.Strings(urls)
 	return urls, nil
-}
-
-func configuredSiteURL(ctx context.Context, database *sql.DB, siteID int64) (string, error) {
-	if database == nil {
-		return "", nil
-	}
-	if siteID <= 0 {
-		siteID = 1
-	}
-	settings, err := db.LoadSiteSettingsForSite(ctx, database, siteID)
-	if err != nil {
-		return "", fmt.Errorf("读取网站地址失败: %w", err)
-	}
-	siteURL := strings.TrimRight(strings.TrimSpace(settings["site_url"]), "/")
-	if siteURL != "" {
-		return siteURL, nil
-	}
-	var domain string
-	_ = database.QueryRowContext(ctx, `SELECT "domain" FROM "`+db.SiteTable+`" WHERE "id" = ?`, siteID).Scan(&domain)
-	domain = db.NormalizeDomain(domain)
-	if domain != "" {
-		return "https://" + domain, nil
-	}
-	return "", nil
 }
 
 func renderSitemapHTML(urls []string) []byte {

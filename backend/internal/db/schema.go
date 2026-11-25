@@ -37,6 +37,7 @@ func CreateSchema(ctx context.Context, database *sql.DB) error {
 		{name: "api keys", fn: EnsureApiKeys},
 		{name: "template assignments", fn: templateconfig.Ensure},
 		{name: "template labels", fn: templatelabel.Ensure},
+		{name: "site origin", fn: MigrateSiteOrigin},
 	}
 	for _, ensure := range ensurers {
 		if err := ensure.fn(ctx, database); err != nil {

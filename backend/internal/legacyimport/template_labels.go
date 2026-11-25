@@ -227,6 +227,9 @@ func convertLegacyLabelContent(content string, aliases map[string]string) string
 	content = legacyHopeVariablePattern.ReplaceAllStringFunc(content, func(value string) string {
 		name := strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(value, "#"), "#"))
 		name = strings.TrimPrefix(name, "hope_")
+		if name == "weburl" {
+			return "{{siteOrigin}}"
+		}
 		if setting, ok := legacyHopeSettings[name]; ok {
 			return `{{setting "` + setting + `"}}`
 		}
@@ -245,7 +248,6 @@ func convertLegacyLabelContent(content string, aliases map[string]string) string
 
 var legacyHopeSettings = map[string]string{
 	"webname":   "site_name",
-	"weburl":    "site_url",
 	"coname":    "company_name",
 	"address":   "company_address",
 	"post":      "company_postcode",

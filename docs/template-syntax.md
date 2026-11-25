@@ -26,6 +26,8 @@
 | `label` | `{{label "card" .}}`，渲染后台标签模板 |
 | `currentSiteID` | `{{currentSiteID}}`，当前发布站点 ID，供公共模板隔离 localStorage 等站点级状态 |
 | `currentLang` | `{{currentLang}}`，当前语言代码 |
+| `siteOrigin` | `{{siteOrigin}}`，由主域名生成的公开地址。独立语言站使用其语言域名 |
+| `homeURL` | `{{homeURL}}`，当前语言的首页路径 |
 | `languages` | `{{range languages}}...{{end}}`，语言导航，字段 `.Code`、`.Name`、`.URL`、`.Current` |
 
 ### 导航与栏目

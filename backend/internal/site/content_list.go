@@ -2,7 +2,6 @@ package site
 
 import (
 	"context"
-	"net/url"
 	"strings"
 
 	"gocms/internal/db"
@@ -71,19 +70,9 @@ func (s *Server) populateAdminContentURLs(ctx context.Context, siteID int64, ite
 	if len(items) == 0 {
 		return nil
 	}
-	settings, err := db.LoadSiteSettingsForSite(ctx, s.database, siteID)
+	base, err := db.SitePublicOrigin(ctx, s.database, siteID)
 	if err != nil {
 		return err
-	}
-	base := strings.TrimRight(strings.TrimSpace(settings["site_url"]), "/")
-	if base == "" {
-		var domain string
-		if err := s.database.QueryRowContext(ctx, `SELECT domain FROM gocms_site WHERE id=?`, siteID).Scan(&domain); err != nil {
-			return err
-		}
-		if domain = db.NormalizeDomain(domain); domain != "" {
-			base = "https://" + domain
-		}
 	}
 	languages, err := s.getLanguages(ctx, siteID)
 	if err != nil {
@@ -98,12 +87,9 @@ func (s *Server) populateAdminContentURLs(ctx context.Context, siteID int64, ite
 		available = true
 		if language.IsDefault != 1 {
 			if language.SiteMode == db.LanguageSiteModeStandalone {
-				base = strings.TrimRight(strings.TrimSpace(language.Domain), "/")
+				base = db.PublicOrigin(language.Domain)
 				if base == "" {
 					return nil
-				}
-				if !strings.Contains(base, "://") {
-					base = "https://" + base
 				}
 			} else {
 				prefix = strings.Trim(strings.TrimSpace(language.PathPrefix), "/")
@@ -117,12 +103,6 @@ func (s *Server) populateAdminContentURLs(ctx context.Context, siteID int64, ite
 	}
 	if !available {
 		return nil
-	}
-	if base != "" {
-		parsed, err := url.Parse(base)
-		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-			return nil
-		}
 	}
 	placeholders := make([]string, len(items))
 	args := []any{routing.DefaultDetailPath, routing.DefaultDetailPattern, siteID}

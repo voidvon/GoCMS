@@ -68,6 +68,43 @@ func EnsureSiteSettings(ctx context.Context, database *sql.DB) error {
 	return nil
 }
 
+// MigrateSiteOrigin retires the old setting and replaces its template calls in
+// stored labels in the same transaction.
+func MigrateSiteOrigin(ctx context.Context, database *sql.DB) error {
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS gocms_schema_migration (name TEXT PRIMARY KEY)`); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO gocms_schema_migration (name) VALUES ('site-origin-from-domain')`)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return tx.Commit()
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE gocms_template_label SET
+		content = replace(replace(content, ?1, 'siteOrigin'), ?2, '{{siteOrigin}}'),
+		temptext = replace(replace(temptext, ?1, 'siteOrigin'), ?2, '{{siteOrigin}}'),
+		listvar = replace(replace(listvar, ?1, 'siteOrigin'), ?2, '{{siteOrigin}}')
+		WHERE instr(content || temptext || listvar, 'site_url') > 0`, `setting "site_url"`, "{{.site_url}}"); err != nil {
+		return fmt.Errorf("replace obsolete site URL in template labels: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM "`+siteSettingsTable+`" WHERE "key" = 'site_url'`); err != nil {
+		return fmt.Errorf("remove obsolete site URL setting: %w", err)
+	}
+	return tx.Commit()
+}
+
 type settingsQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }

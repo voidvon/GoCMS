@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/url"
-	"strings"
 
 	"gocms/internal/db"
 	"gocms/internal/memberoauth"
@@ -27,14 +26,11 @@ func (s *Server) memberLoginCallbacks(ctx context.Context) ([]memberLoginCallbac
 	out := []memberLoginCallback{}
 	seen := map[string]bool{}
 	add := func(site db.Site, origin string) {
-		c := memberoauth.Config{PublicURL: strings.ToLower(strings.TrimRight(strings.TrimSpace(origin), "/"))}
+		c := memberoauth.Config{PublicURL: db.PublicOrigin(origin)}
 		if c.PublicURL == "" || memberoauth.Validate(c) != nil {
 			return
 		}
 		u, _ := url.Parse(c.PublicURL)
-		if strings.Contains(u.Host, "*") {
-			return
-		}
 		// Domain ownership must resolve to this exact site, including language domains.
 		matched, e := db.GetSiteByHost(ctx, s.database, u.Host)
 		if e != nil || matched == nil || matched.ID != site.ID || seen[c.PublicURL] {
@@ -47,18 +43,9 @@ func (s *Server) memberLoginCallbacks(ctx context.Context) ([]memberLoginCallbac
 		if site.Status != "active" {
 			continue
 		}
-		settings, e := db.LoadSiteSettingsForSite(ctx, s.database, site.ID)
-		if e != nil {
-			return nil, e
-		}
-		if configured := strings.TrimSpace(settings["site_url"]); configured != "" {
-			add(site, configured)
-		}
-		for _, host := range append([]string{site.Domain}, site.Aliases...) {
-			if host == "" || strings.Contains(host, "*") {
-				continue
-			}
-			add(site, "https://"+host)
+		add(site, site.Domain)
+		for _, alias := range site.Aliases {
+			add(site, alias)
 		}
 		rows, e := s.database.QueryContext(ctx, `SELECT domain FROM gocms_language WHERE site_id=? AND site_mode='standalone' AND is_enabled=1 AND domain<>'' ORDER BY id`, site.ID)
 		if e != nil {
@@ -78,10 +65,8 @@ func (s *Server) memberLoginCallbacks(ctx context.Context) ([]memberLoginCallbac
 		if e != nil {
 			return nil, e
 		}
-		for _, host := range domains {
-			if !strings.Contains(host, "*") {
-				add(site, "https://"+host)
-			}
+		for _, domain := range domains {
+			add(site, domain)
 		}
 	}
 	return out, nil

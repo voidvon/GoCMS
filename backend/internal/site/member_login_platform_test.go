@@ -314,12 +314,9 @@ func TestPlatformGoogleLegacyIdentityMigration(t *testing.T) {
 func TestPlatformGoogleCallbackDirectory(t *testing.T) {
 	s, database, _ := newCategoryTestServer(t)
 	ctx := context.Background()
-	if _, err := database.Exec(`UPDATE gocms_site SET domain='example.test',aliases='["alias.example.test","localhost","*.wild.example.test"]' WHERE id=1;
+	if _, err := database.Exec(`UPDATE gocms_site SET domain='example.test',aliases='["alias.example.test","http://localhost:18766","*.wild.example.test"]' WHERE id=1;
  INSERT INTO gocms_site(name,code,domain,status) VALUES('Disabled','disabled','disabled.example.test','disabled');
  INSERT INTO gocms_language(site_id,code,name,site_mode,domain) VALUES(1,'fr','French','standalone','fr.example.test')`); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.SaveSiteSettingsForSite(ctx, database, 1, map[string]string{"site_url": "http://localhost:18766"}); err != nil {
 		t.Fatal(err)
 	}
 	callbacks, err := s.memberLoginCallbacks(ctx)
@@ -341,7 +338,7 @@ func TestPlatformGoogleCallbackDirectory(t *testing.T) {
 	if _, err = s.googleConfigForOrigin(ctx, "http://localhost:18767"); err == nil {
 		t.Fatal("unconfigured port accepted")
 	}
-	if err = db.SaveSiteSettingsForSite(ctx, database, 1, map[string]string{"site_url": "https://unmanaged.example.test"}); err != nil {
+	if _, err = database.Exec(`INSERT INTO gocms_site_setting (key, value) VALUES ('site_url', 'https://unmanaged.example.test')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.googleConfigForOrigin(ctx, "https://unmanaged.example.test"); err == nil {

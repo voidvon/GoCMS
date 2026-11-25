@@ -183,7 +183,7 @@ func ConvertTemplateVars(content string) string {
 		{"[!--the.classid--]", "{{.category_id}}"},
 		{"[!--the.classurl--]", "{{.category_url}}"},
 		{"[!--site.name--]", `{{setting "site_name"}}`},
-		{"[!--site.url--]", `{{setting "site_url"}}`},
+		{"[!--site.url--]", "{{siteOrigin}}"},
 	}
 	result := content
 	for _, r := range replacements {
@@ -700,6 +700,7 @@ func ValidateContent(name, content string) error {
 	_, err := template.New(name).Funcs(template.FuncMap{
 		"setting":               func(...any) string { return "" },
 		"settingHTML":           func(...any) string { return "" },
+		"siteOrigin":            func() string { return "" },
 		"include":               func(...any) (string, error) { return "", nil },
 		"label":                 func(...any) (string, error) { return "", nil },
 		"contentItems":          func(...any) []any { return nil },

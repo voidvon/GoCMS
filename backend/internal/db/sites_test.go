@@ -102,7 +102,7 @@ func TestCreateSiteAndUniqueCode(t *testing.T) {
 		t.Errorf("expected 2 aliases, got %d", len(found.Aliases))
 	}
 
-	// Verify site_name and site_url settings are seeded
+	// The public origin is derived from the main domain.
 	settings, err := LoadSiteSettingsForSite(context.Background(), database, created.ID)
 	if err != nil {
 		t.Fatalf("LoadSiteSettingsForSite failed: %v", err)
@@ -110,8 +110,20 @@ func TestCreateSiteAndUniqueCode(t *testing.T) {
 	if settings["site_name"] != "技术博客" {
 		t.Errorf("expected site_name '技术博客', got %q", settings["site_name"])
 	}
-	if settings["site_url"] != "https://blog.example.com" {
-		t.Errorf("expected site_url 'https://blog.example.com', got %q", settings["site_url"])
+	if _, ok := settings["site_url"]; ok {
+		t.Fatal("the public origin was saved as a separate site setting")
+	}
+	origin, err := SitePublicOrigin(context.Background(), database, created.ID)
+	if err != nil || origin != "https://blog.example.com" {
+		t.Fatalf("site origin = %q, %v", origin, err)
+	}
+	created.Domain = "http://localhost:18766/"
+	if err := UpdateSite(context.Background(), database, created); err != nil {
+		t.Fatal(err)
+	}
+	routed, err := GetSiteByHost(context.Background(), database, "localhost:18766")
+	if err != nil || routed.ID != created.ID || PublicOrigin(routed.Domain) != "http://localhost:18766" {
+		t.Fatalf("configured origin did not route to the site: %+v, %v", routed, err)
 	}
 }
 
@@ -250,7 +262,6 @@ func TestSiteSettingsScoping(t *testing.T) {
 	// Save settings for site 1
 	if err := SaveSiteSettingsForSite(context.Background(), database, 1, map[string]string{
 		"site_name": "站点1名称",
-		"site_url":  "https://site1.com",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +269,6 @@ func TestSiteSettingsScoping(t *testing.T) {
 	// Save settings for site 2
 	if err := SaveSiteSettingsForSite(context.Background(), database, 2, map[string]string{
 		"site_name": "站点2名称",
-		"site_url":  "https://site2.com",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -277,6 +287,27 @@ func TestSiteSettingsScoping(t *testing.T) {
 	}
 	if s2Settings["site_name"] != "站点2名称" {
 		t.Errorf("expected site 2 site_name '站点2名称', got %q", s2Settings["site_name"])
+	}
+	if _, err := database.Exec(`
+		DELETE FROM gocms_schema_migration WHERE name = 'site-origin-from-domain';
+		INSERT INTO gocms_site_setting (site_id, key, value) VALUES (1, 'site_url', 'https://admin.example.test'), (2, 'site_url', 'https://old.example.test');
+		INSERT INTO gocms_template_label (key, name, content, temptext, listvar)
+		VALUES ('website', 'Website', '{{setting "site_url"}}', '{{.site_url}}', '{{if setting "site_url"}}link{{end}}')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateSiteOrigin(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+	var removed, names int
+	if err := database.QueryRow(`SELECT COUNT(*) FILTER (WHERE key = 'site_url'), COUNT(*) FILTER (WHERE key = 'site_name') FROM gocms_site_setting`).Scan(&removed, &names); err != nil || removed != 0 || names != 2 {
+		t.Fatalf("settings after upgrade: obsolete = %d, names = %d, error = %v", removed, names, err)
+	}
+	var content, temptext, listvar string
+	if err := database.QueryRow(`SELECT content, temptext, listvar FROM gocms_template_label WHERE key = 'website'`).Scan(&content, &temptext, &listvar); err != nil {
+		t.Fatal(err)
+	}
+	if content != "{{siteOrigin}}" || temptext != "{{siteOrigin}}" || listvar != "{{if siteOrigin}}link{{end}}" {
+		t.Fatalf("unexpected migrated label: %q, %q, %q", content, temptext, listvar)
 	}
 }
 
@@ -408,5 +439,3 @@ func TestGetSiteByHostStandaloneLanguage(t *testing.T) {
 		t.Errorf("expected output dir site2_ru, got %s", site.OutputDir)
 	}
 }
-
-

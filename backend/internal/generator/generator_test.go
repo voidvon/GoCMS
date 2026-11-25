@@ -22,8 +22,9 @@ func TestGenerateUsesConfiguredThemeDataAndRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`
+		UPDATE gocms_site SET domain = 'example.test' WHERE id = 1;
 		INSERT INTO "gocms_site_setting" ("key", "value") VALUES
-			('site_name', '示例站点'), ('site_url', 'https://example.test/'),
+			('site_name', '示例站点'),
 			('site_copyright', 'Copyright')`); err != nil {
 		t.Fatal(err)
 	}
@@ -313,8 +314,9 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`
+		UPDATE gocms_site SET domain = 'example.test' WHERE id = 1;
 		INSERT INTO "gocms_site_setting" ("key", "value") VALUES
-			('site_name', '测试多语言站点'), ('site_url', 'https://example.test/')`); err != nil {
+			('site_name', '测试多语言站点'), ('site_url', 'https://admin.example.test')`); err != nil {
 		t.Fatal(err)
 	}
 	// Add secondary language 'en'
@@ -431,6 +433,9 @@ func TestMultiLanguageStaticGeneration(t *testing.T) {
 	if !strings.Contains(sitemap, "https://example.test/news/first.html") || !strings.Contains(sitemap, "https://example.test/en/news/first.html") {
 		t.Fatalf("unexpected sitemap: %s", sitemap)
 	}
+	if robots := readGenerated(t, web, "robots.txt"); !strings.Contains(robots, "Sitemap: https://example.test/sitemap.xml") {
+		t.Fatalf("robots.txt did not use the configured main domain: %s", robots)
+	}
 }
 
 func TestLinkCategoryGeneration(t *testing.T) {
@@ -445,8 +450,9 @@ func TestLinkCategoryGeneration(t *testing.T) {
 	}
 
 	if _, err := database.Exec(`
+		UPDATE gocms_site SET domain = 'example.test' WHERE id = 1;
 		INSERT INTO "gocms_site_setting" ("key", "value") VALUES
-			('site_name', '链接测试站点'), ('site_url', 'https://example.test/'),
+			('site_name', '链接测试站点'),
 			('site_copyright', 'Copyright')`); err != nil {
 		t.Fatal(err)
 	}
@@ -631,8 +637,8 @@ func TestMultiSiteGenerationIndependentDirectories(t *testing.T) {
 	// Site 1 settings (Chinese default + English sub-site)
 	if _, err := database.Exec(`
 		INSERT INTO "gocms_site_setting" ("site_id", "key", "value") VALUES
-			(1, 'site_name', '站点一'),
-			(1, 'site_url', 'https://site1.example.com/')
+			(1, 'site_name', '站点一');
+		UPDATE gocms_site SET domain = 'site1.example.com' WHERE id = 1
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -648,8 +654,8 @@ func TestMultiSiteGenerationIndependentDirectories(t *testing.T) {
 	// Site 2 settings
 	if _, err := database.Exec(`
 		INSERT INTO "gocms_site_setting" ("site_id", "key", "value") VALUES
-			(2, 'site_name', '站点二'),
-			(2, 'site_url', 'https://site2.example.com/')
+			(2, 'site_name', '站点二');
+		INSERT INTO gocms_site (id, name, code, domain) VALUES (2, '站点二', 'site2', 'site2.example.com')
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -1007,7 +1013,8 @@ func TestStandaloneLanguageSiteGeneration(t *testing.T) {
 	}
 	if _, err := database.Exec(`
 		INSERT INTO "gocms_site_setting" ("site_id", "key", "value") VALUES
-			(2, 'site_name', '主站'), (2, 'site_url', 'https://example.test/')`); err != nil {
+			(2, 'site_name', '主站');
+		INSERT INTO gocms_site (id, name, code, domain) VALUES (2, '主站', 'test-main', 'example.test')`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1053,7 +1060,7 @@ func TestStandaloneLanguageSiteGeneration(t *testing.T) {
 	}
 
 	templates := filepath.Join(t.TempDir(), "templates")
-	writeTemplate(t, templates, "index.html", `site={{setting "site_name"}} lang={{currentLang}} langs={{range languages .}}{{.Code}}:{{.URL}};{{end}}`)
+	writeTemplate(t, templates, "index.html", `site={{setting "site_name"}} origin={{siteOrigin}} lang={{currentLang}} langs={{range languages .}}{{.Code}}:{{.URL}};{{end}}`)
 	writeTemplate(t, templates, "msg.html", `msg lang={{currentLang}}`)
 	writeTemplate(t, templates, "search.html", `search lang={{currentLang}}`)
 	writeTemplate(t, templates, "lists/news.html", `cat={{.category_name}} lang={{currentLang}}`)
@@ -1082,7 +1089,7 @@ func TestStandaloneLanguageSiteGeneration(t *testing.T) {
 	// zh-CN: /
 	// en: /en/
 	// ru: https://ru.example.com/ (cross-domain standalone URL!)
-	if !strings.Contains(zhHome, "zh-CN:/;") || !strings.Contains(zhHome, "en:/en/;") || !strings.Contains(zhHome, "ru:https://ru.example.com/;") {
+	if !strings.Contains(zhHome, "origin=https://example.test ") || !strings.Contains(zhHome, "zh-CN:/;") || !strings.Contains(zhHome, "en:/en/;") || !strings.Contains(zhHome, "ru:https://ru.example.com/;") {
 		t.Fatalf("unexpected main site lang switcher: %s", zhHome)
 	}
 	if strings.Contains(zhHome, "de:") || strings.Contains(zhHome, "foreign-en") {
@@ -1120,7 +1127,7 @@ func TestStandaloneLanguageSiteGeneration(t *testing.T) {
 	// zh-CN: https://example.test/ (cross-domain back to main site!)
 	// en: https://example.test/en/ (cross-domain back to main site subdir!)
 	// ru: https://ru.example.com/
-	if !strings.Contains(ruHome, "zh-CN:https://example.test/;") || !strings.Contains(ruHome, "en:https://example.test/en/;") || !strings.Contains(ruHome, "ru:https://ru.example.com/;") {
+	if !strings.Contains(ruHome, "origin=https://ru.example.com ") || !strings.Contains(ruHome, "zh-CN:https://example.test/;") || !strings.Contains(ruHome, "en:https://example.test/en/;") || !strings.Contains(ruHome, "ru:https://ru.example.com/;") {
 		t.Fatalf("unexpected standalone ru lang switcher: %s", ruHome)
 	}
 
@@ -1172,8 +1179,9 @@ func TestListIndexFilePatternPagination(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`
+		UPDATE gocms_site SET domain = 'example.test' WHERE id = 1;
 		INSERT INTO "gocms_site_setting" ("key", "value") VALUES
-			('site_name', '测试站点'), ('site_url', 'https://example.test/')`); err != nil {
+			('site_name', '测试站点')`); err != nil {
 		t.Fatal(err)
 	}
 	// Two list categories sharing the products directory: 131 keeps the {id}
@@ -1274,8 +1282,9 @@ func TestDetailDirectoryFilePattern(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := database.Exec(`
+		UPDATE gocms_site SET domain = 'example.test' WHERE id = 1;
 		INSERT INTO "gocms_site_setting" ("key", "value") VALUES
-			('site_name', '测试站点'), ('site_url', 'https://example.test/')`); err != nil {
+			('site_name', '测试站点')`); err != nil {
 		t.Fatal(err)
 	}
 	// Category 181 keeps the flat {id}.html rule, 182 nests each entry.

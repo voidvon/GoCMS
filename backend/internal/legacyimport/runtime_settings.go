@@ -46,9 +46,11 @@ func MigrateExistingSettings(ctx context.Context, database *sql.DB) error {
 
 	if len(configRows) > 0 {
 		row := configRows[0]
+		if err := importSiteDomain(ctx, transaction, row.text("WebUrl")); err != nil {
+			return err
+		}
 		values := map[string]string{
 			"site_name":        row.text("WebName"),
-			"site_url":         row.text("WebUrl"),
 			"site_icp":         row.text("WebIcp"),
 			"company_mobile":   row.text("WebMsn"),
 			"company_qq":       row.text("WebQQ"),

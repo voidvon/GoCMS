@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"path"
 	"path/filepath"
@@ -80,14 +81,9 @@ func EnsureSites(ctx context.Context, database *sql.DB) error {
 	}
 	if count == 0 {
 		now := time.Now().Format("2006-01-02 15:04:05")
-		var defaultDomain string
-		if tableExists(ctx, database, siteSettingsTable) {
-			_ = database.QueryRowContext(ctx, `SELECT "value" FROM "`+siteSettingsTable+`" WHERE "key" = 'site_url' LIMIT 1`).Scan(&defaultDomain)
-			defaultDomain = NormalizeDomain(defaultDomain)
-		}
 		if _, err := database.ExecContext(ctx, `
-			INSERT INTO "`+SiteTable+`" ("id", "name", "code", "domain", "aliases", "redirect_aliases", "theme_id", "output_dir", "is_default", "status", "created_at", "updated_at")
-			VALUES (1, '默认站点', 'default', ?, '[]', 0, '', '', 1, 'active', ?, ?)`, defaultDomain, now, now); err != nil {
+			INSERT INTO "`+SiteTable+`" ("id", "name", "code", "is_default", "created_at", "updated_at")
+			VALUES (1, '默认站点', 'default', 1, ?, ?)`, now, now); err != nil {
 			return fmt.Errorf("seed default site: %w", err)
 		}
 	}
@@ -99,6 +95,9 @@ func NormalizeDomain(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	if value == "" {
 		return ""
+	}
+	if addr, err := netip.ParseAddr(value); err == nil {
+		return addr.String()
 	}
 	prefix := ""
 	if strings.HasPrefix(value, "*.") {
@@ -116,6 +115,60 @@ func NormalizeDomain(value string) string {
 	host := strings.Split(value, "/")[0]
 	host = strings.Split(host, ":")[0]
 	return prefix + strings.TrimSpace(host)
+}
+
+func parseSiteOrigin(domain string) (*url.URL, error) {
+	if addr, err := netip.ParseAddr(domain); err == nil && addr.Is6() {
+		domain = "[" + addr.String() + "]"
+	}
+	if !strings.Contains(domain, "://") {
+		domain = "https://" + domain
+	}
+	u, err := url.Parse(domain)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" ||
+		u.User != nil || (u.Path != "" && u.Path != "/") || strings.ContainsAny(domain, "?#\\") {
+		return nil, errors.New("主域名必须是域名或 HTTP(S) 地址，可包含端口")
+	}
+	u.Path = ""
+	return u, nil
+}
+
+func normalizeSiteAddress(domain string) (string, error) {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if domain == "" {
+		return "", nil
+	}
+	u, err := parseSiteOrigin(domain)
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(domain, "://") {
+		return u.String(), nil
+	}
+	return u.Host, nil
+}
+
+// PublicOrigin turns a configured host or HTTP(S) address into a public origin.
+func PublicOrigin(domain string) string {
+	u, err := parseSiteOrigin(strings.ToLower(strings.TrimSpace(domain)))
+	if err != nil || strings.Contains(u.Host, "*") {
+		return ""
+	}
+	return u.String()
+}
+
+func SitePublicOrigin(ctx context.Context, query settingsQueryer, siteID int64) (string, error) {
+	if siteID <= 0 {
+		siteID = 1
+	}
+	site, err := GetSiteByID(ctx, query, siteID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return PublicOrigin(site.Domain), nil
 }
 
 func MatchHostPattern(pattern, host string) bool {
@@ -263,10 +316,15 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 		}
 	}
 
-	// 2. Scan all sites to check aliases (exact match)
+	// 2. Match addresses with a scheme or port, then exact aliases.
 	sites, err := ListSites(ctx, query)
 	if err != nil {
 		return nil, err
+	}
+	for _, s := range sites {
+		if NormalizeDomain(s.Domain) == host {
+			return &s, nil
+		}
 	}
 	for _, s := range sites {
 		for _, alias := range s.Aliases {
@@ -323,12 +381,12 @@ func GetSiteByHost(ctx context.Context, query settingsQueryer, host string) (*Si
 
 	// 4. Scan wildcard domain or aliases (*.domain.com)
 	for _, s := range sites {
-		if MatchHostPattern(s.Domain, host) {
+		if MatchHostPattern(NormalizeDomain(s.Domain), host) {
 			match := s
 			return &match, nil
 		}
 		for _, alias := range s.Aliases {
-			if MatchHostPattern(alias, host) {
+			if MatchHostPattern(NormalizeDomain(alias), host) {
 				match := s
 				return &match, nil
 			}
@@ -368,7 +426,11 @@ func CreateSite(ctx context.Context, database *sql.DB, s *Site) (*Site, error) {
 	if err := ValidateSiteCode(s.Code); err != nil {
 		return nil, err
 	}
-	s.Domain = NormalizeDomain(s.Domain)
+	domain, err := normalizeSiteAddress(s.Domain)
+	if err != nil {
+		return nil, err
+	}
+	s.Domain = domain
 	if s.Status == "" {
 		s.Status = "active"
 	}
@@ -428,15 +490,6 @@ func CreateSite(ctx context.Context, database *sql.DB, s *Site) (*Site, error) {
 		VALUES (?, 'site_name', ?, CURRENT_TIMESTAMP)`, siteID, s.Name); err != nil {
 		return nil, err
 	}
-	if s.Domain != "" {
-		siteURL := "https://" + s.Domain
-		if _, err := tx.ExecContext(ctx, `
-			INSERT OR IGNORE INTO "`+siteSettingsTable+`" ("site_id", "key", "value", "updated_at")
-			VALUES (?, 'site_url', ?, CURRENT_TIMESTAMP)`, siteID, siteURL); err != nil {
-			return nil, err
-		}
-	}
-
 	var tplCount int
 	_ = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'gocms_template_assignment'`).Scan(&tplCount)
 	if tplCount > 0 {
@@ -465,7 +518,11 @@ func UpdateSite(ctx context.Context, database *sql.DB, s *Site) error {
 	if err := ValidateSiteCode(s.Code); err != nil {
 		return err
 	}
-	s.Domain = NormalizeDomain(s.Domain)
+	domain, err := normalizeSiteAddress(s.Domain)
+	if err != nil {
+		return err
+	}
+	s.Domain = domain
 	if s.Status == "" {
 		s.Status = "active"
 	}
@@ -534,19 +591,6 @@ func UpdateSite(ctx context.Context, database *sql.DB, s *Site) error {
 		VALUES (?, 'site_name', ?, CURRENT_TIMESTAMP)
 		ON CONFLICT("site_id", "key") DO UPDATE SET "value" = excluded."value", "updated_at" = CURRENT_TIMESTAMP`,
 		s.ID, s.Name)
-
-	// If site_url is empty in settings and domain is provided, populate it
-	if s.Domain != "" {
-		var existingURL string
-		_ = tx.QueryRowContext(ctx, `SELECT "value" FROM "`+siteSettingsTable+`" WHERE "site_id" = ? AND "key" = 'site_url'`, s.ID).Scan(&existingURL)
-		if strings.TrimSpace(existingURL) == "" {
-			_, _ = tx.ExecContext(ctx, `
-				INSERT INTO "`+siteSettingsTable+`" ("site_id", "key", "value", "updated_at")
-				VALUES (?, 'site_url', ?, CURRENT_TIMESTAMP)
-				ON CONFLICT("site_id", "key") DO UPDATE SET "value" = excluded."value", "updated_at" = CURRENT_TIMESTAMP`,
-				s.ID, "https://"+s.Domain)
-		}
-	}
 
 	return tx.Commit()
 }

@@ -94,7 +94,6 @@ export function SitesPage() {
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [standardSettings, setStandardSettings] = useState<Record<string, string>>({
     site_name: "",
-    site_url: "",
     site_keywords: "",
     site_description: "",
     icp_beian: "",
@@ -115,7 +114,6 @@ export function SitesPage() {
       const data = await getSiteSettings(site.id)
       const stdKeys = new Set([
         "site_name",
-        "site_url",
         "site_keywords",
         "site_description",
         "icp_beian",
@@ -126,7 +124,6 @@ export function SitesPage() {
       ])
       setStandardSettings({
         site_name: data.site_name || site.name || "",
-        site_url: data.site_url || (site.domain ? `https://${site.domain}` : ""),
         site_keywords: data.site_keywords || data.keywords || "",
         site_description: data.site_description || data.description || "",
         icp_beian: data.icp_beian || data.icp || "",
@@ -494,7 +491,7 @@ export function SitesPage() {
                 onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
               />
               <p className="text-[11px] text-muted-foreground">
-                用于根据 Host 请求头路由到本站，无需包含 http:// 协议头
+                用于访问本站和生成公开链接。只填域名时默认使用 HTTPS，也可填写带协议和端口的地址。
               </p>
             </div>
 
@@ -620,27 +617,14 @@ export function SitesPage() {
             <form onSubmit={handleSaveSettings} className="space-y-4">
               <ImageOptimizationFields settings={standardSettings} onChange={setStandardSettings} />
               <div className="space-y-3 rounded-lg border p-3.5 bg-muted/20">
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">基础与链接</h4>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="std-site-name" className="text-xs">站点全称 (site_name)</Label>
-                    <Input
-                      id="std-site-name"
-                      className="h-8 text-xs"
-                      value={standardSettings.site_name}
-                      onChange={(e) => setStandardSettings({ ...standardSettings, site_name: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="std-site-url" className="text-xs">站点主网址 (site_url)</Label>
-                    <Input
-                      id="std-site-url"
-                      className="h-8 text-xs"
-                      placeholder="https://example.com"
-                      value={standardSettings.site_url}
-                      onChange={(e) => setStandardSettings({ ...standardSettings, site_url: e.target.value })}
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="std-site-name" className="text-xs">站点全称 (site_name)</Label>
+                  <Input
+                    id="std-site-name"
+                    className="h-8 text-xs"
+                    value={standardSettings.site_name}
+                    onChange={(e) => setStandardSettings({ ...standardSettings, site_name: e.target.value })}
+                  />
                 </div>
               </div>
 

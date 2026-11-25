@@ -133,6 +133,8 @@ type LanguageInfo struct {
 type content struct {
 	onRendered       func()
 	siteID           int64
+	mainOrigin       string
+	currentOrigin    string
 	consentPolicy    consent.Policy
 	contactCards     []sitecontacts.Card
 	tables           map[string][]Row
@@ -471,6 +473,7 @@ func (c *content) templateFuncs() template.FuncMap {
 		"languages":     func(_ ...any) []LanguageInfo { return c.languagesNav() },
 		"morepic":       gallery.Parse,
 		"homeURL":       func() string { return c.homeURL() },
+		"siteOrigin":    func() string { return c.currentOrigin },
 		"multiValue": func(val any) []string {
 			if val == nil {
 				return nil
@@ -492,18 +495,11 @@ func (c *content) languagesNav() []LanguageInfo {
 	for i, l := range c.languages {
 		targetURL := l.URL
 		if l.SiteMode == "standalone" {
-			if l.Domain != "" {
-				if strings.Contains(l.Domain, "://") {
-					targetURL = strings.TrimRight(l.Domain, "/") + "/"
-				} else {
-					targetURL = "https://" + l.Domain + "/"
-				}
+			if origin := db.PublicOrigin(l.Domain); origin != "" {
+				targetURL = origin + "/"
 			}
 		} else if c.isStandalone {
-			mainSiteURL := strings.TrimRight(c.settings["site_url"], "/")
-			if mainSiteURL != "" {
-				targetURL = mainSiteURL + l.URL
-			}
+			targetURL = c.mainOrigin + l.URL
 		}
 		res[i] = LanguageInfo{
 			Code:       l.Code,
@@ -787,13 +783,10 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		_ = tx.Rollback()
 		return report, fmt.Errorf("隐私同意配置无效: %w", err)
 	}
-	if strings.TrimSpace(c.settings["site_url"]) == "" && siteID > 0 {
-		var domain string
-		_ = tx.QueryRowContext(ctx, `SELECT "domain" FROM "`+db.SiteTable+`" WHERE "id" = ?`, siteID).Scan(&domain)
-		domain = db.NormalizeDomain(domain)
-		if domain != "" {
-			c.settings["site_url"] = "https://" + domain
-		}
+	c.mainOrigin, err = db.SitePublicOrigin(ctx, tx, siteID)
+	if err != nil {
+		_ = tx.Rollback()
+		return report, err
 	}
 	c.assignments, err = templateconfig.LoadForSite(ctx, tx, siteID)
 	if err != nil {
@@ -994,8 +987,10 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		c.consentPolicy = privacy.Resolve(siteID, lang.Code)
 		c.isStandalone = (lang.SiteMode == "standalone")
 		c.currentLangInfo = lang
+		c.currentOrigin = c.mainOrigin
 		if c.isStandalone {
 			c.langPrefix = ""
+			c.currentOrigin = db.PublicOrigin(lang.Domain)
 		} else {
 			c.langPrefix = lang.PathPrefix
 		}
@@ -1028,25 +1023,24 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		published[key] = c.published
 		if c.isStandalone {
 			if contentID == 0 {
-				langSiteURL, domainErr := standaloneIndexURL(lang.Domain)
-				if domainErr != nil {
-					return report, fmt.Errorf("%s: %w", lang.Name, domainErr)
+				if c.currentOrigin == "" {
+					return report, fmt.Errorf("%s: %w：独立语言站点需要有效的 HTTP(S) 域名", lang.Name, ErrIndexConfiguration)
 				}
 
 				langUrls := sitemapURLs(c.pages)
 
-				c.pages["llms.txt"], err = renderLLMS(ctx, langSiteURL, langUrls, func(path string) (io.ReadCloser, error) {
+				c.pages["llms.txt"], err = renderLLMS(ctx, c.currentOrigin, langUrls, func(path string) (io.ReadCloser, error) {
 					return io.NopCloser(bytes.NewReader(c.pages[path])), nil
 				})
 				if err != nil {
 					return report, err
 				}
 				c.pages["sitemap.html"] = renderSitemapHTML(langUrls)
-				xmlMap := renderSitemapXML(langSiteURL, langUrls)
+				xmlMap := renderSitemapXML(c.currentOrigin, langUrls)
 				c.pages["sitemap.xml"] = xmlMap
 				c.pages["Sitemap.xml"] = xmlMap
-				if c.pages["robots.txt"] == nil && langSiteURL != "" {
-					c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", langSiteURL))
+				if c.pages["robots.txt"] == nil {
+					c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", c.currentOrigin))
 				}
 			}
 			if err = applyConsent(c.pages, c.consentPolicy); err != nil {
@@ -1079,7 +1073,7 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 	c.pages = mainPages
 	if contentID == 0 {
 		urls := sitemapURLs(c.pages)
-		c.pages["llms.txt"], err = renderLLMS(ctx, c.settings["site_url"], urls, func(path string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(c.pages[path])), nil })
+		c.pages["llms.txt"], err = renderLLMS(ctx, c.mainOrigin, urls, func(path string) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(c.pages[path])), nil })
 		if err != nil {
 			return report, err
 		}
@@ -1088,13 +1082,12 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		if err != nil {
 			return report, err
 		}
-		xmlMap := renderSitemapXML(strings.TrimRight(c.settings["site_url"], "/"), urls)
+		xmlMap := renderSitemapXML(c.mainOrigin, urls)
 		c.pages["sitemap.xml"] = xmlMap
 		c.pages["Sitemap.xml"] = xmlMap
 
-		if c.pages["robots.txt"] == nil && c.settings["site_url"] != "" {
-			siteURL := strings.TrimRight(c.settings["site_url"], "/")
-			c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", siteURL))
+		if c.pages["robots.txt"] == nil && c.mainOrigin != "" {
+			c.pages["robots.txt"] = []byte(fmt.Sprintf("User-agent: *\nAllow: /\n\nSitemap: %s/sitemap.xml\n", c.mainOrigin))
 		}
 	}
 	for _, row := range baseContents {
@@ -2373,7 +2366,6 @@ func (c *content) buildForLang() error {
 	if err := c.pageTemplate(homePagePath, c.homeTemplate(), Row{
 		"title":         esc(siteTitle),
 		"site_name":     esc(siteName),
-		"site_url":      esc(c.settings["site_url"]),
 		"seo_title":     esc(siteKeywords),
 		"description":   esc(siteDescription),
 		"root_category": "",

@@ -307,6 +307,10 @@ func (s *Server) adminSiteSettings(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请求格式不正确"})
 			return
 		}
+		if _, ok := payload["site_url"]; ok {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请在多站点管理中编辑主域名"})
+			return
+		}
 		if _, ok := payload[sitecontacts.SettingKey]; ok {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请在语言管理中编辑联系方式"})
 			return

@@ -13,9 +13,9 @@ import (
 	"strconv"
 	"strings"
 
-	"gocms/internal/sitehost"
-
+	"gocms/internal/db"
 	"gocms/internal/routing"
+	"gocms/internal/sitehost"
 )
 
 type sourceRow map[string]string
@@ -190,9 +190,11 @@ func importSettings(ctx context.Context, transaction *sql.Tx, rows []sourceRow) 
 		return nil
 	}
 	row := rows[0]
+	if err := importSiteDomain(ctx, transaction, row.text("WebUrl")); err != nil {
+		return err
+	}
 	values := map[string]string{
 		"site_name":        row.text("WebName"),
-		"site_url":         row.text("WebUrl"),
 		"site_icp":         row.text("WebIcp"),
 		"site_qq":          row.text("WebQQ"),
 		"company_qq":       row.text("WebQQ"),
@@ -214,6 +216,15 @@ func importSettings(ctx context.Context, transaction *sql.Tx, rows []sourceRow) 
 		}
 	}
 	return nil
+}
+
+func importSiteDomain(ctx context.Context, transaction *sql.Tx, address string) error {
+	origin := db.PublicOrigin(address)
+	if origin == "" {
+		return nil
+	}
+	_, err := transaction.ExecContext(ctx, `UPDATE "`+db.SiteTable+`" SET "domain" = ? WHERE "is_default" = 1 AND TRIM("domain") = ''`, origin)
+	return err
 }
 
 func importCustomLabelSettings(ctx context.Context, transaction *sql.Tx, rows []sourceRow) error {

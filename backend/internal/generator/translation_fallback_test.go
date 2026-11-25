@@ -27,7 +27,7 @@ func TestGenerateUsesOnlyConfiguredTranslationFallback(t *testing.T) {
 				UPDATE gocms_language SET is_default = (code = ?), is_fallback = (code = 'en');
 				INSERT INTO gocms_model_field (table_id, field_name, field_label, is_translatable)
 				VALUES (2, 'downloads_html', 'Documents', 1);
-				INSERT INTO gocms_site_setting (key, value) VALUES ('site_url', 'https://example.test/');
+				UPDATE gocms_site SET domain = 'example.test' WHERE id = 1;
 				INSERT INTO gocms_category (id, name, list_path, list_template, detail_path, detail_template, seo_title, description, cover_content)
 				VALUES (1, '旧栏目', 'topics', 'custom/list.html', 'entries', 'custom/detail.html', '旧SEO', '旧描述', '旧封面');
 				INSERT INTO gocms_category_translation (category_id, lang, name, description)

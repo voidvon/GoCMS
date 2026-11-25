@@ -132,6 +132,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		if err := templatelabel.Ensure(context.Background(), database); err != nil {
 			return nil, err
 		}
+		if err := db.MigrateSiteOrigin(context.Background(), database); err != nil {
+			return nil, err
+		}
 	}
 	captSvc, err := captcha.NewService()
 	if err != nil {
@@ -722,7 +725,7 @@ func (s *Server) shouldRedirectAlias(site *db.Site, reqHost string) (string, boo
 	for _, alias := range site.Aliases {
 		normAlias := db.NormalizeDomain(alias)
 		if normAlias == normalizedReq || (strings.HasPrefix(alias, "*.") && db.MatchHostPattern(alias, normalizedReq)) {
-			return primary, true
+			return site.Domain, true
 		}
 	}
 	return "", false
@@ -738,13 +741,18 @@ func (s *Server) checkAliasRedirect(response http.ResponseWriter, request *http.
 		return false
 	}
 	if primaryDomain, ok := s.shouldRedirectAlias(matched, reqHost); ok {
-		scheme := requestScheme(request)
+		origin := db.PublicOrigin(primaryDomain)
+		if origin == "" {
+			return false
+		}
+		if !strings.Contains(primaryDomain, "://") {
+			origin = requestScheme(request) + strings.TrimPrefix(origin, "https")
+		}
 		uri := request.URL.RequestURI()
 		if uri == "" {
 			uri = "/"
 		}
-		target := fmt.Sprintf("%s://%s%s", scheme, primaryDomain, uri)
-		http.Redirect(response, request, target, http.StatusMovedPermanently)
+		http.Redirect(response, request, origin+uri, http.StatusMovedPermanently)
 		return true
 	}
 	return false

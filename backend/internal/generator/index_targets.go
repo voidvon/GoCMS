@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -59,26 +58,6 @@ type IndexTarget struct {
 	web       string
 }
 
-func standaloneIndexURL(domain string) (string, error) {
-	domain = strings.TrimRight(strings.TrimSpace(domain), "/")
-	if domain == "" {
-		return "", fmt.Errorf("%w：请为独立语言站点配置域名", ErrIndexConfiguration)
-	}
-	if !strings.Contains(domain, "://") {
-		domain = "https://" + domain
-	}
-	u, err := url.Parse(domain)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
-		return "", fmt.Errorf("%w：独立语言站点需要有效的 HTTP(S) 域名", ErrIndexConfiguration)
-	}
-	return domain, nil
-}
-
-func validIndexBase(base string) bool {
-	u, err := url.Parse(base)
-	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
-}
-
 func (p Publisher) mainIndexWeb() string {
 	web := p.TargetWeb()
 	if p.SiteID <= 1 {
@@ -92,18 +71,15 @@ func (p Publisher) mainIndexWeb() string {
 }
 
 func (p Publisher) indexTargets(ctx context.Context) ([]IndexTarget, error) {
-	base, err := configuredSiteURL(ctx, p.DB, p.SiteID)
-	if err != nil {
-		return nil, err
-	}
-	targets := []IndexTarget{{ID: "main", Name: "主站", Mode: "subdir", URL: base, Languages: []IndexLanguage{}, web: p.mainIndexWeb()}}
-	if base != "" && !validIndexBase(base) {
-		targets[0].URL = ""
-		targets[0].Issue = "请在站点配置中设置有效的 HTTP(S) 网站地址"
-	}
+	targets := []IndexTarget{{ID: "main", Name: "主站", Mode: "subdir", Languages: []IndexLanguage{}, web: p.mainIndexWeb()}}
 	if p.DB == nil {
 		return targets, nil
 	}
+	base, err := db.SitePublicOrigin(ctx, p.DB, p.SiteID)
+	if err != nil {
+		return nil, err
+	}
+	targets[0].URL = base
 	siteID := p.SiteID
 	if siteID <= 0 {
 		siteID = 1
@@ -124,10 +100,10 @@ func (p Publisher) indexTargets(ctx context.Context) ([]IndexTarget, error) {
 		}
 		language := IndexLanguage{Code: code, Name: name, Path: "/"}
 		if isDefault != 1 && strings.EqualFold(strings.TrimSpace(mode), db.LanguageSiteModeStandalone) {
-			base, domainErr := standaloneIndexURL(domain)
+			base := db.PublicOrigin(domain)
 			target := IndexTarget{ID: "language:" + strconv.FormatInt(id, 10), Name: name, Mode: "standalone", URL: base, Languages: []IndexLanguage{language}, web: p.LanguageTargetWeb(LanguageInfo{Code: code, SiteMode: db.LanguageSiteModeStandalone, OutputDir: output})}
-			if domainErr != nil {
-				target.Issue = domainErr.Error()
+			if base == "" {
+				target.Issue = "独立语言站点需要有效的 HTTP(S) 域名"
 			}
 			if err := db.ValidateOutputDir(output); err != nil {
 				target.Issue = err.Error()

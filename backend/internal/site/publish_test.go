@@ -26,7 +26,7 @@ func TestAdminSitemapGeneration(t *testing.T) {
 	if err := db.CreateSchema(context.Background(), database); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.Exec(`INSERT INTO "gocms_site_setting" ("key", "value") VALUES ('site_url', 'https://example.com/')`); err != nil {
+	if _, err := database.Exec(`UPDATE gocms_site SET domain = 'example.com' WHERE id = 1`); err != nil {
 		t.Fatal(err)
 	}
 	server, err := New(database, t.TempDir())
