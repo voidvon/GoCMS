@@ -67,6 +67,7 @@ type Server struct {
 	publication                *publication
 	sitePubMu                  sync.Mutex
 	sitePublications           map[int64]*publication
+	sitePublicationStates      map[int64]*publicationState
 	updateMu                   sync.Mutex
 	updateActive               bool
 	captcha                    *captcha.Service

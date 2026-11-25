@@ -248,7 +248,7 @@ func (s *Server) templateLabelSaved(response http.ResponseWriter, request *http.
 		pub = s.publicationForSite(request.Context(), siteID)
 	}
 	if request.URL.Query().Get("publish") == "1" && pub != nil {
-		report, started := s.startPublishPub(pub, true)
+		report, started := s.startPublishPub(pub, 0, true)
 		writeJSON(response, http.StatusOK, map[string]any{"ok": true, "item": item, "publication": report, "publish_started": started})
 		return
 	}
@@ -262,7 +262,7 @@ func (s *Server) templateLabelDeleted(response http.ResponseWriter, request *htt
 		pub = s.publicationForSite(request.Context(), siteID)
 	}
 	if request.URL.Query().Get("publish") == "1" && pub != nil {
-		report, started := s.startPublishPub(pub, true)
+		report, started := s.startPublishPub(pub, 0, true)
 		writeJSON(response, http.StatusOK, map[string]any{"ok": true, "publication": report, "publish_started": started})
 		return
 	}

@@ -51,6 +51,14 @@ type ContentPage struct {
 	Items    []Content `json:"items"`
 }
 
+type contentVisibility string
+
+const (
+	contentVisibilityAll    contentVisibility = ""
+	contentVisibilityPublic contentVisibility = "1"
+	contentVisibilityHidden contentVisibility = "0"
+)
+
 type contentPayload struct {
 	Commerce      *commerce.Product                 `json:"commerce,omitempty"`
 	Lang          string                            `json:"lang,omitempty"`
@@ -100,12 +108,13 @@ func (s *Server) adminContent(response http.ResponseWriter, request *http.Reques
 	// 层级关系取自 "parent_id"，与栏目名称和路径无关。
 	includeChildren := boolQuery(request.URL.Query().Get("include_children"))
 	lang := strings.TrimSpace(request.URL.Query().Get("lang"))
+	visibility := contentVisibility(strings.TrimSpace(request.URL.Query().Get("visible")))
 	page := positiveInt(request.URL.Query().Get("page"), 1)
 	pageSize := positiveInt(request.URL.Query().Get("page_size"), 20)
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	result, err := s.queryAdminContent(request.Context(), siteID, query, categoryID, includeChildren, lang, page, pageSize)
+	result, err := s.queryAdminContent(request.Context(), siteID, query, categoryID, includeChildren, lang, page, pageSize, visibility)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
@@ -195,7 +204,7 @@ func (s *Server) adminContentItem(response http.ResponseWriter, request *http.Re
 			return
 		}
 		_, _ = s.database.ExecContext(request.Context(), `DELETE FROM "`+db.ContentTranslationTable+`" WHERE "content_id" = ?`, id)
-		s.contentSaved(response, request)
+		s.respondAfterSave(response, request, 0)
 		return
 	}
 	s.saveContent(response, request, id)
@@ -479,7 +488,7 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		http.Error(response, "database error", http.StatusInternalServerError)
 		return
 	}
-	s.contentSaved(response, request)
+	s.respondAfterSave(response, request, id)
 }
 
 func normalizeFlag(value int64) int64 {
@@ -503,7 +512,11 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 		lang = defaultLang
 	}
 
-	rows, total, err := s.queryContentRows(ctx, siteID, query, categoryID, includeChildren, lang, page, pageSize, visibleOnly, true, `
+	visibility := contentVisibilityAll
+	if visibleOnly {
+		visibility = contentVisibilityPublic
+	}
+	rows, total, err := s.queryContentRows(ctx, siteID, query, categoryID, includeChildren, lang, page, pageSize, visibility, true, `
 		"id", COALESCE("route_key", ''), COALESCE("category_id", 0), COALESCE("title", ''),
 		       COALESCE("code", ''), COALESCE("summary", ''), COALESCE("body", ''), COALESCE("cover_image", ''),
 		       COALESCE("published_at", ''), COALESCE("source", ''), COALESCE("seo_title", ''), COALESCE("description", ''),
@@ -543,15 +556,18 @@ func (s *Server) queryContent(ctx context.Context, siteID int64, query string, c
 
 // queryContentRows shares filtering, permissions and pagination between admin
 // and public queries. Public ordering uses sort_order and ranks keyword matches.
-func (s *Server) queryContentRows(ctx context.Context, siteID int64, query string, categoryID int64, includeChildren bool, lang string, page, pageSize int, visibleOnly, publicOrder bool, columns string) (*sql.Rows, int64, error) {
+func (s *Server) queryContentRows(ctx context.Context, siteID int64, query string, categoryID int64, includeChildren bool, lang string, page, pageSize int, visibility contentVisibility, publicOrder bool, columns string) (*sql.Rows, int64, error) {
 	where := "1=1" + contentScopeSQL(ctx)
 	var args []any
 	if siteID > 0 {
 		where += ` AND "site_id" = ?`
 		args = append(args, siteID)
 	}
-	if visibleOnly {
+	switch visibility {
+	case contentVisibilityPublic:
 		where += ` AND "visible" = 1`
+	case contentVisibilityHidden:
+		where += ` AND "visible" = 0`
 	}
 	if categoryID > 0 {
 		if includeChildren {

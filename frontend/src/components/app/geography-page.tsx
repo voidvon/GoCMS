@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { Download, RefreshCw, Upload } from "lucide-react"
 import { activateGeography, downloadGeography, getGeographyStatus, uploadGeography, type GeographyStatus } from "@/lib/api"
 import { showError, showSuccess } from "@/components/app/admin-notifications"
+import { TimeText } from "@/components/app/time-text"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -78,7 +79,7 @@ export function GeographyPage() {
         <div className="sm:col-span-2"><Button type="submit" disabled={disabled}><Upload className="size-4" />上传并导入</Button></div>
       </form>
     </section>
-    <section className="space-y-3 rounded-xl border p-5"><h2 className="font-medium">目录版本</h2>{status?.datasets.map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm"><div className="space-y-1"><p>{item.version} {item.active && <Badge variant="secondary">使用中</Badge>}</p><p className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()} · 国家 {item.countries.toLocaleString()} / 行政区 {item.regions.toLocaleString()} / 城市 {item.cities.toLocaleString()}</p></div>{!item.active && <Button variant="outline" size="sm" disabled={disabled} onClick={() => void run(() => activateGeography(item.id))}>切换到此版本</Button>}</div>)}</section>
+    <section className="space-y-3 rounded-xl border p-5"><h2 className="font-medium">目录版本</h2>{status?.datasets.map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm"><div className="space-y-1"><p>{item.version} {item.active && <Badge variant="secondary">使用中</Badge>}</p><p className="text-xs text-muted-foreground"><TimeText value={item.created_at} /> · 国家 {item.countries.toLocaleString()} / 行政区 {item.regions.toLocaleString()} / 城市 {item.cities.toLocaleString()}</p></div>{!item.active && <Button variant="outline" size="sm" disabled={disabled} onClick={() => void run(() => activateGeography(item.id))}>切换到此版本</Button>}</div>)}</section>
     <p className="text-xs text-muted-foreground">地址参考数据来自 <a className="underline" href="https://www.geonames.org/" target="_blank" rel="noreferrer">GeoNames</a>，遵循 <a className="underline" href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>；本系统将原始数据转换为可搜索目录。该目录用于辅助填写，不提供地址真实性或配送范围校验。</p>
   </ScrollArea>
 }

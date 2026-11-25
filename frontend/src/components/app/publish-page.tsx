@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ExternalLink, LoaderCircle, RefreshCw } from "lucide-react"
-import { generatePublishIndexes, getPublication, getPublishTargets, publishSite, type IndexFormat, type Publication, type PublishIndexFile, type PublishTarget } from "@/lib/api"
+import { usePublication } from "@/lib/publication-context"
+import { generatePublishIndexes, getPublishTargets, publishSite, type IndexFormat, type PublishIndexFile, type PublishTarget } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { InlineAlert } from "@/components/app/app-ui"
-import { showSuccess } from "@/components/app/admin-notifications"
+import { showError, showSuccess } from "@/components/app/admin-notifications"
 import { useSite } from "@/lib/site-context"
 import { TimeText } from "@/components/app/time-text"
 
@@ -44,15 +45,12 @@ function IndexFileCell({ file, label, generating, disabled, onGenerate }: {
 
 export function PublishPage() {
   const { activeSite, activeSiteId } = useSite()
-  const [report, setReport] = useState<Publication | null>(null)
+  const { report, syncError, track } = usePublication()
   const [targets, setTargets] = useState<PublishTarget[]>([])
   const [targetsLoading, setTargetsLoading] = useState(true)
-  const [error, setError] = useState("")
   const [indexError, setIndexError] = useState("")
   const [starting, setStarting] = useState(false)
   const [job, setJob] = useState<IndexJob | null>(null)
-  const previousReport = useRef<Publication | null>(null)
-  const isPublishing = useRef(false)
   const mounted = useRef(false)
 
   const refreshTargets = useCallback(async () => {
@@ -72,57 +70,21 @@ export function PublishPage() {
 
   useEffect(() => {
     mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+
+  const finished = report?.state === "running" ? undefined : report?.finished
+  useEffect(() => {
     void refreshTargets()
-    let active = true
-    const refresh = async (background = false) => {
-      try {
-        const next = await getPublication(activeSiteId, background)
-        if (!active) return
-        const previous = previousReport.current
-        if ((isPublishing.current || previous?.state === "running") && next.state === "success") {
-          showSuccess("发布成功")
-          isPublishing.current = false
-        } else if (next.state === "failed") {
-          isPublishing.current = false
-        }
-        if (previous && next.state !== "running" && (previous.state !== next.state || previous.finished !== next.finished)) {
-          void refreshTargets()
-        }
-        previousReport.current = next
-        setReport(next)
-        setError("")
-      } catch (e) {
-        if (active) setError(e instanceof Error ? e.message : "无法读取发布状态")
-      }
-    }
-    void refresh()
-    const timer = setInterval(() => void refresh(true), 2000)
-    return () => {
-      active = false
-      mounted.current = false
-      clearInterval(timer)
-    }
-  }, [activeSiteId, refreshTargets])
+  }, [refreshTargets, finished])
 
   async function publish() {
     setStarting(true)
-    setError("")
-    isPublishing.current = true
     try {
       const next = await publishSite(activeSiteId)
-      if (!mounted.current) return
-      setReport(next)
-      if (next.state === "success") {
-        showSuccess("发布成功")
-        isPublishing.current = false
-        void refreshTargets()
-      }
-      previousReport.current = next
+      track(next)
     } catch (e) {
-      if (mounted.current) {
-        isPublishing.current = false
-        setError(e instanceof Error ? e.message : "发布失败")
-      }
+      if (mounted.current) showError(e, "发布失败")
     } finally {
       if (mounted.current) setStarting(false)
     }
@@ -162,7 +124,7 @@ export function PublishPage() {
 
   return (
     <ScrollArea className="h-full" contentClassName="space-y-6 pb-1 pr-3">
-      {error && <InlineAlert>{error}</InlineAlert>}
+      {syncError && <InlineAlert>{syncError}</InlineAlert>}
       {report?.error && <InlineAlert>{report.error}</InlineAlert>}
       <Card>
         <CardContent className="space-y-5">
@@ -190,7 +152,7 @@ export function PublishPage() {
             <div><p className="text-xs text-muted-foreground">发布目标</p><p className="mt-1 text-xl font-semibold">{targetsLoading ? "—" : targets.length}</p></div>
             <div><p className="text-xs text-muted-foreground">启用语言</p><p className="mt-1 text-xl font-semibold">{targetsLoading ? "—" : languagesCount}</p></div>
             <div><p className="text-xs text-muted-foreground">最近任务生成文件</p><p className="mt-1 text-xl font-semibold">{report?.state === "success" ? report.files : "—"}</p></div>
-            <div><p className="text-xs text-muted-foreground">最近完成</p><p className="mt-2 text-sm">{report?.finished && !report.finished.startsWith("0001") ? <TimeText value={report.finished} mode="datetime" /> : "尚无记录"}</p></div>
+            <div><p className="text-xs text-muted-foreground">最近完成</p><p className="mt-2 text-sm">{report?.finished && !report.finished.startsWith("0001") ? <TimeText value={report.finished} /> : "尚无记录"}</p></div>
           </div>
           {report?.content_id ? <p className="text-xs text-muted-foreground">最近任务为内容 #{report.content_id} 的单条更新；此类更新不会刷新网站索引。</p> : null}
         </CardContent>

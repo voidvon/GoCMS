@@ -8,9 +8,15 @@ const HOUR = 60 * MINUTE
 const WEEKDAYS = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
 
 const pad = (value: number) => String(value).padStart(2, "0")
+export type TimeSource = "instant" | "wall"
+const dateOnly = /^\d{4}-\d{2}-\d{2}$/
 
 /** 解析后端时间戳为瞬时时间；空值或无法识别的值返回 null。 */
 export function parseInstant(value?: string | null): Date | null {
+  return parseTime(value, "instant")
+}
+
+function parseTime(value: string | null | undefined, source: TimeSource): Date | null {
   const raw = (value ?? "").trim()
   if (!raw) return null
   if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw)) {
@@ -20,15 +26,17 @@ export function parseInstant(value?: string | null): Date | null {
   const match = /^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?))?$/.exec(raw)
   if (!match) return null
   const time = match[2] ?? "00:00:00"
-  const parsed = new Date(`${match[1]}T${time.length === 5 ? `${time}:00` : time}Z`)
+  const parsed = new Date(`${match[1]}T${time.length === 5 ? `${time}:00` : time}${source === "instant" ? "Z" : ""}`)
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
 /** 浏览器时区下的完整时间：2026-10-18 20:33:24 */
-export function formatDateTime(value?: string | null): string {
-  const date = parseInstant(value)
+export function formatDateTime(value?: string | null, source: TimeSource = "instant"): string {
+  const date = parseTime(value, source)
   if (!date) return ""
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  if (source === "wall" && dateOnly.test(value?.trim() ?? "")) return day
+  return `${day} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
 }
 
 /** 浏览器时区下的日期：2026-10-18 */
@@ -46,39 +54,32 @@ export function localDayStart(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toISOString()
 }
 
-/** 挂钟时间（用户填写、不带时区）按字面展示：2026/10/18 */
-export function formatWallDate(value?: string | null): string {
-  const raw = (value ?? "").trim()
-  if (!raw) return ""
-  const date = raw.slice(0, 10)
-  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.replaceAll("-", "/") : raw
-}
-
 /**
  * 相对时间：刚刚、N 分钟前、N 小时前、昨天、前天、本周、上周、本月、上月，
- * 更早的时间显示具体日期，未来时间直接显示具体日期。
+ * 更早的历史记录只显示日期，往年带年份。
  */
-export function formatRelativeTime(value?: string | null): string {
-  const date = parseInstant(value)
+export function formatRelativeTime(value?: string | null, source: TimeSource = "instant"): string {
+  const date = parseTime(value, source)
   if (!date) return ""
   const now = new Date()
   const elapsed = now.getTime() - date.getTime()
-  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  const hasClock = source !== "wall" || !dateOnly.test(value?.trim() ?? "")
+  const clock = hasClock ? ` ${pad(date.getHours())}:${pad(date.getMinutes())}` : ""
   const day = `${date.getMonth() + 1}月${date.getDate()}日`
-  if (elapsed >= 0 && elapsed < MINUTE) return "刚刚"
-  if (elapsed >= MINUTE && elapsed < HOUR) return `${Math.floor(elapsed / MINUTE)} 分钟前`
+  if (hasClock && elapsed >= 0 && elapsed < MINUTE) return "刚刚"
+  if (hasClock && elapsed >= MINUTE && elapsed < HOUR) return `${Math.floor(elapsed / MINUTE)} 分钟前`
   const days = dayDiff(now, date)
-  if (days === 0 && elapsed >= 0) return `${Math.floor(elapsed / HOUR)} 小时前`
-  if (days === 1) return `昨天 ${clock}`
-  if (days === 2) return `前天 ${clock}`
+  if (days === 0 && elapsed >= 0) return hasClock ? `${Math.floor(elapsed / HOUR)} 小时前` : "今天"
+  if (days === 1) return `昨天${clock}`
+  if (days === 2) return `前天${clock}`
   const weeks = dayDiff(startOfWeek(now), startOfWeek(date)) / 7
-  if (weeks === 0) return `${WEEKDAYS[date.getDay()]} ${clock}`
-  if (weeks === 1) return `上周${WEEKDAYS[date.getDay()].slice(1)} ${clock}`
+  if (weeks === 0) return `${WEEKDAYS[date.getDay()]}${clock}`
+  if (weeks === 1) return `上周${WEEKDAYS[date.getDay()].slice(1)}${clock}`
   const months = (now.getFullYear() - date.getFullYear()) * 12 + (now.getMonth() - date.getMonth())
-  if (months === 0) return `本月${date.getDate()}日 ${clock}`
-  if (months === 1) return `上月${date.getDate()}日 ${clock}`
-  if (date.getFullYear() === now.getFullYear()) return `${day} ${clock}`
-  return `${date.getFullYear()}年${day} ${clock}`
+  if (months === 0) return `本月${date.getDate()}日${clock}`
+  if (months === 1) return `上月${date.getDate()}日${clock}`
+  const calendarDate = date.getFullYear() === now.getFullYear() ? day : `${date.getFullYear()}年${day}`
+  return elapsed < 0 ? calendarDate + clock : calendarDate
 }
 
 /** 自然日之差，忽略时分秒。 */

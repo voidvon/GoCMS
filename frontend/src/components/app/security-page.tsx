@@ -279,7 +279,7 @@ export function SecurityPage({ user }: { user: AdminUser }) {
                 </TableRow>
               ) : events.map(event => (
                 <TableRow key={event.id}>
-                  <TableCell className="ps-4 text-xs text-muted-foreground"><TimeText value={event.created_at} mode="datetime" /></TableCell>
+                  <TableCell className="ps-4 text-xs text-muted-foreground"><TimeText value={event.created_at} /></TableCell>
                   <TableCell><Badge variant={event.action === "ban" ? "destructive" : "outline"}>{actionLabels[event.action] ?? event.action}</Badge></TableCell>
                   <TableCell className="font-mono text-xs">{event.ip || "—"}</TableCell>
                   <TableCell className="max-w-44 whitespace-normal wrap-anywhere text-xs">{event.host || "—"}</TableCell>

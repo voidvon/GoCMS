@@ -258,7 +258,7 @@ func TestPageUpdateRollsBackDirectoriesWhenHistoryCannotBeSaved(t *testing.T) {
 	for _, name := range []string{"main", "standalone"} {
 		web := filepath.Join(root, name)
 		writeTemplate(t, web, "index.html", "before")
-		update, err := stagePageUpdate(context.Background(), web, map[string][]byte{"index.html": []byte("after")}, false, true, nil)
+		update, err := stagePageUpdate(context.Background(), web, map[string][]byte{"index.html": []byte("after")}, false, true, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

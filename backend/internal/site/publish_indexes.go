@@ -27,7 +27,7 @@ func (s *Server) adminPublishIndexes(w http.ResponseWriter, r *http.Request) {
 	}
 	var targets []generator.IndexTarget
 	if r.Method == http.MethodGet {
-		targets, err = pub.publisher.IndexTargets(r.Context())
+		targets, err = pub.publisherSnapshot().IndexTargets(r.Context())
 	} else {
 		var payload struct {
 			Target string `json:"target"`
@@ -37,7 +37,7 @@ func (s *Server) adminPublishIndexes(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "请指定发布目标和索引格式"})
 			return
 		}
-		targets, err = pub.publisher.GenerateIndexes(r.Context(), payload.Target, payload.Format)
+		targets, err = pub.publisherSnapshot().GenerateIndexes(r.Context(), payload.Target, payload.Format)
 	}
 	if err != nil {
 		status := http.StatusInternalServerError

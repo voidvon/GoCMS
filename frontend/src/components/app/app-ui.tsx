@@ -1,6 +1,6 @@
 import type { ComponentProps, ReactNode } from "react"
 import { useState } from "react"
-import { AlertCircle, ChevronLeft, ChevronRight, Search } from "lucide-react"
+import { AlertCircle, ChevronLeft, ChevronRight, Search, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -75,8 +75,10 @@ export function InlineAlert({
 export function SearchField({
   className,
   size = "default",
+  onClear,
   ...props
-}: ComponentProps<typeof Input>) {
+}: ComponentProps<typeof Input> & { onClear?: () => void }) {
+  const showClear = Boolean(onClear && String(props.value ?? ""))
   return (
     <div className="relative min-w-0 flex-1">
       <Search
@@ -89,8 +91,22 @@ export function SearchField({
       <Input
         size={size}
         {...props}
-        className={cn(size === "sm" ? "pl-[26px]" : "pl-8", className)}
+        className={cn(size === "sm" ? "pl-[26px]" : "pl-8", showClear && "pr-8", className)}
       />
+      {showClear && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="absolute top-1/2 right-0.5 -translate-y-1/2 text-muted-foreground"
+          aria-label="清空搜索"
+          title="清空搜索"
+          disabled={props.disabled}
+          onClick={onClear}
+        >
+          <X aria-hidden="true" />
+        </Button>
+      )}
     </div>
   )
 }

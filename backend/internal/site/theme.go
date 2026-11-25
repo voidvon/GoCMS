@@ -425,7 +425,7 @@ func (s *Server) adminThemeActivate(response http.ResponseWriter, request *http.
 		pub.publisher.Templates = definition.TemplatesRoot
 		pub.publisher.Theme = definition.AssetsRoot
 		pub.publisher.HomeTemplate = definition.HomeTemplate()
-		publicationReport, publishStarted := s.startPublishLocked(pub, false)
+		publicationReport, publishStarted := s.startPublishLocked(pub, 0, false)
 		pub.mu.Unlock()
 		writeJSON(response, http.StatusOK, map[string]any{
 			"ok":              true,

@@ -844,9 +844,17 @@ export function getStats(options: { includeTop?: boolean; window?: DashboardWind
   return request<AdminStats>(`/api/admin/stats${query({ include_top: options.includeTop === false ? "false" : undefined, window: options.window, refresh: options.refresh ? "true" : undefined })}`, init)
 }
 
-export function getContent(page: number, pageSize: number, search: string, categoryID = 0, lang?: string, includeChildren = false) {
+export function getContent(page: number, pageSize: number, search: string, categoryID = 0, lang?: string, includeChildren = false, visible?: "0" | "1") {
   return request<ContentPage>(
-    `/api/admin/content${query({ page, page_size: pageSize, q: search, category_id: categoryID || undefined, include_children: includeChildren ? 1 : undefined, lang: lang || undefined })}`,
+    `/api/admin/content${query({
+      page,
+      page_size: pageSize,
+      q: search,
+      category_id: categoryID || undefined,
+      include_children: includeChildren ? 1 : undefined,
+      lang: lang || undefined,
+      visible,
+    })}`,
   )
 }
 
@@ -1167,10 +1175,21 @@ export function deleteFeedbackField(id: number) {
   return request<{ ok: boolean }>(`/api/admin/feedback-fields/${id}`, { method: "DELETE" })
 }
 
-export type Publication = { state: "idle" | "running" | "success" | "failed"; started: string; finished: string; files: number; contents: number; error?: string; content_id?: number }
+export type Publication = {
+  state: "idle" | "running" | "success" | "failed"
+  started: string
+  finished: string
+  files: number
+  contents: number
+  error?: string
+  content_id?: number
+  queued?: boolean
+  progress?: { stage: "preparing" | "rendering" | "assembling" | "writing" | "installing"; completed: number; total?: number }
+}
 export type SaveResponse = { ok: boolean; publication?: Publication; publish_started?: boolean }
-export function getPublication(siteId?: number, background = false) {
+export function getPublication(siteId?: number, background = false, signal?: AbortSignal) {
   return request<Publication>(`/api/admin/publish${query({ site_id: siteId })}`, {
+    signal,
     headers: background ? { "X-GoCMS-Background": "1" } : undefined,
   })
 }

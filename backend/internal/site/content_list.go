@@ -32,12 +32,12 @@ type AdminContentPage struct {
 	Items    []AdminContentItem `json:"items"`
 }
 
-func (s *Server) queryAdminContent(ctx context.Context, siteID int64, query string, categoryID int64, includeChildren bool, lang string, page, pageSize int) (AdminContentPage, error) {
+func (s *Server) queryAdminContent(ctx context.Context, siteID int64, query string, categoryID int64, includeChildren bool, lang string, page, pageSize int, visibility contentVisibility) (AdminContentPage, error) {
 	defaultLang, fallbackLang := s.getDefaultAndFallbackLang(ctx, siteID)
 	if lang == "" {
 		lang = defaultLang
 	}
-	rows, total, err := s.queryContentRows(ctx, siteID, query, categoryID, includeChildren, lang, page, pageSize, false, false, `
+	rows, total, err := s.queryContentRows(ctx, siteID, query, categoryID, includeChildren, lang, page, pageSize, visibility, false, `
 		"id", COALESCE("category_id", 0), COALESCE("title", ''), COALESCE("code", ''),
 		COALESCE("cover_image", ''), COALESCE("published_at", ''), COALESCE("featured", 0), COALESCE("visible", 0)`)
 	if err != nil {

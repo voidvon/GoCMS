@@ -151,7 +151,7 @@ func TestLanguageDefaultsApplyToOwningSiteContentAndCategories(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, lang := range []string{"", "missing-translation"} {
-		page, err := server.queryAdminContent(ctx, 2, "", 0, false, lang, 1, 10)
+		page, err := server.queryAdminContent(ctx, 2, "", 0, false, lang, 1, 10, contentVisibilityAll)
 		if err != nil || len(page.Items) != 1 || page.Items[0].Title != "Titre français" {
 			t.Fatalf("admin content lang %q: %+v %v", lang, page, err)
 		}

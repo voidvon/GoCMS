@@ -11,8 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gocms/internal/db"
+	"gocms/internal/generator"
 )
 
 func TestAdminSitemapGeneration(t *testing.T) {
@@ -217,5 +219,165 @@ func TestAdminPublishContent(t *testing.T) {
 	}
 	if report := server.publicationReport(server.publication); report.State != "failed" || report.Error == "" {
 		t.Fatalf("failure report: %+v", report)
+	}
+}
+
+func TestQueuedPublicationProgressAndReviewPermission(t *testing.T) {
+	s, database, root := newCategoryTestServer(t)
+	s.ConfigurePublishing(t.TempDir(), t.TempDir(), "", "", "")
+	if _, err := database.Exec(`INSERT INTO gocms_site (id, name, code) VALUES (2, '第二站点', 'two');
+		INSERT INTO gocms_admin_group (name, permissions) VALUES ('reviewers', '["content","content.review"]');
+		INSERT INTO gocms_admin_user (username, group_id, site_ids) SELECT 'reviewer', id, '[2]' FROM gocms_admin_group WHERE name = 'reviewers'`); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.createSession("reviewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const path = "/api/admin/publish?site_id=2"
+	pub := s.publicationForSite(context.Background(), 2)
+	pub.mu.Lock()
+	current := pub.beginRunLocked(51)
+	pub.mu.Unlock()
+	current.OnProgress(generator.Progress{Stage: "rendering", Completed: 4})
+	s.invalidateSitePublication(2)
+	next := s.publicationForSite(context.Background(), 2)
+	queued, started := s.startPublishPub(next, 0, true)
+	if started || !queued.Queued || queued.Progress == nil || queued.Progress.Completed != 4 {
+		t.Fatalf("lost running or queued progress: %+v", queued)
+	}
+	response := categoryRequest(t, s, token, http.MethodGet, path, "")
+	var snapshot generator.Report
+	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &snapshot) != nil || !snapshot.Queued || snapshot.ContentID != 0 || snapshot.Progress == nil || snapshot.Progress.Completed != 4 {
+		t.Fatalf("reviewer status: %d %s", response.Code, response.Body.String())
+	}
+	for _, request := range []struct{ method, path string }{
+		{http.MethodPost, path}, {http.MethodGet, "/api/admin/publish?site_id=1"}, {http.MethodGet, "/api/admin/publish/indexes?site_id=2"},
+	} {
+		if res := categoryRequest(t, s, token, request.method, request.path, ""); res.Code != http.StatusForbidden {
+			t.Fatalf("%s %s: %d", request.method, request.path, res.Code)
+		}
+	}
+	if report := s.publicationReport(s.publication); report.State != "idle" {
+		t.Fatalf("progress leaked to another site: %+v", report)
+	}
+	// The queued build has no templates. It must replace the preceding successful
+	// run with its own terminal failure, even after config cache invalidation.
+	s.finishPublish(pub, generator.Report{State: "success", Finished: time.Now()}, nil)
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		report := s.publicationReport(next)
+		if report.State == "failed" && !report.Queued && report.Error != "" {
+			res := categoryRequest(t, s, root, http.MethodGet, path, "")
+			if res.Code != 200 || !strings.Contains(res.Body.String(), "index.html") {
+				t.Fatalf("publisher failure detail: %s", res.Body.String())
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("queued publication did not finish")
+}
+
+func TestSaveAndPublishRefreshesOnlySavedContent(t *testing.T) {
+	s, database, token := newCategoryTestServer(t)
+	templates := t.TempDir()
+	for name, body := range map[string]string{
+		"index.html": "Home", "category_list.html": "List", "content_detail.html": "{{.title}}",
+	} {
+		if err := os.WriteFile(filepath.Join(templates, name), []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.ConfigurePublishing(templates, t.TempDir(), "", "", "")
+	if _, err := database.Exec(`INSERT INTO gocms_category (id, name, list_path, list_page_size, list_template, detail_template) VALUES
+		(71,'编辑栏目','articles',1,'category_list.html','content_detail.html'),
+		(72,'无关栏目','other',1,'missing.html','missing.html');
+		INSERT INTO gocms_content (id,category_id,route_key,title,visible) VALUES
+		(101,71,'first.html','First',1),(102,71,'second.html','Second',1),(103,72,'other.html','Other',1)`); err != nil {
+		t.Fatal(err)
+	}
+	web := s.publication.publisher.TargetWeb()
+	if err := os.MkdirAll(web, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(web, "sitemap.xml"), []byte("original sitemap"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	save := func(method, path, title string) generator.Report {
+		t.Helper()
+		res := categoryRequest(t, s, token, method, path+"?publish=1",
+			fmt.Sprintf(`{"title":%q,"category_id":71,"visible":1}`, title))
+		var result struct{ Publication generator.Report }
+		if res.Code != http.StatusOK || json.Unmarshal(res.Body.Bytes(), &result) != nil || result.Publication.State != "running" {
+			t.Fatalf("save: %d %s", res.Code, res.Body.String())
+		}
+		return result.Publication
+	}
+	wait := func(id int64) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+			r := s.publicationReport(s.publication)
+			if r.State != "running" {
+				if r.State != "success" || r.ContentID != id || r.Contents != 1 || r.Queued {
+					t.Fatalf("unexpected completion: %+v", r)
+				}
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatal("single publication did not finish")
+	}
+
+	created := save(http.MethodPost, "/api/admin/content", "Created")
+	if created.ContentID <= 103 {
+		t.Fatalf("missing inserted ID: %+v", created)
+	}
+	wait(created.ContentID)
+	updated := save(http.MethodPut, "/api/admin/content/101", "Edited")
+	if updated.ContentID != 101 {
+		t.Fatalf("update chose wrong content: %+v", updated)
+	}
+	wait(101)
+
+	// Hold a run open while independent HTTP requests commit new content snapshots.
+	pub := s.publication
+	pub.mu.Lock()
+	pub.beginRunLocked(101)
+	pub.mu.Unlock()
+	for _, change := range []struct{ path, title string }{
+		{"/api/admin/content/101", "First queued"}, {"/api/admin/content/102", "Second queued"}, {"/api/admin/content/101", "Latest first"},
+	} {
+		if report := save(http.MethodPut, change.path, change.title); !report.Queued {
+			t.Fatal("save did not queue")
+		}
+	}
+	pub.mu.Lock()
+	n := len(pub.pending)
+	pub.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("wanted two distinct pending items, got %d", n)
+	}
+	s.finishPublish(pub, generator.Report{State: "success", ContentID: 101, Finished: time.Now()}, nil)
+	wait(102)
+	for name, want := range map[string]string{
+		"content/first.html": "Latest first", "content/second.html": "Second queued", "sitemap.xml": "original sitemap",
+	} {
+		got, err := os.ReadFile(filepath.Join(web, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("%s = %q, %v, want %q", name, got, err, want)
+		}
+	}
+}
+
+func TestPendingFullPublishCoversContentSaves(t *testing.T) {
+	p := &publication{publicationState: &publicationState{report: generator.Report{State: "running"}}}
+	next := &publication{publicationState: p.publicationState}
+	p.enqueueLocked(14)
+	p.enqueueLocked(28)
+	p.enqueueLocked(0)
+	next.enqueueLocked(42)
+	if len(p.pending) != 1 || p.pending[0].contentID != 0 || p.pending[0].target != next {
+		t.Fatalf("expected one full publish using current site config, got %+v", p.pending)
 	}
 }

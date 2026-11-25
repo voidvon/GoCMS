@@ -26,6 +26,7 @@ import {
   type SystemModel,
   updateContent,
 } from "@/lib/api"
+import { usePublication } from "@/lib/publication-context"
 import { useLanguage } from "@/lib/language-context"
 import { useSite } from "@/lib/site-context"
 import { showError, showSuccess } from "@/components/app/admin-notifications"
@@ -46,7 +47,7 @@ import { PaginatedTable } from "@/components/app/paginated-table"
 import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
 import { RichTextEditor } from "@/components/app/rich-text-editor"
 import { flattenCategoryTree } from "@/lib/category-tree"
-import { formatWallDate } from "@/lib/time"
+import { TimeText } from "@/components/app/time-text"
 
 function buildInitialContentTranslations(
   content: ContentInput,
@@ -132,6 +133,11 @@ function FieldLabel({
 }
 
 const pageSize = 20
+const visibilityOptions = [
+  { value: "all", label: "全部状态" },
+  { value: "1", label: "公开" },
+  { value: "0", label: "隐藏" },
+] as const
 
 const emptyContent: ContentInput = {
   title: "",
@@ -172,8 +178,8 @@ function publicationMessage(result: SaveResponse, action: ContentSaveAction, vis
   }
   if (!result.publication) return "内容已保存，网站尚未更新。"
   return result.publish_started
-    ? "内容已保存，正在生成网站。请在网站发布中查看结果。"
-    : "内容已保存并加入发布队列，将在当前任务完成后自动生成。"
+    ? "内容已保存，正在更新详情、栏目和首页。可在右上角查看进度。"
+    : "内容已保存，已加入发布队列。可在右上角查看进度。"
 }
 
 function parseFieldOptions(text: string) {
@@ -1357,6 +1363,7 @@ function ContentEditor({
 
 export function ContentPage({ user }: { user: AdminUser }) {
   const { activeSiteId } = useSite()
+  const { track } = usePublication()
   const permissions = user.site_permissions?.[activeSiteId] ?? user.permissions
   const allowed = (permission: string) => user.is_super || permissions.includes("*") || permissions.includes(permission)
   const canReview = allowed("content.review")
@@ -1368,9 +1375,12 @@ export function ContentPage({ user }: { user: AdminUser }) {
   const [modelFields, setModelFields] = useState<ModelField[]>([])
   const [query, setQuery] = useState("")
   const [appliedQuery, setAppliedQuery] = useState("")
+  const searchInput = useRef<HTMLInputElement>(null)
   const [categoryID, setCategoryID] = useState(0)
+  const [visibility, setVisibility] = useState<(typeof visibilityOptions)[number]["value"]>("all")
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
+  const [reload, setReload] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
@@ -1395,23 +1405,28 @@ export function ContentPage({ user }: { user: AdminUser }) {
 
   useEffect(() => {
     let active = true
-    getContent(page, pageSize, appliedQuery, categoryID, activeLang, true)
+    getContent(page, pageSize, appliedQuery, categoryID, activeLang, true, visibility === "all" ? undefined : visibility)
       .then((response) => {
         if (!active) return
-        setItems(response.items)
         setTotal(response.total)
+        const lastPage = Math.max(1, Math.ceil(response.total / pageSize))
+        if (page > lastPage) {
+          setPage(lastPage)
+          return
+        }
+        setItems(response.items)
         setError("")
+        setLoading(false)
       })
       .catch((loadError) => {
-        if (active) setError(loadError instanceof Error ? loadError.message : "内容加载失败")
-      })
-      .finally(() => {
-        if (active) setLoading(false)
+        if (!active) return
+        setError(loadError instanceof Error ? loadError.message : "内容加载失败")
+        setLoading(false)
       })
     return () => {
       active = false
     }
-  }, [appliedQuery, categoryID, page, activeLang])
+  }, [appliedQuery, categoryID, visibility, page, activeLang, reload])
 
   useEffect(() => {
     const id = Number(new URLSearchParams(window.location.search).get("edit"))
@@ -1477,12 +1492,22 @@ export function ContentPage({ user }: { user: AdminUser }) {
     }
   }, [editingDetail, categoryID, categoryOptions])
 
-  function submitSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const nextQuery = query.trim()
+  function applySearch(nextQuery: string) {
     setLoading(true)
     setPage(1)
     setAppliedQuery(nextQuery)
+    setReload((current) => current + 1)
+  }
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    applySearch(query.trim())
+  }
+
+  function clearSearch() {
+    setQuery("")
+    applySearch("")
+    searchInput.current?.focus()
   }
 
   function openNew() {
@@ -1519,19 +1544,16 @@ export function ContentPage({ user }: { user: AdminUser }) {
       const result = editing
         ? await updateContent(editing.id, payload, publish, activeLang)
         : await createContent(payload, publish, activeLang)
+      if (result.publication) track(result.publication)
       showSuccess(publicationMessage(result, action, payload.visible))
       closeEditor(false)
       setLoading(true)
-      const targetPage = editing ? page : 1
       if (!editing) setPage(1)
-      const response = await getContent(targetPage, pageSize, appliedQuery, categoryID, activeLang, true)
-      setItems(response.items)
-      setTotal(response.total)
+      setReload((current) => current + 1)
     } catch (saveError) {
       showError(saveError, "保存失败")
     } finally {
       setSaving(false)
-      setLoading(false)
     }
   }
 
@@ -1542,6 +1564,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
     setNotice("")
     try {
       const report = await publishContent(item.id)
+      track(report)
       setNotice(`「${item.title}」HTML 已更新，共生成 ${report.files} 个页面，包含所属栏目、全部父级栏目及首页（所有启用语言）。`)
     } catch (publishError) {
       setError(publishError instanceof Error ? publishError.message : "更新 HTML 失败")
@@ -1555,6 +1578,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
     setDeleteSaving(true)
     try {
       const result = await deleteContent(deleting.id, true)
+      if (result.publication) track(result.publication)
       setItems((current) => current.filter((item) => item.id !== deleting.id))
       setTotal((current) => Math.max(0, current - 1))
       if (items.length === 1 && page > 1) setPage(page - 1)
@@ -1572,17 +1596,29 @@ export function ContentPage({ user }: { user: AdminUser }) {
   return (
     <div className="space-y-4 lg:flex lg:h-full lg:min-h-0 lg:flex-col lg:space-y-0 lg:gap-4">
       <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <Button size="sm" disabled={!allowed("content.add")} onClick={openNew}><Plus />新增内容</Button>
+        <IconButton size="icon-sm" label="新增内容" disabled={!allowed("content.add")} onClick={openNew}>
+          <Plus aria-hidden="true" />
+        </IconButton>
         <form className="flex w-full sm:w-80 max-w-md gap-2" onSubmit={submitSearch}>
-          <SearchField size="sm" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、编号或关键词" />
+          <SearchField
+            ref={searchInput}
+            size="sm"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onClear={clearSearch}
+            aria-label="搜索标题、编号或关键词"
+            placeholder="搜索标题、编号或关键词"
+          />
           <Button size="sm" type="submit" variant="outline"><Search />搜索</Button>
         </form>
         <Select
           value={String(categoryID)}
           onValueChange={(value) => {
+            const nextCategoryID = Number(value ?? 0)
+            if (nextCategoryID === categoryID) return
             setLoading(true)
             setPage(1)
-            setCategoryID(Number(value ?? 0))
+            setCategoryID(nextCategoryID)
           }}
         >
           <SelectTrigger size="sm" className="w-full sm:w-48" aria-label="按分类筛选">
@@ -1601,6 +1637,26 @@ export function ContentPage({ user }: { user: AdminUser }) {
               <SelectItem key={category.id} value={String(category.id)}>
                 <span className="whitespace-pre">{"  ".repeat(category.depth)}{category.name}</span>
               </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select
+          value={visibility}
+          items={visibilityOptions}
+          onValueChange={(value) => {
+            const nextVisibility = value ?? "all"
+            if (nextVisibility === visibility) return
+            setLoading(true)
+            setPage(1)
+            setVisibility(nextVisibility)
+          }}
+        >
+          <SelectTrigger size="sm" className="w-full sm:w-36" aria-label="按公开状态筛选">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {visibilityOptions.map(({ value, label }) => (
+              <SelectItem key={value} value={value}>{label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -1673,7 +1729,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{categoryName(categories, item.category_id)}</TableCell>
-                  <TableCell className="text-muted-foreground">{formatWallDate(item.published_at) || "暂无日期"}</TableCell>
+                  <TableCell className="text-muted-foreground"><TimeText value={item.published_at} source="wall" placeholder="暂无日期" /></TableCell>
                   <TableCell>
                     <div className="flex gap-1.5 text-xs">
                       <span>{item.visible ? "公开" : "隐藏"}</span>
@@ -1683,10 +1739,16 @@ export function ContentPage({ user }: { user: AdminUser }) {
                   <TableCell className="pr-4 text-right">
                     <div className="flex justify-end gap-1">
                       {allowed("publish") ? (
-                        <Button variant="ghost" size="sm" disabled={publishingID !== null} onClick={() => refreshHTML(item)} title="更新此内容、所属栏目、全部父级栏目及首页（所有启用语言）">
+                        <IconButton
+                          variant="ghost"
+                          size="icon-sm"
+                          disabled={publishingID !== null}
+                          onClick={() => refreshHTML(item)}
+                          label="更新此内容、所属栏目、全部父级栏目及首页（所有启用语言）"
+                          aria-label={`更新「${item.title}」的 HTML`}
+                        >
                           {publishingID === item.id ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-                          更新 HTML
-                        </Button>
+                        </IconButton>
                       ) : null}
                       <IconButton disabled={!allowed("content.delete")} variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(item)} label={`删除${item.title}`}><Trash2 /></IconButton>
                     </div>

@@ -284,7 +284,7 @@ export function DatabaseBackupPage() {
                     {lastRun.state === "success" ? "成功" : lastRun.state === "warning" ? "清理未完成" : "失败"}
                   </Badge>{" "}
                   <span className="text-muted-foreground">
-                    {lastRun.source === "automatic" ? "自动备份" : "手动备份"} · <TimeText value={lastRun.at} mode="datetime" />
+                    {lastRun.source === "automatic" ? "自动备份" : "手动备份"} · <TimeText value={lastRun.at} />
                   </span>
                 </p>
                 {lastRun.state !== "success" && <p className="text-muted-foreground">{lastRun.message}</p>}
@@ -309,7 +309,7 @@ export function DatabaseBackupPage() {
                           <div className="space-y-1">
                             <p className="font-mono text-xs [overflow-wrap:anywhere]">{name}</p>
                             <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                              <TimeText value={item.at} mode="datetime" /> · {formatBackupSize(item.size)}
+                              <TimeText value={item.at} /> · {formatBackupSize(item.size)}
                               {item.recent && <Badge variant="secondary">近期</Badge>}
                               {item.monthly && <Badge variant="outline">月度</Badge>}
                             </p>

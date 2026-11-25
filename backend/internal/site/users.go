@@ -219,6 +219,9 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此内容操作权限"})
 			return false
 		}
+		if route == "/api/admin/publish" && r.Method == http.MethodGet && hasPerm("content") && hasPerm("content.review") {
+			return true
+		}
 		switch module {
 		case "stats", "site-settings", "notifications":
 			return true

@@ -140,6 +140,7 @@ func TestAdminContentListSearchAndPagination(t *testing.T) {
 	if _, err := database.Exec(`
 		UPDATE gocms_content SET code = 'CODE-ONLY' WHERE id = 1;
 		UPDATE gocms_content SET body = 'base-body-marker' WHERE id = 2;
+		UPDATE gocms_content SET visible = 0 WHERE id IN (1, 2);
 		INSERT INTO gocms_content_translation (content_id, lang, title, summary, body) VALUES
 		(1, 'en', 'Needle prefix', '', ''),
 		(2, 'en', 'Needle', 'summary-marker', ''),
@@ -148,30 +149,38 @@ func TestAdminContentListSearchAndPagination(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := []struct {
-		name, query string
-		categoryID  int64
-		page, size  int
-		wantTotal   int64
-		wantIDs     []int64
+		name, query, visible string
+		categoryID           int64
+		page, size           int
+		wantTotal            int64
+		wantIDs              []int64
 	}{
-		{"first search page by descending ID", "Needle", 0, 1, 2, 3, []int64{3, 2}},
-		{"second search page by descending ID", "Needle", 0, 2, 2, 3, []int64{1}},
-		{"base body", "base-body-marker", 0, 1, 20, 1, []int64{2}},
-		{"translation body", "translation-body-marker", 0, 1, 20, 1, []int64{3}},
-		{"translation summary", "summary-marker", 0, 1, 20, 1, []int64{2}},
-		{"code", "CODE-ONLY", 0, 1, 20, 1, []int64{1}},
-		{"other language excluded", "foreign-title-marker", 0, 1, 20, 0, []int64{}},
-		{"first page by descending ID", "", 0, 1, 2, 3, []int64{3, 2}},
-		{"second page by descending ID", "", 0, 2, 2, 3, []int64{1}},
-		{"category filter by descending ID", "", category, 1, 20, 2, []int64{3, 1}},
-		{"category filter with search by descending ID", "Needle", category, 1, 20, 2, []int64{3, 1}},
-		{"past last page", "", 0, 3, 2, 3, []int64{}},
+		{"first search page by descending ID", "Needle", "", 0, 1, 2, 3, []int64{3, 2}},
+		{"second search page by descending ID", "Needle", "", 0, 2, 2, 3, []int64{1}},
+		{"base body", "base-body-marker", "", 0, 1, 20, 1, []int64{2}},
+		{"translation body", "translation-body-marker", "", 0, 1, 20, 1, []int64{3}},
+		{"translation summary", "summary-marker", "", 0, 1, 20, 1, []int64{2}},
+		{"code", "CODE-ONLY", "", 0, 1, 20, 1, []int64{1}},
+		{"other language excluded", "foreign-title-marker", "", 0, 1, 20, 0, []int64{}},
+		{"first page by descending ID", "", "", 0, 1, 2, 3, []int64{3, 2}},
+		{"second page by descending ID", "", "", 0, 2, 2, 3, []int64{1}},
+		{"category filter by descending ID", "", "", category, 1, 20, 2, []int64{3, 1}},
+		{"category filter with search by descending ID", "Needle", "", category, 1, 20, 2, []int64{3, 1}},
+		{"past last page", "", "", 0, 3, 2, 3, []int64{}},
+		{"public only", "", "1", 0, 1, 20, 1, []int64{3}},
+		{"hidden first page", "", "0", 0, 1, 1, 2, []int64{2}},
+		{"hidden second page", "", "0", 0, 2, 1, 2, []int64{1}},
+		{"hidden with category and search", "Needle", "0", category, 1, 20, 1, []int64{1}},
+		{"hidden with no keyword match", "translation-body-marker", "0", category, 1, 20, 0, []int64{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path := fmt.Sprintf("/api/admin/content?lang=en&q=%s&page=%d&page_size=%d", url.QueryEscape(tc.query), tc.page, tc.size)
 			if tc.categoryID != 0 {
 				path += fmt.Sprintf("&category_id=%d&include_children=1", tc.categoryID)
+			}
+			if tc.visible != "" {
+				path += "&visible=" + tc.visible
 			}
 			response := categoryRequest(t, server, token, http.MethodGet, path, "")
 			if response.Code != http.StatusOK {

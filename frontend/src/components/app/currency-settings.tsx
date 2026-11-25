@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react"
 import { Download, Plus, RefreshCw, Save, Trash2, Upload } from "lucide-react"
 import { getCommercePricing, saveCommercePricing, type CurrencyInfo, type PricingSettings } from "@/lib/api"
 import { showError, showSuccess } from "./admin-notifications"
+import { TimeText } from "./time-text"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -64,7 +65,7 @@ export function CurrencySettings() {
       </div>)}
       <Select<string> value={null} onValueChange={code => { if (code) change({ currencies: [...value.currencies, { currency: code, rate: code === value.base_currency ? "1" : "", enabled: true, countries: [] }] }) }} disabled={!value.base_currency || value.currencies.length >= supported.length}><SelectTrigger className="w-full sm:w-60" aria-label="添加目标币种"><Plus className="size-4" /><SelectValue placeholder="添加目标币种" /></SelectTrigger><SelectContent>{supported.filter(item => !value.currencies.some(rule => rule.currency === item.code)).map(item => <SelectItem key={item.code} value={item.code}>{item.code}</SelectItem>)}</SelectContent></Select>
       <p className="text-xs leading-6 text-muted-foreground">优先使用规格中配置的固定币种售价，否则根据汇率换算并按目标币种最小单位四舍五入。只有启用了对应币种的支付渠道，才按目标币种下单；否则仅显示参考金额并注明实际支付币种。</p></div>
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"><div><p className="text-sm">汇率更新时间：{value.rates_updated_at ? new Date(value.rates_updated_at).toLocaleString() : "尚未保存"}</p><p className="mt-1 text-xs text-muted-foreground">本版手动维护汇率；修改汇率会自动更新时间。</p></div><Button type="button" variant="outline" onClick={() => { change({ refresh_rates: true }); showSuccess("已标记确认汇率，保存设置后重新计算有效期。") }}><RefreshCw className="size-4" />确认汇率仍有效</Button></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-4"><div><p className="text-sm">汇率更新时间：<TimeText value={value.rates_updated_at} placeholder="尚未保存" /></p><p className="mt-1 text-xs text-muted-foreground">本版手动维护汇率；修改汇率会自动更新时间。</p></div><Button type="button" variant="outline" onClick={() => { change({ refresh_rates: true }); showSuccess("已标记确认汇率，保存设置后重新计算有效期。") }}><RefreshCw className="size-4" />确认汇率仍有效</Button></div>
       <details className="rounded-lg border p-4"><summary className="cursor-pointer text-sm font-medium">自动识别地区（可选）</summary><div className="mt-4 grid gap-5 sm:grid-cols-2"><div className="space-y-2"><Label htmlFor="country-header">可信代理提供的国家请求头</Label><Input id="country-header" value={value.country_header} placeholder="留空关闭，例如 X-Country-Code" maxLength={64} onChange={event => change({ country_header: event.target.value.trim() })} /></div><div className="space-y-2"><Label htmlFor="trusted-proxies">可信代理 CIDR（逗号分隔）</Label><Input id="trusted-proxies" value={value.trusted_proxies.join(", ")} placeholder="例如 127.0.0.1/32" onChange={event => change({ trusted_proxies: event.target.value.split(",").map(item => item.trim()) })} /></div><p className="text-xs leading-6 text-muted-foreground sm:col-span-2">只接受配置网段代理提供的两位国家代码。请确保代理覆盖该请求头，不能透传访客自行填写的值。未配置或无法识别时使用基准币种；用户手动选择始终优先。</p></div></details>
     </fieldset>
   </form></ScrollArea>

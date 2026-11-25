@@ -36,7 +36,16 @@ func (r Row) n(key string) int {
 	return value
 }
 
+// Progress counts completed templates while rendering, then files written to staging.
+type Progress struct {
+	Stage     string `json:"stage"`
+	Completed int    `json:"completed"`
+	Total     int    `json:"total,omitempty"`
+}
+
 type Report struct {
+	Progress  *Progress `json:"progress,omitempty"`
+	Queued    bool      `json:"queued,omitempty"`
 	State     string    `json:"state"`
 	Started   time.Time `json:"started"`
 	Finished  time.Time `json:"finished"`
@@ -47,6 +56,7 @@ type Report struct {
 }
 
 type Publisher struct {
+	OnProgress           func(Progress)
 	DB                   *sql.DB
 	Web, Templates, Data string
 	Assets               string
@@ -121,6 +131,7 @@ type LanguageInfo struct {
 }
 
 type content struct {
+	onRendered       func()
 	siteID           int64
 	consentPolicy    consent.Policy
 	contactCards     []sitecontacts.Card
@@ -685,7 +696,6 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		siteID = 1
 	}
 	lockFile := p.lockPath()
-	reportFile := p.reportPath()
 	lock, err := os.OpenFile(filepath.Join(p.Data, lockFile), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return report, err
@@ -696,6 +706,7 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		return report, ErrPublishBusy
 	}
 	defer unlock()
+	_ = p.writeReport(report)
 	defer func() {
 		report.Finished = time.Now()
 		report.State = "success"
@@ -703,8 +714,7 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 			report.State = "failed"
 			report.Error = err.Error()
 		}
-		data, _ := json.MarshalIndent(report, "", "  ")
-		_ = atomicWrite(filepath.Join(p.Data, reportFile), data)
+		_ = p.writeReport(report)
 	}()
 
 	c := &content{
@@ -716,6 +726,19 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		assignments:      map[string]string{},
 		pages:            map[string][]byte{},
 		homeTemplatePath: p.HomeTemplate,
+	}
+	progress := Progress{Stage: "preparing"}
+	notify := func() {
+		if p.OnProgress != nil {
+			p.OnProgress(progress)
+		}
+	}
+	notify()
+	if p.OnProgress != nil {
+		c.onRendered = func() {
+			progress.Completed++
+			notify()
+		}
 	}
 	tx, err := p.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -963,6 +986,8 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 	mainPages := make(map[string][]byte)
 	mainRemoved := make(map[string]bool)
 
+	progress = Progress{Stage: "rendering"}
+	notify()
 	for _, lang := range enabledLanguages {
 		c.lang = lang.Code
 		c.contactCards = contactLibrary.Resolve(contactSelections[lang.Code], contactSelections[fallbackLang])
@@ -1049,6 +1074,8 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 		}
 	}
 
+	progress = Progress{Stage: "assembling"}
+	notify()
 	c.pages = mainPages
 	if contentID == 0 {
 		urls := sitemapURLs(c.pages)
@@ -1091,13 +1118,19 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 			update.discard()
 		}
 	}()
-	update, err := stagePageUpdate(ctx, p.TargetWeb(), mainPages, minifyHTML, contentID != 0, mainRemoved)
+	progress = Progress{Stage: "writing", Total: totalFiles}
+	notify()
+	fileWritten := func() {
+		progress.Completed++
+		notify()
+	}
+	update, err := stagePageUpdate(ctx, p.TargetWeb(), mainPages, minifyHTML, contentID != 0, mainRemoved, fileWritten)
 	if err != nil {
 		return report, err
 	}
 	updates = append(updates, update)
 	for _, build := range standaloneList {
-		update, err = stagePageUpdate(ctx, build.targetWeb, build.pages, minifyHTML, contentID != 0, build.removed)
+		update, err = stagePageUpdate(ctx, build.targetWeb, build.pages, minifyHTML, contentID != 0, build.removed, fileWritten)
 		if err != nil {
 			return report, err
 		}
@@ -1106,6 +1139,8 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 	if err = ctx.Err(); err != nil {
 		return report, err
 	}
+	progress = Progress{Stage: "installing"}
+	notify()
 	if err = installPageUpdates(updates, func() error { return p.writePublishedPages(published) }); err != nil {
 		return report, err
 	}
@@ -1113,7 +1148,7 @@ func (p Publisher) generate(ctx context.Context, contentID int64) (report Report
 }
 
 func publishPagesToDirectory(ctx context.Context, targetWeb string, pages map[string][]byte, minifyHTML bool) error {
-	update, err := stagePageUpdate(ctx, targetWeb, pages, minifyHTML, false, nil)
+	update, err := stagePageUpdate(ctx, targetWeb, pages, minifyHTML, false, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -1121,7 +1156,7 @@ func publishPagesToDirectory(ctx context.Context, targetWeb string, pages map[st
 	return installPageUpdates([]*stagedPages{update}, nil)
 }
 
-func stagePageUpdate(ctx context.Context, targetWeb string, pages map[string][]byte, minifyHTML, partial bool, removed map[string]bool) (_ *stagedPages, err error) {
+func stagePageUpdate(ctx context.Context, targetWeb string, pages map[string][]byte, minifyHTML, partial bool, removed map[string]bool, fileWritten func()) (_ *stagedPages, err error) {
 	web, err := filepath.Abs(targetWeb)
 	if err != nil {
 		return nil, err
@@ -1182,6 +1217,9 @@ func stagePageUpdate(ctx context.Context, targetWeb string, pages map[string][]b
 		}
 		if err = atomicWrite(path, data); err != nil {
 			return nil, err
+		}
+		if fileWritten != nil {
+			fileWritten()
 		}
 	}
 
@@ -1271,6 +1309,9 @@ func (c *content) pageTemplate(pagePath, templatePath string, row Row) error {
 		return fmt.Errorf("生成页面非 UTF-8: %s", pagePath)
 	}
 	c.pages[pagePath] = []byte(output.String())
+	if c.onRendered != nil {
+		c.onRendered()
+	}
 	return nil
 }
 

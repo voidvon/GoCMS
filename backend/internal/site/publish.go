@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -20,10 +20,27 @@ import (
 )
 
 type publication struct {
-	mu        sync.Mutex
+	*publicationState
 	publisher generator.Publisher
-	report    generator.Report
-	pending   bool
+}
+
+// Site settings can invalidate the publisher configuration during a run.
+// The running report and queued updates belong to the site, not that cache entry.
+type publicationState struct {
+	mu      sync.Mutex
+	report  generator.Report
+	pending []publicationJob
+}
+
+type publicationJob struct {
+	target    *publication
+	contentID int64 // Zero requests a full site snapshot.
+}
+
+func (p *publication) publisherSnapshot() generator.Publisher {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.publisher
 }
 
 func (s *Server) ConfigurePublishing(templates, data, frontend, assets, theme string) {
@@ -45,10 +62,7 @@ func (s *Server) ConfigurePublishing(templates, data, frontend, assets, theme st
 			HomeTemplate: homeTpl,
 			SiteID:       1,
 		},
-		report: generator.Report{State: "idle"},
-	}
-	if b, e := os.ReadFile(filepath.Join(data, "publish.json")); e == nil {
-		_ = json.Unmarshal(b, &p.report)
+		publicationState: &publicationState{report: generator.Report{State: "idle"}},
 	}
 	s.publication = p
 }
@@ -60,7 +74,9 @@ func (s *Server) publicationForSite(ctx context.Context, siteID int64) *publicat
 	if siteID <= 1 {
 		if s.database != nil {
 			if s1, err := db.GetSiteByID(ctx, s.database, 1); err == nil && s1 != nil {
+				s.publication.mu.Lock()
 				s.publication.publisher.OutputDir = s1.OutputDir
+				s.publication.mu.Unlock()
 			}
 		}
 		return s.publication
@@ -76,17 +92,21 @@ func (s *Server) publicationForSite(ctx context.Context, siteID int64) *publicat
 
 	targetSite, err := db.GetSiteByID(ctx, s.database, siteID)
 	if err != nil || targetSite == nil {
-		return s.publication
+		return nil
 	}
 
+	s.themeMu.RLock()
 	tplRoot := s.templateRoot
 	assetRoot := s.assetsRoot
 	themeRoot := s.themeRoot
-	homeTpl := s.activeTheme.HomeTemplate()
+	activeTheme := s.activeTheme
+	themeBase := s.themeBase
+	s.themeMu.RUnlock()
+	homeTpl := activeTheme.HomeTemplate()
 
 	themeID := targetSite.ThemeID
-	if themeID == "" && s.activeTheme.Manifest.ID != "" {
-		themeID = s.activeTheme.Manifest.ID
+	if themeID == "" && activeTheme.Manifest.ID != "" {
+		themeID = activeTheme.Manifest.ID
 	}
 	if themeID != "" {
 		siteIDStr := strconv.FormatInt(siteID, 10)
@@ -94,8 +114,8 @@ func (s *Server) publicationForSite(ctx context.Context, siteID int64) *publicat
 		if _, err := os.Stat(siteThemeDir); os.IsNotExist(err) {
 			siteThemeDir = filepath.Join(s.assetsRoot, "1", "themes", themeID)
 		}
-		if _, err := os.Stat(siteThemeDir); os.IsNotExist(err) && s.themeBase != "" {
-			siteThemeDir = filepath.Join(s.themeBase, themeID)
+		if _, err := os.Stat(siteThemeDir); os.IsNotExist(err) && themeBase != "" {
+			siteThemeDir = filepath.Join(themeBase, themeID)
 		}
 		themeAssets := filepath.Join(siteThemeDir, "assets")
 		themeTemplates := filepath.Join(siteThemeDir, "templates")
@@ -125,11 +145,14 @@ func (s *Server) publicationForSite(ctx context.Context, siteID int64) *publicat
 			SiteID:       siteID,
 			OutputDir:    targetSite.OutputDir,
 		},
-		report: generator.Report{State: "idle"},
 	}
-	reportFile := filepath.Join(pub.publisher.Data, fmt.Sprintf("publish_%d.json", siteID))
-	if b, e := os.ReadFile(reportFile); e == nil {
-		_ = json.Unmarshal(b, &pub.report)
+	if s.sitePublicationStates == nil {
+		s.sitePublicationStates = make(map[int64]*publicationState)
+	}
+	pub.publicationState = s.sitePublicationStates[siteID]
+	if pub.publicationState == nil {
+		pub.publicationState = &publicationState{report: generator.Report{State: "idle"}}
+		s.sitePublicationStates[siteID] = pub.publicationState
 	}
 	s.sitePublications[siteID] = pub
 	return pub
@@ -143,61 +166,101 @@ func (s *Server) invalidateSitePublication(siteID int64) {
 	}
 }
 
-func (s *Server) startPublish(queue bool) (generator.Report, bool) {
-
-	return s.startPublishPub(s.publication, queue)
-}
-
-func (s *Server) startPublishPub(p *publication, queue bool) (generator.Report, bool) {
+func (s *Server) startPublishPub(p *publication, contentID int64, queue bool) (generator.Report, bool) {
 	if p == nil {
 		return generator.Report{State: "failed", Error: "publishing is not configured"}, false
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return s.startPublishLocked(p, queue)
+	return s.startPublishLocked(p, contentID, queue)
 }
 
-func (s *Server) startPublishLocked(p *publication, queue bool) (generator.Report, bool) {
+func (s *Server) startPublishLocked(p *publication, contentID int64, queue bool) (generator.Report, bool) {
 	if p.report.State == "running" {
 		if queue {
-			p.pending = true
+			p.enqueueLocked(contentID)
+			p.report.Queued = true
 		}
 		return p.report, false
 	}
-	p.report = generator.Report{State: "running", Started: time.Now()}
+	publisher := p.beginRunLocked(contentID)
 	go func() {
-		for {
-			r, e := p.publisher.Generate(context.Background())
-			if e != nil {
-				r.State = "failed"
-				r.Error = e.Error()
+		var report generator.Report
+		var err error
+		if contentID == 0 {
+			report, err = publisher.Generate(context.Background())
+		} else {
+			report, err = publisher.GenerateContent(context.Background(), contentID)
+			if err != nil {
+				// A later queued success can replace this report between browser polls.
+				log.Printf("publish site %d content %d: %v", publisher.SiteID, contentID, err)
+				s.recordAdminNotification(context.Background(), db.AdminNotification{
+					SiteID: publisher.SiteID, Kind: "content_publish_failed", Level: db.AdminNotificationLevelError,
+					Title: "内容已保存，页面发布失败", Detail: "请核对本次内容更新。服务日志中已记录失败的内容编号和原因。", LinkView: "content",
+				})
 			}
-			p.mu.Lock()
-			if p.pending {
-				p.pending = false
-				p.report = generator.Report{State: "running", Started: time.Now()}
-				p.mu.Unlock()
-				continue
-			}
-			p.report = r
-			p.mu.Unlock()
+		}
+		s.finishPublish(p, report, err)
+	}()
+	return p.report, true
+}
+
+func (p *publication) enqueueLocked(contentID int64) {
+	job := publicationJob{target: p, contentID: contentID}
+	if contentID == 0 {
+		// A waiting full build will read all committed changes when it starts.
+		p.pending = []publicationJob{job}
+		return
+	}
+	for i, waiting := range p.pending {
+		if waiting.contentID == 0 || waiting.contentID == contentID {
+			p.pending[i].target = p
 			return
 		}
-	}()
+	}
+	p.pending = append(p.pending, job)
+}
 
-	return p.report, true
+func (p *publication) beginRunLocked(contentID int64) generator.Publisher {
+	p.report = generator.Report{State: "running", Started: time.Now(), ContentID: contentID, Queued: len(p.pending) > 0}
+	publisher := p.publisher
+	publisher.OnProgress = func(progress generator.Progress) {
+		p.mu.Lock()
+		p.report.Progress = &progress
+		p.mu.Unlock()
+	}
+	return publisher
+}
+
+func (s *Server) finishPublish(p *publication, report generator.Report, err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err != nil {
+		report.State, report.Error = "failed", err.Error()
+		if report.Finished.IsZero() {
+			report.Finished = time.Now()
+		}
+	}
+	p.report = report
+	if len(p.pending) > 0 {
+		next := p.pending[0]
+		p.pending[0] = publicationJob{}
+		p.pending = p.pending[1:]
+		s.startPublishLocked(next.target, next.contentID, false)
+	}
 }
 
 func (s *Server) publicationReport(p *publication) generator.Report {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.report.State != "running" {
-		var persisted generator.Report
-		reportFile := filepath.Join(p.publisher.Data, "publish.json")
-		if p.publisher.SiteID > 1 {
-			reportFile = filepath.Join(p.publisher.Data, fmt.Sprintf("publish_%d.json", p.publisher.SiteID))
+	if p.report.State == "running" {
+		return p.report
+	}
+	if persisted, err := p.publisher.LastReport(); err == nil {
+		if persisted.State == "running" {
+			return persisted
 		}
-		if data, err := os.ReadFile(reportFile); err == nil && json.Unmarshal(data, &persisted) == nil && persisted.Finished.After(p.report.Finished) {
+		if persisted.Finished.After(p.report.Finished) {
 			p.report = persisted
 		}
 	}
@@ -228,7 +291,7 @@ func (s *Server) adminPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodPost {
-		report, started := s.startPublishPub(pub, false)
+		report, started := s.startPublishPub(pub, 0, false)
 		code := http.StatusAccepted
 		if !started {
 			code = http.StatusConflict
@@ -236,8 +299,17 @@ func (s *Server) adminPublish(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, code, report)
 		return
 	}
-	report := s.publicationReport(pub)
-	writeJSON(w, http.StatusOK, report)
+	writeJSON(w, http.StatusOK, publicationForUser(s.publicationReport(pub), user, siteID))
+}
+
+func publicationForUser(report generator.Report, user *AdminUser, siteID int64) generator.Report {
+	if !user.HasPermissionInSite(siteID, "publish") {
+		report.ContentID = 0
+		if report.Error != "" {
+			report.Error = "网站发布失败，请联系有网站发布权限的管理员查看详情。"
+		}
+	}
+	return report
 }
 
 func (s *Server) adminSitemap(w http.ResponseWriter, r *http.Request) {
@@ -272,7 +344,7 @@ func (s *Server) adminSitemap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	format := strings.ToLower(strings.TrimSpace(payload.Format))
-	filename, err := pub.publisher.GenerateSitemap(r.Context(), format)
+	filename, err := pub.publisherSnapshot().GenerateSitemap(r.Context(), format)
 	if err != nil {
 		if errors.Is(err, generator.ErrPublishBusy) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
@@ -288,16 +360,14 @@ func (s *Server) adminSitemap(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) contentSaved(w http.ResponseWriter, r *http.Request) {
+func (s *Server) respondAfterSave(w http.ResponseWriter, r *http.Request, contentID int64) {
 	if r.URL.Query().Get("publish") == "1" && s.publication != nil {
 		user := s.currentAdmin(r)
 		siteID, err := s.resolveSiteID(r, user)
 		if err == nil {
-			pub := s.publicationForSite(r.Context(), siteID)
-			if pub != nil {
-				report, started := s.startPublishPub(pub, true)
-				// Never silently lose a publish request made while another snapshot is being generated.
-				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "publication": report, "publish_started": started})
+			if pub := s.publicationForSite(r.Context(), siteID); pub != nil {
+				report, started := s.startPublishPub(pub, contentID, true)
+				writeJSON(w, http.StatusOK, map[string]any{"ok": true, "publication": publicationForUser(report, user, siteID), "publish_started": started})
 				return
 			}
 		}
@@ -329,7 +399,7 @@ func (s *Server) adminLLMS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filename, err := pub.publisher.GenerateLLMS(r.Context())
+	filename, err := pub.publisherSnapshot().GenerateLLMS(r.Context())
 	if err != nil {
 		if errors.Is(err, generator.ErrPublishBusy) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
@@ -390,21 +460,11 @@ func (s *Server) adminPublishContent(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": generator.ErrPublishBusy.Error()})
 		return
 	}
-	pub.report = generator.Report{State: "running", Started: time.Now(), ContentID: payload.ID}
-	publisher := pub.publisher
+	publisher := pub.beginRunLocked(payload.ID)
 	pub.mu.Unlock()
 
 	report, err := publisher.GenerateContent(r.Context(), payload.ID)
-	if err != nil {
-		report.State, report.Error = "failed", err.Error()
-	}
-	pub.mu.Lock()
-	pub.report = report
-	if pub.pending {
-		pub.pending = false
-		s.startPublishLocked(pub, false)
-	}
-	pub.mu.Unlock()
+	s.finishPublish(pub, report, err)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, generator.ErrPublishBusy) {

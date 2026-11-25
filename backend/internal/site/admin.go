@@ -668,7 +668,7 @@ func (s *Server) saveCategory(response http.ResponseWriter, request *http.Reques
 		commerceError(response, err)
 		return
 	}
-	s.contentSaved(response, request)
+	s.respondAfterSave(response, request, 0)
 }
 
 func (s *Server) normalizeCategoryRoutes(ctx context.Context, siteID, id int64, payload *categoryPayload) error {
@@ -908,7 +908,7 @@ func (s *Server) deleteCategory(response http.ResponseWriter, request *http.Requ
 		return
 	}
 	_, _ = s.database.ExecContext(request.Context(), `DELETE FROM "`+db.CategoryTranslationTable+`" WHERE "category_id" = ?`, id)
-	s.contentSaved(response, request)
+	s.respondAfterSave(response, request, 0)
 }
 
 func (s *Server) nextCategoryOrder(ctx context.Context, siteID, parentID int64, orderID *int64) error {

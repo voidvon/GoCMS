@@ -58,6 +58,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 
 
 import { SettingsDialog } from "@/components/app/settings-dialog"
+import { PublicationStatus } from "@/components/app/publication-status"
+import { PublicationProvider } from "@/lib/publication-context"
 import { NotificationBell } from "@/components/app/notification-bell"
 import { ThemeToggle } from "@/components/app/theme-provider"
 import { HeaderActionsProvider, HeaderActionsSlot } from "@/components/app/header-actions"
@@ -491,10 +493,23 @@ export function AdminShell({ user, onLogout }: AdminShellProps) {
     <SiteProvider>
       <LanguageProvider>
         <HeaderActionsProvider>
-          <AdminShellInner user={user} onLogout={onLogout} />
+          <SitePublicationShell user={user} onLogout={onLogout} />
         </HeaderActionsProvider>
       </LanguageProvider>
     </SiteProvider>
+  )
+}
+
+function SitePublicationShell({ user, onLogout }: AdminShellProps) {
+  const { activeSiteId } = useSite()
+  const sitePermissions = user.site_permissions?.[activeSiteId] ?? user.permissions
+  const canTrack = canView(user, "publish", activeSiteId) ||
+    (canView(user, "content", activeSiteId) && sitePermissions.includes("content.review"))
+
+  return (
+    <PublicationProvider key={`${activeSiteId}-${canTrack}`} siteId={activeSiteId} enabled={canTrack}>
+      <AdminShellInner user={user} onLogout={onLogout} />
+    </PublicationProvider>
   )
 }
 
@@ -550,7 +565,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
     <div className="flex h-dvh overflow-hidden bg-background">
       <Sidebar activeView={activeView} onNavigate={navigate} user={user} onLogout={handleLogout} collapsed={collapsed} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center justify-between border-b bg-background/95 px-4 backdrop-blur sm:px-6">
+        <header className="sticky top-0 z-20 flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b bg-background/95 px-4 py-1 backdrop-blur sm:px-6">
           <div className="flex items-center gap-3">
             <Button variant="ghost" size="icon" className="hidden lg:inline-flex"
               aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
@@ -611,7 +626,10 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
               <p className="hidden text-xs text-muted-foreground sm:block">{meta.description}</p>
             </div>
           </div>
-          <HeaderActionsSlot className="flex items-center gap-2" />
+          <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
+            <HeaderActionsSlot className="flex items-center gap-2" />
+            <PublicationStatus />
+          </div>
         </header>
         <main className="flex min-h-0 flex-1 flex-col">
           <ScrollArea key={`${activeView}-${activeSiteId}`} className="flex-1" contentClassName="min-h-full p-4 sm:p-6 lg:h-full">
