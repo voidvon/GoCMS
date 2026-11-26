@@ -104,6 +104,63 @@ func TestAccessLogWriterDoesNotWaitForSQLiteAndDrains(t *testing.T) {
 	}
 }
 
+func TestAccessLogWriterReclassifiesRetainedCrawlers(t *testing.T) {
+	ctx := context.Background()
+	business, err := db.Open(filepath.Join(t.TempDir(), "site.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer business.Close()
+	if err := db.CreateSchema(ctx, business); err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(business, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs, err := db.OpenAccessLogs(ctx, business, server.accessLogs.cutoff())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	recent := now.Add(-time.Hour).Format(accessLogTimestampLayout)
+	expired := now.AddDate(0, 0, -7).Format(accessLogTimestampLayout)
+	_, err = logs.ExecContext(ctx, `INSERT INTO gocms_access_log
+		(path, ip, user_agent, agent_kind, device_kind, visited_at) VALUES
+		('/discover', '192.0.2.1', 'SITELINKDISCOVERY/0.1', 'other', 'other', ?1),
+		('/scan', '192.0.2.2', ?3, 'browser', 'desktop', ?1),
+		('/homepage', '192.0.2.3', ?4, 'other', 'other', ?1),
+		('/normal', '192.0.2.4', ?5, 'browser', 'desktop', ?1),
+		('/expired', '192.0.2.5', 'SiteLinkDiscovery/0.1', 'other', 'other', ?2)`,
+		recent, expired, accessLogCortexUA, accessLogUptimeUA, accessLogChromeUA)
+	closeErr := logs.Close()
+	if err != nil || closeErr != nil {
+		t.Fatalf("seed existing access log database: insert=%v close=%v", err, closeErr)
+	}
+	if err := server.StartAccessLogWriter(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer server.CloseAccessLogWriter(ctx)
+
+	crawlers, total, err := server.listAccessLogs(ctx, 1, AccessLogFilter{AgentKind: "bot"}, 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || len(crawlers) != 2 ||
+		crawlers[0].AgentLabel != "Cortex Xpanse" || crawlers[0].DeviceKind != "other" ||
+		crawlers[1].AgentLabel != "SiteLinkDiscovery" {
+		t.Fatalf("unexpected crawler logs: total=%d rows=%+v", total, crawlers)
+	}
+	summary, err := server.accessLogSummaryForWindow(ctx, 1, true, "24h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Metrics.RecentNewUsers != 2 || summary.Metrics.RecentUsers != 2 ||
+		summary.Metrics.RecentVisits != 4 || len(summary.TopPages) != 2 {
+		t.Fatalf("unexpected dashboard summary: %+v", summary)
+	}
+}
+
 func TestAccessLogQueueReservesCapacityForErrors(t *testing.T) {
 	writer := &accessLogWriter{queue: make(chan accessLogEvent, accessLogQueueSize)}
 	for _, status := range []int{http.StatusOK, http.StatusNotFound, http.StatusInternalServerError} {

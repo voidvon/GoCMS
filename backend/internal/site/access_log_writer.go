@@ -52,13 +52,17 @@ func (s *Server) StartAccessLogWriter(ctx context.Context) error {
 	if s.database == nil {
 		return nil
 	}
-	database, err := db.OpenAccessLogs(ctx, s.database, s.accessLogs.cutoff())
+	cutoff := s.accessLogs.cutoff()
+	database, err := db.OpenAccessLogs(ctx, s.database, cutoff)
 	if err != nil {
 		s.accessLogDatabase = nil
 		return err
 	}
 	if database == nil {
 		return nil
+	}
+	if err := backfillAccessLogCrawlers(ctx, database, cutoff); err != nil {
+		log.Printf("reclassify retained access log crawlers: %v", err)
 	}
 	workerCtx, cancel := context.WithCancel(context.Background())
 	writer := &accessLogWriter{
@@ -69,6 +73,37 @@ func (s *Server) StartAccessLogWriter(ctx context.Context) error {
 	s.accessLogDatabase, s.accessLogWriter = database, writer
 	go writer.run(workerCtx, s)
 	return nil
+}
+
+func backfillAccessLogCrawlers(ctx context.Context, database *sql.DB, cutoff string) error {
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS gocms_schema_migration (name TEXT PRIMARY KEY)`); err != nil {
+		return err
+	}
+	marker, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO gocms_schema_migration (name) VALUES ('access-log-named-crawlers')`)
+	if err != nil {
+		return err
+	}
+	affected, err := marker.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected > 0 {
+		for _, pattern := range accessLogCrawlerBackfillPatterns {
+			if _, err := tx.ExecContext(ctx, `UPDATE "`+db.AccessLogTable+`"
+				SET "agent_kind" = ?, "agent_label" = ?, "device_kind" = 'other'
+				WHERE "visited_at" >= ? AND "agent_kind" IN ('browser', 'other')
+					AND instr(lower("user_agent"), ?) > 0`, pattern.kind, pattern.label, cutoff, pattern.match); err != nil {
+				return fmt.Errorf("match access log crawler %s: %w", pattern.label, err)
+			}
+		}
+	}
+	return tx.Commit()
 }
 
 // CloseAccessLogWriter stops accepting events and flushes queued events after

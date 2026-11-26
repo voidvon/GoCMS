@@ -19,6 +19,8 @@ const (
 	accessLogIPhoneUA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 	accessLogGoogleUA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 	accessLogCurlUA   = "curl/8.4.0"
+	accessLogCortexUA = "Hello from Palo Alto Networks, find out more about our scans in https://docs-cortex.paloaltonetworks.com/r/1/Cortex-Xpanse/Scanning-activity"
+	accessLogUptimeUA = "UptimeFlare/1.0 (+https://github.com/lyc8503/UptimeFlare)"
 )
 
 // The admin frontend renders access log times in the browser zone, so the API
@@ -55,6 +57,12 @@ func TestSummarizeUserAgent(t *testing.T) {
 		{"ipad", "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/604.1", "browser", "Safari", "tablet"},
 		{"googlebot", accessLogGoogleUA, "bot", "Googlebot", "other"},
 		{"bingbot", "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)", "bot", "Bingbot", "other"},
+		{"site link discovery", "SITELINKDISCOVERY/0.1", "bot", "SiteLinkDiscovery", "other"},
+		{"cortex xpanse", accessLogCortexUA, "bot", "Cortex Xpanse", "other"},
+		{"contact finder", "InfinitDocContactFinder/1.0 (+https://infinitdoc.com)", "bot", "InfinitDocContactFinder", "other"},
+		{"wordpress checker", "domain-wordpress-checker/1.0", "bot", "Domain WordPress Checker", "other"},
+		{"turnitin", "Turnitin (https://bit.ly/2UvnfoQ)", "bot", "Turnitin", "other"},
+		{"uptime flare", accessLogUptimeUA, "other", "未知客户端", "other"},
 		{"curl", accessLogCurlUA, "tool", "curl", "other"},
 		{"go-client", "Go-http-client/1.1", "tool", "Go HTTP Client", "other"},
 		{"empty", "", "other", "无 User-Agent", "other"},

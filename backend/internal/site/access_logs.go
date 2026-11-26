@@ -473,11 +473,21 @@ type userAgentInfo struct {
 	Device string
 }
 
-var accessLogAgentPatterns = []struct {
+type accessLogAgentPattern struct {
 	match string
 	kind  string
 	label string
-}{
+}
+
+var accessLogCrawlerBackfillPatterns = []accessLogAgentPattern{
+	{"sitelinkdiscovery/", "bot", "SiteLinkDiscovery"},
+	{"cortex-xpanse/scanning-activity", "bot", "Cortex Xpanse"},
+	{"infinitdoccontactfinder/", "bot", "InfinitDocContactFinder"},
+	{"domain-wordpress-checker/", "bot", "Domain WordPress Checker"},
+	{"turnitin (", "bot", "Turnitin"},
+}
+
+var accessLogAgentPatterns = append([]accessLogAgentPattern{
 	{"googlebot", "bot", "Googlebot"},
 	{"google-inspectiontool", "bot", "Google Inspection"},
 	{"googleother", "bot", "GoogleOther"},
@@ -551,7 +561,7 @@ var accessLogAgentPatterns = []struct {
 	{"postmanruntime", "tool", "Postman"},
 	{"insomnia", "tool", "Insomnia"},
 	{"googlesiteverification", "bot", "Site Verification"},
-}
+}, accessLogCrawlerBackfillPatterns...)
 
 func summarizeUserAgent(userAgent string) userAgentInfo {
 	lower := strings.ToLower(strings.TrimSpace(userAgent))
