@@ -9,8 +9,8 @@ import (
 	"gocms/internal/translation"
 )
 
-// AdminContentItem contains only the fields used by the admin content table.
-// Editing loads the complete Content through the item endpoint.
+// AdminContentItem contains the fields for the admin content table and the
+// publication date for existing API clients. Editing loads the complete Content.
 type AdminContentItem struct {
 	ID          int64  `json:"id"`
 	Category    int64  `json:"category_id"`
@@ -18,6 +18,7 @@ type AdminContentItem struct {
 	Code        string `json:"code"`
 	CoverImage  string `json:"cover_image"`
 	PublishedAt string `json:"published_at"`
+	UpdatedAt   string `json:"updated_at"`
 	Featured    int64  `json:"featured"`
 	Visible     int64  `json:"visible"`
 	URL         string `json:"url"`
@@ -38,7 +39,7 @@ func (s *Server) queryAdminContent(ctx context.Context, siteID int64, query stri
 	}
 	rows, total, err := s.queryContentRows(ctx, siteID, query, categoryID, includeChildren, lang, page, pageSize, visibility, false, `
 		"id", COALESCE("category_id", 0), COALESCE("title", ''), COALESCE("code", ''),
-		COALESCE("cover_image", ''), COALESCE("published_at", ''), COALESCE("featured", 0), COALESCE("visible", 0)`)
+		COALESCE("cover_image", ''), COALESCE("published_at", ''), "updated_at", COALESCE("featured", 0), COALESCE("visible", 0)`)
 	if err != nil {
 		return AdminContentPage{}, err
 	}
@@ -46,7 +47,7 @@ func (s *Server) queryAdminContent(ctx context.Context, siteID int64, query stri
 	items := make([]AdminContentItem, 0, pageSize)
 	for rows.Next() {
 		var item AdminContentItem
-		if err := rows.Scan(&item.ID, &item.Category, &item.Title, &item.Code, &item.CoverImage, &item.PublishedAt, &item.Featured, &item.Visible); err != nil {
+		if err := rows.Scan(&item.ID, &item.Category, &item.Title, &item.Code, &item.CoverImage, &item.PublishedAt, &item.UpdatedAt, &item.Featured, &item.Visible); err != nil {
 			return AdminContentPage{}, err
 		}
 		items = append(items, item)

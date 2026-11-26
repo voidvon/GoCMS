@@ -150,6 +150,13 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 	if module == "session" || (module == "sites" && r.Method == http.MethodGet) {
 		return true
 	}
+	if route == adminSettingsRoute {
+		if r.Method == http.MethodGet || u.IsSuper {
+			return true
+		}
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "只有超级管理员可以修改后台设置"})
+		return false
+	}
 	if module == "media-storage" {
 		if u.IsSuper {
 			return true

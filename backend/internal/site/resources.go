@@ -17,12 +17,11 @@ import (
 	"gocms/internal/db"
 )
 
-func (s *Server) resourceRoots(r *http.Request) ([]string, string, int64, bool) {
+func (s *Server) resourceRoots(ctx context.Context, siteID int64, requestPath string) ([]string, string, bool) {
 	themeRoot, _ := s.themePaths()
-	siteID, _ := s.resolvePublicSiteID(r)
 	var themeID string
-	if s.database != nil && r != nil {
-		if targetSite, err := db.GetSiteByID(r.Context(), s.database, siteID); err == nil && targetSite != nil {
+	if s.database != nil {
+		if targetSite, err := db.GetSiteByID(ctx, s.database, siteID); err == nil && targetSite != nil {
 			themeID = targetSite.ThemeID
 		}
 	}
@@ -47,12 +46,12 @@ func (s *Server) resourceRoots(r *http.Request) ([]string, string, int64, bool) 
 
 	// Standard web-root assets (favicon, touch icon, logo) live directly in the
 	// theme asset root and are served at "/" rather than under /images/.
-	rootName := strings.TrimPrefix(strings.ToLower(r.URL.Path), "/")
+	rootName := strings.TrimPrefix(strings.ToLower(requestPath), "/")
 	if rootName != "" && !strings.Contains(rootName, "/") && isPublicRootImage(rootName) {
 		if themeRoot == "" {
-			return nil, "", siteID, false
+			return nil, "", false
 		}
-		return []string{themeRoot}, rootName, siteID, true
+		return []string{themeRoot}, rootName, true
 	}
 
 	themeRoots := func(directory string) []string {
@@ -106,11 +105,10 @@ func (s *Server) resourceRoots(r *http.Request) ([]string, string, int64, bool) 
 		{prefix: "/js/", roots: func() []string { return themeRoots("js") }},
 		{prefix: "/skin/", roots: func() []string { return themeRoots("skin") }},
 	} {
-		requestPath := r.URL.Path
 		lower := strings.ToLower(requestPath)
 		base := strings.TrimSuffix(route.prefix, "/")
 		if lower == base {
-			return route.roots(), "", siteID, true
+			return route.roots(), "", true
 		}
 		if strings.HasPrefix(lower, route.prefix) {
 			rel := requestPath[len(route.prefix):]
@@ -120,13 +118,13 @@ func (s *Server) resourceRoots(r *http.Request) ([]string, string, int64, bool) 
 				if strings.HasPrefix(lowerRel, "/theme/") || strings.HasPrefix(lowerRel, "/themes/") ||
 					strings.Contains(lowerRel, "/themes/") || strings.Contains(lowerRel, "/theme/") ||
 					strings.HasSuffix(lowerRel, ".html") || strings.HasSuffix(lowerRel, ".json") {
-					return nil, "", siteID, false
+					return nil, "", false
 				}
 			}
-			return route.roots(), rel, siteID, true
+			return route.roots(), rel, true
 		}
 	}
-	return nil, "", siteID, false
+	return nil, "", false
 }
 
 type cachedMinifiedAsset struct {
@@ -139,7 +137,8 @@ var minifiedAssetCache sync.Map
 
 // Files are opened inside the configured resource roots, without allowing symlink escapes.
 func (s *Server) serveResource(w http.ResponseWriter, r *http.Request) bool {
-	roots, rel, siteID, ok := s.resourceRoots(r)
+	siteID, _ := s.resolvePublicSiteID(r)
+	roots, rel, ok := s.resourceRoots(r.Context(), siteID, r.URL.Path)
 	if !ok {
 		return false
 	}
@@ -165,34 +164,55 @@ func (s *Server) serveResource(w http.ResponseWriter, r *http.Request) bool {
 				return true
 			}
 		}
-		f, err := os.OpenInRoot(root, rel)
-		if err != nil {
+		file, info := openResourceInRoot(root, rel)
+		if file == nil {
 			continue
 		}
-		info, err := f.Stat()
-		if err == nil && info.Mode().IsRegular() {
-			switch strings.ToLower(filepath.Ext(rel)) {
-			case ".svg":
-				w.Header().Set("Content-Type", "image/svg+xml")
-				w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-			case ".ico":
-				w.Header().Set("Content-Type", "image/vnd.microsoft.icon")
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-			}
-			if data, ok := s.minifiedAsset(r.Context(), siteID, root, rel, r.URL.Path, f, info); ok {
-				http.ServeContent(w, r, info.Name(), info.ModTime(), bytes.NewReader(data))
-			} else {
-				_, _ = f.Seek(0, io.SeekStart)
-				http.ServeContent(w, r, info.Name(), info.ModTime(), f)
-			}
-			_ = f.Close()
-			return true
+		defer file.Close()
+		switch strings.ToLower(filepath.Ext(rel)) {
+		case ".svg":
+			w.Header().Set("Content-Type", "image/svg+xml")
+			w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+		case ".ico":
+			w.Header().Set("Content-Type", "image/vnd.microsoft.icon")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
 		}
-		_ = f.Close()
+		if data, ok := s.minifiedAsset(r.Context(), siteID, root, rel, r.URL.Path, file, info); ok {
+			http.ServeContent(w, r, info.Name(), info.ModTime(), bytes.NewReader(data))
+		} else {
+			_, _ = file.Seek(0, io.SeekStart)
+			http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+		}
+		return true
 	}
 	http.NotFound(w, r)
 	return true
+}
+
+func openResource(roots []string, rel string) (*os.File, os.FileInfo, string) {
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		if file, info := openResourceInRoot(root, rel); file != nil {
+			return file, info, root
+		}
+	}
+	return nil, nil, ""
+}
+
+func openResourceInRoot(root, rel string) (*os.File, os.FileInfo) {
+	file, err := os.OpenInRoot(root, rel)
+	if err != nil {
+		return nil, nil
+	}
+	info, err := file.Stat()
+	if err == nil && info.Mode().IsRegular() {
+		return file, info
+	}
+	_ = file.Close()
+	return nil, nil
 }
 
 func (s *Server) minifiedAsset(ctx context.Context, siteID int64, root, rel, requestPath string, file *os.File, info os.FileInfo) ([]byte, bool) {

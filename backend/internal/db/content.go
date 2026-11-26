@@ -25,6 +25,7 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 			"body" TEXT NOT NULL DEFAULT '',
 			"cover_image" TEXT NOT NULL DEFAULT '',
 			"published_at" TEXT NOT NULL DEFAULT '',
+			"updated_at" TEXT NOT NULL DEFAULT '',
 			"source" TEXT NOT NULL DEFAULT '',
 			"seo_title" TEXT NOT NULL DEFAULT '',
 			"description" TEXT NOT NULL DEFAULT '',
@@ -48,6 +49,7 @@ func EnsureContent(ctx context.Context, database *sql.DB) error {
 		"site_id":    "INTEGER NOT NULL DEFAULT 1",
 		"model_id":   "INTEGER NOT NULL DEFAULT 1",
 		"extra_data": "TEXT NOT NULL DEFAULT '{}'",
+		"updated_at": "TEXT NOT NULL DEFAULT ''",
 	} {
 		if err := ensureContentColumn(ctx, database, name, definition); err != nil {
 			return err

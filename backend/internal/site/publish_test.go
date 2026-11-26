@@ -128,7 +128,7 @@ func TestAdminPublishContent(t *testing.T) {
 	server.ConfigurePublishing(templates, t.TempDir(), "", "", "")
 	if _, err := database.Exec(`INSERT INTO gocms_category (id, name, list_path, list_file_pattern, list_template, detail_template) VALUES
 		(71, '任意栏目', 'custom', 'index.html', 'category_list.html', 'content_detail.html');
-		INSERT INTO gocms_content (id, category_id, route_key, title, visible) VALUES (301, 71, 'entry.html', '指定条目', 1);
+		INSERT INTO gocms_content (id, category_id, route_key, title, visible, updated_at) VALUES (301, 71, 'entry.html', '指定条目', 1, '2024-03-02T12:34:00Z');
 		INSERT INTO gocms_content (id, site_id, category_id, route_key, title, visible) VALUES (302, 2, 71, 'other.html', '其他站点', 1);
 		INSERT INTO gocms_admin_group (name, permissions) VALUES ('editor', '["content","content.edit"]'), ('publisher', '["content","publish"]');
 		INSERT INTO gocms_admin_user (username, group_id) SELECT 'editor', id FROM gocms_admin_group WHERE name = 'editor';
@@ -172,6 +172,10 @@ func TestAdminPublishContent(t *testing.T) {
 				}
 			}
 		})
+	}
+	var updatedAt string
+	if err := database.QueryRow(`SELECT updated_at FROM gocms_content WHERE id = 301`).Scan(&updatedAt); err != nil || updatedAt != "2024-03-02T12:34:00Z" {
+		t.Fatalf("generating HTML changed the update time to %q: %v", updatedAt, err)
 	}
 	web := server.publication.publisher.TargetWeb()
 	body, err := os.ReadFile(filepath.Join(web, "content", "entry.html"))

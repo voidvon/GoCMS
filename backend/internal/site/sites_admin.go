@@ -128,6 +128,15 @@ func (s *Server) resolvePublicSiteID(r *http.Request) (int64, error) {
 	return s.resolveSiteID(r, nil)
 }
 
+type adminSiteView struct {
+	db.Site
+	PublicOrigin string `json:"public_origin"`
+}
+
+func siteForAdmin(site db.Site) adminSiteView {
+	return adminSiteView{Site: site, PublicOrigin: db.PublicOrigin(site.Domain)}
+}
+
 func (s *Server) adminSites(w http.ResponseWriter, r *http.Request) {
 	user := s.currentAdmin(r)
 	if user == nil {
@@ -141,14 +150,11 @@ func (s *Server) adminSites(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		var accessible []db.Site
+		accessible := make([]adminSiteView, 0, len(allSites))
 		for _, site := range allSites {
 			if user.CanManageSite(site.ID) {
-				accessible = append(accessible, site)
+				accessible = append(accessible, siteForAdmin(site))
 			}
-		}
-		if accessible == nil {
-			accessible = []db.Site{}
 		}
 		writeJSON(w, http.StatusOK, accessible)
 		return
@@ -169,7 +175,7 @@ func (s *Server) adminSites(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusCreated, created)
+		writeJSON(w, http.StatusCreated, siteForAdmin(*created))
 		return
 	}
 
@@ -205,7 +211,7 @@ func (s *Server) adminSiteItem(w http.ResponseWriter, r *http.Request, idStr str
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, site)
+		writeJSON(w, http.StatusOK, siteForAdmin(*site))
 
 	case http.MethodPut:
 		var payload db.Site
@@ -229,7 +235,7 @@ func (s *Server) adminSiteItem(w http.ResponseWriter, r *http.Request, idStr str
 			return
 		}
 		s.invalidateSitePublication(id)
-		writeJSON(w, http.StatusOK, payload)
+		writeJSON(w, http.StatusOK, siteForAdmin(payload))
 
 	case http.MethodDelete:
 		if !user.IsSuper {

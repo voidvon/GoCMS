@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"gocms/internal/commerce"
 	"gocms/internal/db"
@@ -355,6 +356,28 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 		return
 	}
 	defer transaction.Rollback()
+	if payload.Visible == 1 && payload.PublishedAt == "" && request.URL.Query().Get("publish") == "1" {
+		if id != 0 {
+			err := transaction.QueryRowContext(request.Context(), `SELECT "published_at" FROM "gocms_content" WHERE "id" = ?`, id).Scan(&payload.PublishedAt)
+			if err == sql.ErrNoRows {
+				http.NotFound(response, request)
+				return
+			}
+			if err != nil {
+				http.Error(response, "database error", http.StatusInternalServerError)
+				return
+			}
+		}
+		if strings.TrimSpace(payload.PublishedAt) == "" {
+			// Content dates are stored as local dates and times, including those used by themes.
+			now := time.Now()
+			offset, err := strconv.Atoi(request.URL.Query().Get("publish_utc_offset"))
+			if err == nil && offset >= -14*60 && offset <= 14*60 {
+				now = now.In(time.FixedZone("", offset*60))
+			}
+			payload.PublishedAt = now.Format(time.DateTime)
+		}
+	}
 	galleryField, galleryURLs, err := applyCoverGallery(request.Context(), transaction, targetSiteID, modelID, &payload)
 	if err != nil {
 		http.Error(response, "database error", http.StatusInternalServerError)
@@ -362,15 +385,16 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 	}
 	extraBytes, _ := json.Marshal(payload.ExtraData)
 	extraDataStr := string(extraBytes)
+	updatedAt := time.Now().UTC().Format(time.RFC3339)
 
 	if id == 0 {
 		result, err := transaction.ExecContext(request.Context(), `
 			INSERT INTO "gocms_content"
-			("site_id", "category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "seo_title", "description", "sort_order", "featured", "visible", "model_id", "extra_data")
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			("site_id", "category_id", "route_key", "title", "code", "summary", "body", "cover_image", "published_at", "source", "seo_title", "description", "sort_order", "featured", "visible", "model_id", "extra_data", "updated_at")
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			targetSiteID, payload.Category, filename, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
 			payload.PublishedAt, payload.Source, payload.SEOTitle, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
-			modelID, extraDataStr)
+			modelID, extraDataStr, updatedAt)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
@@ -440,10 +464,10 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 				"route_key" = CASE WHEN ? THEN ? ELSE "route_key" END,
 				"title" = ?, "code" = ?, "summary" = ?, "body" = ?,
 				"cover_image" = ?, "published_at" = ?, "source" = ?, "seo_title" = ?, "description" = ?,
-				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
+				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ?, "updated_at" = ? WHERE "id" = ?`,
 				targetSiteID, payload.Category, payload.RouteKey != nil, filename, payload.Title, payload.Code, payload.Summary, payload.Content, payload.CoverImage,
 				payload.PublishedAt, payload.Source, payload.SEOTitle, payload.Description, payload.OrderID, payload.Featured, payload.Visible,
-				modelID, extraDataStr, id)
+				modelID, extraDataStr, updatedAt, id)
 			if err != nil {
 				http.Error(response, "database error", http.StatusInternalServerError)
 				return
@@ -459,10 +483,10 @@ func (s *Server) saveContent(response http.ResponseWriter, request *http.Request
 				"route_key" = CASE WHEN ? THEN ? ELSE "route_key" END,
 				"code" = ?,
 				"cover_image" = ?, "published_at" = ?, "source" = ?,
-				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ? WHERE "id" = ?`,
+				"sort_order" = ?, "featured" = ?, "visible" = ?, "model_id" = ?, "extra_data" = ?, "updated_at" = ? WHERE "id" = ?`,
 				targetSiteID, payload.Category, payload.RouteKey != nil, filename, payload.Code, payload.CoverImage,
 				payload.PublishedAt, payload.Source, payload.OrderID, payload.Featured, payload.Visible,
-				modelID, extraDataStr, id)
+				modelID, extraDataStr, updatedAt, id)
 			if err != nil {
 				http.Error(response, "database error", http.StatusInternalServerError)
 				return

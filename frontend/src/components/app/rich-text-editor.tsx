@@ -29,18 +29,22 @@ import {
 } from "lucide-react"
 import { TableKit } from "@tiptap/extension-table"
 import TextAlign from "@tiptap/extension-text-align"
-import Image from "@tiptap/extension-image"
+import Image, { type ImageOptions } from "@tiptap/extension-image"
+import { DOMParser, DOMSerializer } from "@tiptap/pm/model"
+import { Plugin } from "@tiptap/pm/state"
 import StarterKit from "@tiptap/starter-kit"
-import { EditorContent, useEditor, useEditorState } from "@tiptap/react"
+import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type Editor, type NodeViewProps } from "@tiptap/react"
 
 import { IconButton } from "@/components/app/app-ui"
 import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
+import { MediaPreviewImage } from "@/components/app/media-preview-image"
 import { uploadMedia, type MediaAsset } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 type RichTextEditorProps = {
   id?: string
   value: string
+  languageCode?: string
   onChange: (value: string) => void
   onUploadingChange?: (uploading: boolean) => void
   className?: string
@@ -298,7 +302,43 @@ function RichTextToolbar({
   )
 }
 
-export function RichTextEditor({ id, value, onChange, onUploadingChange, className }: RichTextEditorProps) {
+function RichTextImagePreview({ node, extension }: NodeViewProps) {
+  const { src, alt, title, width, height } = node.attrs
+  return (
+    <NodeViewWrapper data-drag-handle>
+      <MediaPreviewImage source={src ?? ""} languageCode={extension.options.languageCode} alt={alt ?? ""} title={title} width={width} height={height} className="rich-text-image" />
+    </NodeViewWrapper>
+  )
+}
+
+// The node view resolves a display URL. Tiptap still serializes the stored src.
+const PreviewImage = Image.extend<ImageOptions & { languageCode?: string }>({
+  addNodeView() {
+    return ReactNodeViewRenderer(RichTextImagePreview)
+  },
+  addProseMirrorPlugins() {
+    // EditorContent clears its node views on unmount. Keep the stored src
+    // inert until the editor view is destroyed.
+    return [new Plugin({
+      props: {
+        nodeViews: { image: () => ({ dom: document.createElement("span") }) },
+      },
+    })]
+  },
+})
+
+function editorHTML(editor: Editor) {
+  // An inert template keeps serialization from fetching the original src.
+  const template = document.createElement("template")
+  DOMSerializer.fromSchema(editor.schema).serializeFragment(
+    editor.state.doc.content,
+    { document: template.content.ownerDocument },
+    template.content,
+  )
+  return template.innerHTML
+}
+
+export function RichTextEditor({ id, value, languageCode, onChange, onUploadingChange, className }: RichTextEditorProps) {
   const onChangeRef = useRef(onChange)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const imageSelectionRef = useRef<{ from: number; to: number } | null>(null)
@@ -315,29 +355,32 @@ export function RichTextEditor({ id, value, onChange, onUploadingChange, classNa
       StarterKit.configure({
         link: { openOnClick: false },
       }),
-      Image.configure({
+      PreviewImage.configure({
         allowBase64: false,
         HTMLAttributes: { class: "rich-text-image" },
+        languageCode,
       }),
       TableKit.configure({
         table: { resizable: false },
       }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),
     ],
-    content: value,
     editorProps: {
       attributes: {
         class: "rich-text-prose focus:outline-none",
       },
     },
     onUpdate: ({ editor: currentEditor }) => {
-      onChangeRef.current(currentEditor.isEmpty ? "" : currentEditor.getHTML())
+      onChangeRef.current(currentEditor.isEmpty ? "" : editorHTML(currentEditor))
     },
-  }, [])
+  }, [languageCode])
 
   useEffect(() => {
-    if (!editor || value === editor.getHTML()) return
-    editor.commands.setContent(value || "", { emitUpdate: false })
+    if (!editor || value === editorHTML(editor)) return
+    const template = document.createElement("template")
+    template.innerHTML = value || ""
+    const doc = DOMParser.fromSchema(editor.schema).parse(template.content)
+    editor.commands.setContent(doc, { emitUpdate: false })
   }, [editor, value])
 
   const state = useEditorState({

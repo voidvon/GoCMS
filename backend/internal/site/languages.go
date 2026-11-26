@@ -37,17 +37,18 @@ func (b *BoolInt) UnmarshalJSON(data []byte) error {
 }
 
 type LanguageItem struct {
-	ID         int64  `json:"id"`
-	Code       string `json:"code"`
-	Name       string `json:"name"`
-	IsDefault  int    `json:"is_default"`
-	IsFallback int    `json:"is_fallback"`
-	IsEnabled  int    `json:"is_enabled"`
-	SortOrder  int    `json:"sort_order"`
-	PathPrefix string `json:"path_prefix"`
-	SiteMode   string `json:"site_mode"`
-	Domain     string `json:"domain"`
-	OutputDir  string `json:"output_dir"`
+	ID           int64  `json:"id"`
+	Code         string `json:"code"`
+	Name         string `json:"name"`
+	IsDefault    int    `json:"is_default"`
+	IsFallback   int    `json:"is_fallback"`
+	IsEnabled    int    `json:"is_enabled"`
+	SortOrder    int    `json:"sort_order"`
+	PathPrefix   string `json:"path_prefix"`
+	SiteMode     string `json:"site_mode"`
+	Domain       string `json:"domain"`
+	PublicOrigin string `json:"public_origin,omitempty"`
+	OutputDir    string `json:"output_dir"`
 	// IsAdminDefault marks the language the admin backend displays by default in
 	// category and content lists. It is independent from IsDefault (the primary
 	// site language rendered at the site root).
@@ -110,6 +111,11 @@ func (s *Server) adminLanguages(response http.ResponseWriter, request *http.Requ
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
+		}
+		for i := range items {
+			if items[i].SiteMode == db.LanguageSiteModeStandalone && items[i].IsDefault != 1 && items[i].IsEnabled == 1 {
+				items[i].PublicOrigin = db.PublicOrigin(items[i].Domain)
+			}
 		}
 		writeJSON(response, http.StatusOK, items)
 	case http.MethodPost:

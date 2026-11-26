@@ -31,6 +31,7 @@ import {
 import { logout, type AdminUser } from "@/lib/api"
 import { LanguageProvider } from "@/lib/language-context"
 import { SiteProvider, useSite } from "@/lib/site-context"
+import { AdminSettingsProvider, useAdminSettings } from "@/lib/admin-settings-context"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -347,18 +348,18 @@ function UserMenu({ user, onLogout, className, collapsed = false }: UserMenuProp
 }
 
 type SidebarProps = Pick<NavigationProps, "activeView" | "onNavigate"> &
-  Pick<AdminShellProps, "user" | "onLogout"> & { collapsed: boolean }
+  Pick<AdminShellProps, "user" | "onLogout"> & { adminName: string; collapsed: boolean }
 
-function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarProps) {
+function Sidebar({ activeView, onNavigate, user, onLogout, adminName, collapsed }: SidebarProps) {
   return (
     <aside id="desktop-sidebar" aria-label="侧边栏" data-state={collapsed ? "collapsed" : "expanded"} className={cn("hidden shrink-0 border-r bg-muted/20 transition-[width] duration-200 lg:block", collapsed ? "w-16" : "w-60")}>
       <div className={cn("sticky top-0 flex h-svh flex-col py-4", collapsed ? "px-2" : "px-4")}>
         <div className={cn("flex shrink-0 items-center gap-3 py-2", collapsed ? "justify-center" : "px-2")}>
-          <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <span title={collapsed ? adminName : undefined} className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <BarChart3 className="size-4" />
           </span>
-          {!collapsed && <div className="whitespace-nowrap">
-            <p className="text-sm font-semibold tracking-tight">GoCMS 后台</p>
+          {!collapsed && <div className="min-w-0">
+            <p className="truncate text-sm font-semibold tracking-tight" title={adminName}>{adminName}</p>
             <p className="text-xs text-muted-foreground">内容管理</p>
           </div>}
         </div>
@@ -372,7 +373,7 @@ function Sidebar({ activeView, onNavigate, user, onLogout, collapsed }: SidebarP
           <div className={cn("flex items-center gap-1", collapsed && "flex-col")}>
             <UserMenu user={user} onLogout={onLogout} collapsed={collapsed} className={collapsed ? "w-full" : "flex-1"} />
             <ThemeToggle />
-            <SettingsDialog />
+            <SettingsDialog canEditAdminName={user.is_super} />
           </div>
         </div>
       </div>
@@ -490,13 +491,15 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
 
 export function AdminShell({ user, onLogout }: AdminShellProps) {
   return (
-    <SiteProvider>
-      <LanguageProvider>
-        <HeaderActionsProvider>
-          <SitePublicationShell user={user} onLogout={onLogout} />
-        </HeaderActionsProvider>
-      </LanguageProvider>
-    </SiteProvider>
+    <AdminSettingsProvider>
+      <SiteProvider>
+        <LanguageProvider>
+          <HeaderActionsProvider>
+            <SitePublicationShell user={user} onLogout={onLogout} />
+          </HeaderActionsProvider>
+        </LanguageProvider>
+      </SiteProvider>
+    </AdminSettingsProvider>
   )
 }
 
@@ -516,6 +519,7 @@ function SitePublicationShell({ user, onLogout }: AdminShellProps) {
 function AdminShellInner({ user, onLogout }: AdminShellProps) {
   const { view: activeView, navigate } = useAdminRoute()
   const { activeSiteId } = useSite()
+  const { displayName: adminName } = useAdminSettings()
   const [mobileOpen, setMobileOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem("gocms-sidebar-collapsed") === "true" }
@@ -563,7 +567,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
-      <Sidebar activeView={activeView} onNavigate={navigate} user={user} onLogout={handleLogout} collapsed={collapsed} />
+      <Sidebar activeView={activeView} onNavigate={navigate} user={user} onLogout={handleLogout} adminName={adminName} collapsed={collapsed} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-1 border-b bg-background/95 px-4 py-1 backdrop-blur sm:px-6">
           <div className="flex items-center gap-3">
@@ -591,10 +595,10 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
               <SheetContent side="left" className="flex w-72 max-w-[calc(100vw-2rem)] flex-col p-4">
                 <SheetHeader className="px-2">
                   <SheetTitle className="flex items-center gap-3">
-                    <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                       <BarChart3 className="size-4" />
                     </span>
-                    GoCMS 后台
+                    <span className="min-w-0 truncate" title={adminName}>{adminName}</span>
                   </SheetTitle>
                 </SheetHeader>
                 <div className="mt-3 px-2">
@@ -613,7 +617,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
                   <div className="flex items-center gap-1">
                     <UserMenu user={user} onLogout={handleLogout} className="flex-1" />
                     <ThemeToggle />
-                    <SettingsDialog />
+                    <SettingsDialog canEditAdminName={user.is_super} />
                   </div>
                 </div>
               </SheetContent>

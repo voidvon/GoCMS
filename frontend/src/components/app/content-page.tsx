@@ -45,6 +45,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { ConfirmDialog, IconButton, InlineAlert, SearchField } from "@/components/app/app-ui"
 import { PaginatedTable } from "@/components/app/paginated-table"
 import { MediaPickerDialog } from "@/components/app/media-picker-dialog"
+import { MediaPreviewImage } from "@/components/app/media-preview-image"
 import { RichTextEditor } from "@/components/app/rich-text-editor"
 import { flattenCategoryTree } from "@/lib/category-tree"
 import { TimeText } from "@/components/app/time-text"
@@ -248,6 +249,7 @@ function MultiImageField({
   isRequired,
   isMultiLangActive,
   useAsCover,
+  languageCode,
   onChange,
   onUploadingChange,
 }: {
@@ -256,6 +258,7 @@ function MultiImageField({
   isRequired: boolean
   isMultiLangActive?: boolean
   useAsCover: boolean
+  languageCode?: string
   onChange: (value: PhotoItem[] | ((current: unknown) => PhotoItem[])) => void
   onUploadingChange: (uploading: boolean) => void
 }) {
@@ -379,13 +382,11 @@ function MultiImageField({
             >
               <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded border bg-background">
                 {item.url ? (
-                  <img
-                    src={item.url}
+                  <MediaPreviewImage
+                    source={item.url}
+                    languageCode={languageCode}
                     alt={item.title || `图片 ${index + 1}`}
                     className="size-full object-cover"
-                    onError={(e) => {
-                      ;(e.target as HTMLElement).style.display = "none"
-                    }}
                   />
                 ) : (
                   <ImagePlus className="size-5 text-muted-foreground/40" />
@@ -594,6 +595,7 @@ function defaultFieldType(name: string): string {
 function SingleImageField({
   label,
   value,
+  languageCode,
   isRequired,
   description,
   isTranslatable,
@@ -602,6 +604,7 @@ function SingleImageField({
 }: {
   label: string
   value: string
+  languageCode?: string
   isRequired: boolean
   description?: string
   isTranslatable?: boolean
@@ -647,7 +650,7 @@ function SingleImageField({
       />
       <div className="overflow-hidden rounded-lg border bg-muted">
         {value ? (
-          <img src={value} alt={label} className="aspect-[3/1] max-h-48 w-full object-contain" />
+          <MediaPreviewImage source={value} languageCode={languageCode} alt={label} className="aspect-[3/1] max-h-48 w-full object-contain" />
         ) : (
           <div className="flex aspect-[3/1] max-h-36 items-center justify-center gap-2 text-sm text-muted-foreground">
             <ImagePlus className="size-5" />
@@ -918,6 +921,7 @@ function ContentEditor({
     isRequired: boolean,
     idPrefix: string,
     placeholderNote?: string,
+    languageCode = defaultLang,
   ) {
     const inputId = `${idPrefix}-${field.field_name}`
 
@@ -929,6 +933,7 @@ function ContentEditor({
           value={val}
           isRequired={isRequired}
           useAsCover={field.field_name === coverGalleryField}
+          languageCode={languageCode}
           onChange={onChange}
           onUploadingChange={(uploading) => setPendingGalleryUploads((count) => count + (uploading ? 1 : -1))}
         />
@@ -953,6 +958,7 @@ function ContentEditor({
           key={field.field_name}
           label={field.field_label}
           value={val || ""}
+          languageCode={languageCode}
           isRequired={isRequired}
           description={field.description}
           onChange={onChange}
@@ -971,6 +977,7 @@ function ContentEditor({
           <RichTextEditor
             id={inputId}
             value={val || ""}
+            languageCode={languageCode}
             onChange={onChange}
             onUploadingChange={setBodyUploading}
           />
@@ -1348,6 +1355,7 @@ function ContentEditor({
                         isRequired,
                         `lang-${lang.code}`,
                         placeholderNote,
+                        lang.code,
                       )
                     })}
                   </div>
@@ -1385,7 +1393,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
   const [error, setError] = useState("")
   const [notice, setNotice] = useState("")
   const [editorOpen, setEditorOpen] = useState(false)
-  const [editing, setEditing] = useState<ContentListItem | null>(null)
+  const [editing, setEditing] = useState<Pick<ContentListItem, "id"> | null>(null)
   const [editingDetail, setEditingDetail] = useState<Content | null>(null)
   const [editorLoading, setEditorLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -1679,7 +1687,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
               <TableRow>
                 <TableHead className="pl-4">标题</TableHead>
                 <TableHead>分类</TableHead>
-                <TableHead>发布日期</TableHead>
+                <TableHead>更新时间</TableHead>
                 <TableHead>状态</TableHead>
                 <TableHead className="pr-4 text-right">操作</TableHead>
               </TableRow>
@@ -1700,7 +1708,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
                         disabled={!canEditItem(item)}
                         aria-label={`编辑${item.title}`}
                       >
-                        {item.cover_image ? <img src={item.cover_image} alt="" className="size-full object-contain" /> : <FileText className="size-4" />}
+                        {item.cover_image ? <MediaPreviewImage source={item.cover_image} languageCode={activeLang} alt="" className="size-full object-contain" /> : <FileText className="size-4" />}
                       </button>
                       <div className="min-w-0">
                         <div className="flex min-w-0 items-center gap-1">
@@ -1729,7 +1737,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{categoryName(categories, item.category_id)}</TableCell>
-                  <TableCell className="text-muted-foreground"><TimeText value={item.published_at} source="wall" placeholder="暂无日期" /></TableCell>
+                  <TableCell className="text-muted-foreground"><TimeText value={item.updated_at} placeholder="暂无记录" /></TableCell>
                   <TableCell>
                     <div className="flex gap-1.5 text-xs">
                       <span>{item.visible ? "公开" : "隐藏"}</span>

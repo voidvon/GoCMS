@@ -90,6 +90,9 @@ func New(database *sql.DB, siteRoot string) (*Server, error) {
 		if err := db.EnsureSites(context.Background(), database); err != nil {
 			return nil, err
 		}
+		if err := db.EnsureAdminSettings(context.Background(), database); err != nil {
+			return nil, err
+		}
 		if err := db.EnsureSiteSettings(context.Background(), database); err != nil {
 			return nil, err
 		}
@@ -319,6 +322,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminLogout(response, request)
 	case "/api/admin/session":
 		s.adminSession(response, request)
+	case adminSettingsRoute:
+		s.adminSettings(response, request)
 	case "/api/admin/stats":
 		s.adminStats(response, request)
 	case "/api/admin/access-logs":
@@ -331,6 +336,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminAccessLogClear(response, request)
 	case "/api/admin/content":
 		s.adminContent(response, request)
+	case "/api/admin/content/image-preview":
+		s.adminContentImagePreview(response, request)
 	case "/api/admin/media":
 		s.adminMedia(response, request)
 	case mediaCleanupRoute:

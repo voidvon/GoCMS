@@ -116,6 +116,7 @@ export type Site = {
   name: string
   code: string
   domain: string
+  public_origin?: string
   aliases: string[]
   redirect_aliases?: boolean
   theme_id: string
@@ -368,7 +369,7 @@ export type Content = {
 
 export type ContentListItem = Pick<Content,
   "id" | "title" | "code" | "category_id" | "cover_image" | "published_at" | "featured" | "visible"
-> & { url?: string }
+> & { updated_at: string; url?: string }
 
 export type ContentInput = Omit<Content, "id" | "route_key"> & {
   route_key?: string
@@ -535,13 +536,14 @@ export type Language = {
   path_prefix: string
   site_mode?: string
   domain?: string
+  public_origin?: string
   output_dir?: string
   /** Language the admin backend shows by default in category and content lists. */
   is_admin_default: number
   contact_card_ids?: string[]
 }
 
-export type LanguageInput = Omit<Language, "id">
+export type LanguageInput = Omit<Language, "id" | "public_origin">
 
 export type ContactChannel = {
   label: string
@@ -846,6 +848,10 @@ function query(params: Record<string, string | number | undefined>) {
   return encoded ? `?${encoded}` : ""
 }
 
+export const getAdminSettings = () => request<{ admin_name: string }>("/api/admin/settings")
+export const updateAdminName = (name: string) =>
+  request<{ admin_name: string }>("/api/admin/settings", { method: "PUT", body: JSON.stringify({ admin_name: name }) })
+
 export async function getSession() {
   const response = await request<SessionResponse>("/api/admin/session")
   if (!response?.user || typeof response.user.username !== "string" || !Array.isArray(response.user.permissions)) {
@@ -889,6 +895,10 @@ export function getContent(page: number, pageSize: number, search: string, categ
 
 export function getContentItem(id: number, lang?: string) {
   return request<Content>(`/api/admin/content/${id}${query({ lang: lang || undefined })}`)
+}
+
+export function contentImagePreviewURL(siteId: number, path: string) {
+  return endpoint(`/api/admin/content/image-preview${query({ site_id: siteId, path })}`)
 }
 
 export function getCategories(lang?: string) {
@@ -950,15 +960,23 @@ export function deleteCategory(id: number, publish = false) {
   })
 }
 
+function contentSaveQuery(publish: boolean, lang?: string) {
+  return query({
+    publish: publish ? 1 : undefined,
+    publish_utc_offset: publish ? -new Date().getTimezoneOffset() : undefined,
+    lang: lang || undefined,
+  })
+}
+
 export function createContent(payload: ContentInput, publish = false, lang?: string) {
-  return request<SaveResponse>(`/api/admin/content${query({ publish: publish ? 1 : undefined, lang: lang || undefined })}`, {
+  return request<SaveResponse>(`/api/admin/content${contentSaveQuery(publish, lang)}`, {
     method: "POST",
     body: JSON.stringify(payload),
   })
 }
 
 export function updateContent(id: number, payload: ContentInput, publish = false, lang?: string) {
-  return request<SaveResponse>(`/api/admin/content/${id}${query({ publish: publish ? 1 : undefined, lang: lang || undefined })}`, {
+  return request<SaveResponse>(`/api/admin/content/${id}${contentSaveQuery(publish, lang)}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   })
