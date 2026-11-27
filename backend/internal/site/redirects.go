@@ -18,6 +18,7 @@ import (
 
 type redirectRule struct {
 	ID            int64  `json:"id"`
+	MatchType     string `json:"match_type"`
 	SourcePath    string `json:"source_path"`
 	TargetURL     string `json:"target_url"`
 	StatusCode    int    `json:"status_code"`
@@ -26,8 +27,13 @@ type redirectRule struct {
 	Note          string `json:"note"`
 }
 
+const (
+	redirectMatchExact = "exact"
+	redirectMatchRegex = "regex"
+)
+
 func newRedirectRule() redirectRule {
-	return redirectRule{StatusCode: http.StatusMovedPermanently, Enabled: true, PreserveQuery: true}
+	return redirectRule{MatchType: redirectMatchExact, StatusCode: http.StatusMovedPermanently, Enabled: true, PreserveQuery: true}
 }
 
 func redirectPath(value string) string {
@@ -54,6 +60,20 @@ func normalizeRedirect(rule *redirectRule) error {
 	if len(rule.SourcePath) > 2048 || len(rule.TargetURL) > 4096 || len(rule.Note) > 1000 {
 		return errors.New("来源路径、目标地址或备注过长")
 	}
+	if rule.StatusCode != http.StatusMovedPermanently && rule.StatusCode != http.StatusFound {
+		return errors.New("重定向状态码仅支持 301 或 302")
+	}
+	switch rule.MatchType {
+	case redirectMatchRegex:
+		return validateRegexRedirect(*rule)
+	case redirectMatchExact:
+		return normalizeExactRedirect(rule)
+	default:
+		return errors.New("重定向匹配方式无效")
+	}
+}
+
+func normalizeExactRedirect(rule *redirectRule) error {
 	for _, value := range []string{rule.SourcePath, rule.TargetURL} {
 		if strings.ContainsRune(value, '\\') || strings.ContainsFunc(value, unicode.IsControl) {
 			return errors.New("地址不能包含反斜杠或控制字符")
@@ -85,10 +105,15 @@ func normalizeRedirect(rule *redirectRule) error {
 		return errors.New("目标路径包含非法字符")
 	}
 	rule.TargetURL = target.String()
-	if rule.StatusCode != http.StatusMovedPermanently && rule.StatusCode != http.StatusFound {
-		return errors.New("重定向状态码仅支持 301 或 302")
-	}
 	return nil
+}
+
+func (s *Server) exactRedirect(ctx context.Context, siteID int64, source string) (redirectRule, error) {
+	var rule redirectRule
+	err := s.database.QueryRowContext(ctx, `SELECT target_url, status_code, preserve_query FROM gocms_redirect
+		WHERE site_id = ? AND match_type = 'exact' AND source_path = ? AND enabled = 1`, siteID, source).
+		Scan(&rule.TargetURL, &rule.StatusCode, &rule.PreserveQuery)
+	return rule, err
 }
 
 func (s *Server) serveConfiguredRedirect(w http.ResponseWriter, r *http.Request) bool {
@@ -99,11 +124,7 @@ func (s *Server) serveConfiguredRedirect(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return false
 	}
-	var target string
-	var status int
-	var preserve bool
-	err = s.database.QueryRowContext(r.Context(), `SELECT target_url, status_code, preserve_query FROM gocms_redirect
-		WHERE site_id = ? AND source_path = ? AND enabled = 1`, siteID, redirectPath(r.URL.Path)).Scan(&target, &status, &preserve)
+	rule, err := s.exactRedirect(r.Context(), siteID, redirectPath(r.URL.Path))
 	if errors.Is(err, sql.ErrNoRows) {
 		return false
 	}
@@ -111,12 +132,17 @@ func (s *Server) serveConfiguredRedirect(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "redirect lookup failed", http.StatusInternalServerError)
 		return true
 	}
-	destination, err := url.Parse(target)
+	destination, err := url.Parse(rule.TargetURL)
 	if err != nil {
 		http.Error(w, "invalid redirect target", http.StatusInternalServerError)
 		return true
 	}
-	if preserve && r.URL.RawQuery != "" {
+	writeConfiguredRedirect(w, r, destination, rule)
+	return true
+}
+
+func writeConfiguredRedirect(w http.ResponseWriter, r *http.Request, destination *url.URL, rule redirectRule) {
+	if rule.PreserveQuery && r.URL.RawQuery != "" {
 		query := destination.Query()
 		for key, values := range r.URL.Query() {
 			if !query.Has(key) {
@@ -127,8 +153,7 @@ func (s *Server) serveConfiguredRedirect(w http.ResponseWriter, r *http.Request)
 	}
 	// Rules can be edited or disabled immediately; do not cache a stale 301.
 	w.Header().Set("Cache-Control", "no-store")
-	http.Redirect(w, r, destination.String(), status)
-	return true
+	http.Redirect(w, r, destination.String(), rule.StatusCode)
 }
 
 func (s *Server) adminRedirects(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +245,7 @@ func (s *Server) adminRedirects(w http.ResponseWriter, r *http.Request) {
 }
 
 func listRedirects(ctx context.Context, database *sql.DB, siteID int64) ([]redirectRule, error) {
-	rows, err := database.QueryContext(ctx, `SELECT id, source_path, target_url, status_code, enabled, preserve_query, note
+	rows, err := database.QueryContext(ctx, `SELECT id, match_type, source_path, target_url, status_code, enabled, preserve_query, note
 		FROM gocms_redirect WHERE site_id = ? ORDER BY id DESC`, siteID)
 	if err != nil {
 		return nil, err
@@ -229,7 +254,7 @@ func listRedirects(ctx context.Context, database *sql.DB, siteID int64) ([]redir
 	items := []redirectRule{}
 	for rows.Next() {
 		var rule redirectRule
-		if err := rows.Scan(&rule.ID, &rule.SourcePath, &rule.TargetURL, &rule.StatusCode, &rule.Enabled, &rule.PreserveQuery, &rule.Note); err != nil {
+		if err := rows.Scan(&rule.ID, &rule.MatchType, &rule.SourcePath, &rule.TargetURL, &rule.StatusCode, &rule.Enabled, &rule.PreserveQuery, &rule.Note); err != nil {
 			return nil, err
 		}
 		items = append(items, rule)
@@ -266,18 +291,18 @@ func (s *Server) saveRedirects(ctx context.Context, siteID int64, rules []redire
 			}
 		}
 		var duplicate int64
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM gocms_redirect WHERE site_id = ? AND source_path = ? AND id <> ?`, siteID, rule.SourcePath, rule.ID).Scan(&duplicate); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM gocms_redirect WHERE site_id = ? AND match_type = ? AND source_path = ? AND id <> ?`, siteID, rule.MatchType, rule.SourcePath, rule.ID).Scan(&duplicate); err != nil {
 			return err
 		}
 		if duplicate > 0 {
 			return redirectValidationError{"来源路径已存在：" + rule.SourcePath}
 		}
-		args := []any{rule.SourcePath, rule.TargetURL, rule.StatusCode, rule.Enabled, rule.PreserveQuery, rule.Note, siteID}
+		args := []any{rule.MatchType, rule.SourcePath, rule.TargetURL, rule.StatusCode, rule.Enabled, rule.PreserveQuery, rule.Note, siteID}
 		if rule.ID == 0 {
-			_, err = tx.ExecContext(ctx, `INSERT INTO gocms_redirect (source_path, target_url, status_code, enabled, preserve_query, note, site_id) VALUES (?, ?, ?, ?, ?, ?, ?)`, args...)
+			_, err = tx.ExecContext(ctx, `INSERT INTO gocms_redirect (match_type, source_path, target_url, status_code, enabled, preserve_query, note, site_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, args...)
 		} else {
 			var result sql.Result
-			result, err = tx.ExecContext(ctx, `UPDATE gocms_redirect SET source_path = ?, target_url = ?, status_code = ?, enabled = ?, preserve_query = ?, note = ?, updated_at = CURRENT_TIMESTAMP WHERE site_id = ? AND id = ?`, append(args, rule.ID)...)
+			result, err = tx.ExecContext(ctx, `UPDATE gocms_redirect SET match_type = ?, source_path = ?, target_url = ?, status_code = ?, enabled = ?, preserve_query = ?, note = ?, updated_at = CURRENT_TIMESTAMP WHERE site_id = ? AND id = ?`, append(args, rule.ID)...)
 			if err == nil {
 				if n, _ := result.RowsAffected(); n == 0 {
 					return sql.ErrNoRows
@@ -301,7 +326,8 @@ func validateRedirectCycles(ctx context.Context, tx *sql.Tx) error {
 		siteID int64
 		path   string
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT site_id, source_path, target_url FROM gocms_redirect WHERE enabled = 1`)
+	// Regex rules only redirect missing paths to existing pages without an exact redirect.
+	rows, err := tx.QueryContext(ctx, `SELECT site_id, source_path, target_url FROM gocms_redirect WHERE match_type = 'exact' AND enabled = 1`)
 	if err != nil {
 		return err
 	}

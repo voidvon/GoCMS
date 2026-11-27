@@ -28,6 +28,8 @@ import (
 	"gocms/internal/theme"
 )
 
+const searchRedirectPath = "/search"
+
 type Server struct {
 	mediaStorageMu     sync.Mutex
 	mediaStorageKey    string
@@ -416,7 +418,7 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.captchaSlide(response, request)
 	case "/api/captcha/check":
 		s.captchaCheck(response, request)
-	case "/search":
+	case searchRedirectPath:
 		target := "/search.html"
 		if request.URL.RawQuery != "" {
 			target += "?" + request.URL.RawQuery
@@ -561,18 +563,23 @@ func (s *Server) messages(response http.ResponseWriter, request *http.Request) {
 	s.feedbackSubmit(response, request)
 }
 
-func (s *Server) staticFile(response http.ResponseWriter, request *http.Request) {
-	lowerPath := strings.ToLower(request.URL.Path)
+func staticPathBlocked(lowerPath string) bool {
 	privatePath := path.Clean("/" + strings.ReplaceAll(lowerPath, `\`, "/"))
 	if privatePath == "/assets/theme" || strings.HasPrefix(privatePath, "/assets/theme/") || strings.Contains(privatePath, "/themes/") || strings.HasSuffix(privatePath, "/themes") {
-		http.NotFound(response, request)
-		return
+		return true
 	}
 	for _, blocked := range []string{"/database", "/data", "/cmd", "/internal", "/.git"} {
 		if strings.HasPrefix(lowerPath, blocked) {
-			http.NotFound(response, request)
-			return
+			return true
 		}
+	}
+	return false
+}
+
+func (s *Server) staticFile(response http.ResponseWriter, request *http.Request) {
+	if staticPathBlocked(strings.ToLower(request.URL.Path)) {
+		http.NotFound(response, request)
+		return
 	}
 	clean := path.Clean("/" + request.URL.Path)
 	if strings.Contains(clean, "/../") || clean == "/.." {
@@ -614,7 +621,8 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 			// handler. The default site may fall back to siteRoot, and a missing
 			// per-site output directory must not turn an existing siteRoot file
 			// (including /404.html itself) into a 404 response.
-			for _, siteDir := range s.siteServingDirs(matched) {
+			siteDirs := s.siteServingDirs(matched)
+			for _, siteDir := range siteDirs {
 				targetFile := filepath.Join(siteDir, filepath.FromSlash(relPath))
 				if stat, err := os.Stat(targetFile); err == nil {
 					if !stat.IsDir() || fileExistsInDir(targetFile, "index.html") {
@@ -627,6 +635,9 @@ func (s *Server) staticFile(response http.ResponseWriter, request *http.Request)
 				}
 			}
 			if s.legacyLanguagePrefixRedirect(response, request, matched) {
+				return
+			}
+			if s.serveRegexRedirect(response, request, siteID, siteDirs, clean) {
 				return
 			}
 			if s.serveSiteNotFound(response, request, matched, relPath) {

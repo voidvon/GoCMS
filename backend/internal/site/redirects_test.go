@@ -16,7 +16,15 @@ import (
 
 func TestRedirectSchemaUpgrade(t *testing.T) {
 	_, database, _, root := newSiteAdminTestServer(t)
-	if _, err := database.Exec(`DROP TABLE gocms_redirect`); err != nil {
+	if _, err := database.Exec(`DROP TABLE gocms_redirect;
+		CREATE TABLE gocms_redirect (
+			id INTEGER PRIMARY KEY AUTOINCREMENT, site_id INTEGER NOT NULL REFERENCES gocms_site(id) ON DELETE CASCADE,
+			source_path TEXT NOT NULL, target_url TEXT NOT NULL, status_code INTEGER NOT NULL,
+			enabled INTEGER NOT NULL, preserve_query INTEGER NOT NULL, note TEXT NOT NULL,
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(site_id, source_path)
+		);
+		INSERT INTO gocms_redirect VALUES (42, 1, '/legacy', '/current', 302, 1, 0, 'old rule', '2026-01-01', '2026-01-02');
+		UPDATE sqlite_sequence SET seq = 99 WHERE name = 'gocms_redirect'`); err != nil {
 		t.Fatal(err)
 	}
 	server, err := New(database, root)
@@ -24,7 +32,7 @@ func TestRedirectSchemaUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	rule := newRedirectRule()
-	rule.SourcePath, rule.TargetURL = "/legacy", "/current"
+	rule.MatchType, rule.SourcePath, rule.TargetURL = redirectMatchRegex, "/legacy", "/another"
 	if err := server.saveRedirects(context.Background(), 1, []redirectRule{rule}); err != nil {
 		t.Fatal(err)
 	}
@@ -32,8 +40,12 @@ func TestRedirectSchemaUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	items, err := listRedirects(context.Background(), database, 1)
-	if err != nil || len(items) != 1 || items[0].TargetURL != "/current" {
+	wantOld := redirectRule{ID: 42, MatchType: redirectMatchExact, SourcePath: "/legacy", TargetURL: "/current", StatusCode: 302, Enabled: true, Note: "old rule"}
+	if err != nil || len(items) != 2 || items[1] != wantOld || items[0].ID != 100 || items[0].MatchType != redirectMatchRegex {
 		t.Fatalf("upgrade/restart lost rules: %+v %v", items, err)
+	}
+	if res := legacyRedirectRequest(t, server, "GET", "localhost", "/legacy?ignored=1"); res.Code != 302 || res.Header().Get("Location") != "/current" {
+		t.Fatalf("migrated rule changed behavior: %d %v", res.Code, res.Header())
 	}
 }
 

@@ -138,6 +138,7 @@ export const deleteSite = (id: number) => request(`/api/admin/sites/${id}`, { me
 
 export type RedirectRule = {
   id: number
+  match_type: "exact" | "regex"
   source_path: string
   target_url: string
   status_code: 301 | 302
