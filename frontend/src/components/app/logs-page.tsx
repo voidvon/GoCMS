@@ -5,12 +5,12 @@ import {
   clearLogs,
   getLoginLogs,
   getOperationLogs,
-  type AdminUser,
   type LoginLog,
   type OperationLog,
 } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Table,
   TableBody,
@@ -27,12 +27,8 @@ import { localDayStart } from "@/lib/time"
 
 const pageSize = 30
 
-export function LogsPage({ user }: { user: AdminUser }) {
-  const canReadOperations = user.is_super || user.permissions.includes("logs")
-  const canReadLogins = user.is_super || user.permissions.includes("login_logs")
-  const [tab, setTab] = useState<"operations" | "logins">(
-    canReadOperations ? "operations" : "logins"
-  )
+export function LogsPage() {
+  const [tab, setTab] = useState<"operations" | "logins">("operations")
   const [items, setItems] = useState<OperationLog[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -121,7 +117,7 @@ export function LogsPage({ user }: { user: AdminUser }) {
         className="space-y-4 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col lg:space-y-0 lg:gap-4"
       >
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-          {tab === "operations" && canReadOperations ? (
+          {tab === "operations" ? (
             <form
               className="flex flex-wrap items-center gap-2"
               onSubmit={(e) => {
@@ -144,7 +140,7 @@ export function LogsPage({ user }: { user: AdminUser }) {
                 查询 / 刷新
               </Button>
             </form>
-          ) : tab === "logins" && canReadLogins ? (
+          ) : (
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant="outline"
@@ -158,23 +154,17 @@ export function LogsPage({ user }: { user: AdminUser }) {
                 刷新
               </Button>
             </div>
-          ) : (
-            <div />
           )}
 
           <TabsList size="sm" className="ml-auto">
-            {canReadOperations && (
-              <TabsTrigger value="operations" className="gap-2">
-                <ScrollText className="size-4" />
-                操作日志
-              </TabsTrigger>
-            )}
-            {canReadLogins && (
-              <TabsTrigger value="logins" className="gap-2">
-                <LogIn className="size-4" />
-                登录日志
-              </TabsTrigger>
-            )}
+            <TabsTrigger value="operations" className="gap-2">
+              <ScrollText className="size-4" />
+              操作日志
+            </TabsTrigger>
+            <TabsTrigger value="logins" className="gap-2">
+              <LogIn className="size-4" />
+              登录日志
+            </TabsTrigger>
           </TabsList>
         </div>
 
@@ -245,8 +235,8 @@ export function LogsPage({ user }: { user: AdminUser }) {
 
         <TabsContent value="logins" className="min-h-0 flex-1 lg:flex lg:flex-col">
           <div className="flex min-h-0 flex-1 flex-col rounded-md border bg-background lg:overflow-hidden">
-            <div className="relative min-h-0 flex-1 overflow-auto [scrollbar-color:color-mix(in_oklab,var(--muted-foreground)_38%,transparent)_transparent] [scrollbar-width:thin] [&::-webkit-scrollbar]:size-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/35 [&::-webkit-scrollbar-thumb:hover]:bg-muted-foreground/55 [&>[data-slot=table-container]]:overflow-visible [&>[data-slot=table-container]]:static">
-              <Table>
+            <ScrollArea orientation="both" className="min-h-0 flex-1">
+              <Table containerClassName="static overflow-visible">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="pl-4 whitespace-nowrap">时间</TableHead>
@@ -284,22 +274,20 @@ export function LogsPage({ user }: { user: AdminUser }) {
                   )}
                 </TableBody>
               </Table>
-            </div>
+            </ScrollArea>
           </div>
         </TabsContent>
       </Tabs>
 
-      {user.is_super && (
-        <div className="flex shrink-0 flex-wrap items-end gap-2 rounded-md border p-3">
-          <label className="space-y-1 text-sm">
-            <span className="block">清理该日期之前的日志</span>
-            <Input type="date" value={before} onChange={(e) => setBefore(e.target.value)} />
-          </label>
-          <Button variant="destructive" disabled={clearing || !before} onClick={() => void handleClear()}>
-            {clearing ? "正在清理…" : "清理日志"}
-          </Button>
-        </div>
-      )}
+      <div className="flex shrink-0 flex-wrap items-end gap-2 rounded-md border p-3">
+        <label className="space-y-1 text-sm">
+          <span className="block">清理该日期之前的日志</span>
+          <Input type="date" value={before} onChange={(e) => setBefore(e.target.value)} />
+        </label>
+        <Button variant="destructive" disabled={clearing || !before} onClick={() => void handleClear()}>
+          {clearing ? "正在清理…" : "清理日志"}
+        </Button>
+      </div>
     </div>
   )
 }

@@ -1,17 +1,19 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react"
-import { getSites, setActiveSiteId, getActiveSiteId, type Site } from "@/lib/api"
+import { getSiteOptions, getSites, setActiveSiteId, getActiveSiteId, type Site, type SiteOption } from "@/lib/api"
 
-type SiteContextType = {
-  sites: Site[]
-  activeSite: Site | undefined
+type SiteLists = { sites: SiteOption[]; managedSites: Site[] }
+
+type SiteContextType = SiteLists & {
+  activeSite: SiteOption | undefined
   activeSiteId: number
-  setActiveSite: (site: Site) => void
+  setActiveSite: (site: SiteOption) => void
   loading: boolean
   refreshSites: () => Promise<void>
 }
 
 const SiteContext = createContext<SiteContextType>({
   sites: [],
+  managedSites: [],
   activeSite: undefined,
   activeSiteId: 1,
   setActiveSite: () => {},
@@ -19,16 +21,17 @@ const SiteContext = createContext<SiteContextType>({
   refreshSites: async () => {},
 })
 
-export function SiteProvider({ children }: { children: ReactNode }) {
-  const [sites, setSites] = useState<Site[]>([])
+export function SiteProvider({ children, canManageSites }: { children: ReactNode; canManageSites: boolean }) {
+  const [{ sites, managedSites }, setSiteLists] = useState<SiteLists>({ sites: [], managedSites: [] })
   const [activeSiteId, setActiveSiteIdState] = useState<number>(() => getActiveSiteId())
   const [loading, setLoading] = useState(false)
 
   const refreshSites = useCallback(async () => {
     setLoading(true)
     try {
-      const list = await getSites()
-      setSites(list)
+      const managedSites = canManageSites ? await getSites() : []
+      const list = canManageSites ? managedSites : await getSiteOptions()
+      setSiteLists({ sites: list, managedSites })
       const currentSavedId = getActiveSiteId()
       const existing = list.find((s) => s.id === currentSavedId)
       if (existing) {
@@ -46,13 +49,13 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [canManageSites])
 
   useEffect(() => {
     void refreshSites()
   }, [refreshSites])
 
-  const setActiveSite = useCallback((site: Site) => {
+  const setActiveSite = useCallback((site: SiteOption) => {
     setActiveSiteId(site.id)
     setActiveSiteIdState(site.id)
   }, [])
@@ -63,6 +66,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     <SiteContext.Provider
       value={{
         sites,
+        managedSites,
         activeSite,
         activeSiteId,
         setActiveSite,

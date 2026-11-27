@@ -180,7 +180,7 @@ func TestAdminSessionIgnoresStaleSiteSelection(t *testing.T) {
 			want int
 		}{
 			{"/api/admin/session", http.StatusOK},
-			{"/api/admin/sites", http.StatusOK},
+			{"/api/admin/site-options", http.StatusOK},
 			{"/api/admin/content", http.StatusForbidden},
 		} {
 			r := httptest.NewRequest(http.MethodGet, endpoint.path+selector.query, nil)
@@ -191,7 +191,7 @@ func TestAdminSessionIgnoresStaleSiteSelection(t *testing.T) {
 			if w.Code != endpoint.want {
 				t.Fatalf("%s header=%q query=%q: got %d, want %d: %s", endpoint.path, selector.header, selector.query, w.Code, endpoint.want, w.Body.String())
 			}
-			if endpoint.path == "/api/admin/sites" {
+			if endpoint.path == "/api/admin/site-options" {
 				var sites []struct{ ID int64 }
 				if err := json.Unmarshal(w.Body.Bytes(), &sites); err != nil || len(sites) != 1 || sites[0].ID != 2 {
 					t.Fatalf("site recovery returned inaccessible sites: %s", w.Body.String())

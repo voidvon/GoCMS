@@ -77,15 +77,6 @@ func (s *Server) adminOperationLogs(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	user := s.currentAdmin(r)
-	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或账号已停用"})
-		return
-	}
-	if !user.IsSuper && !user.hasPermission("logs") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此操作权限"})
-		return
-	}
 	page := positiveInt(r.URL.Query().Get("page"), 1)
 	if page > 1000000 {
 		page = 1000000
@@ -95,33 +86,13 @@ func (s *Server) adminOperationLogs(w http.ResponseWriter, r *http.Request) {
 	where := "1=1"
 	args := []any{}
 
-	if !user.IsSuper {
-		siteID, err := s.resolveSiteID(r, user)
-		if err != nil || siteID <= 0 {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "无权访问该站点日志"})
-			return
-		}
-		if !user.HasPermissionInSite(siteID, "logs") {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此站点的日志查看权限"})
-			return
-		}
+	if siteID, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("site_id")), 10, 64); err == nil && siteID > 0 {
 		where += " AND site_id = ?"
 		args = append(args, siteID)
-		if username != "" {
-			where += " AND username = ?"
-			args = append(args, username)
-		}
-	} else {
-		if siteIDStr := strings.TrimSpace(r.URL.Query().Get("site_id")); siteIDStr != "" {
-			if sid, err := strconv.ParseInt(siteIDStr, 10, 64); err == nil && sid > 0 {
-				where += " AND site_id = ?"
-				args = append(args, sid)
-			}
-		}
-		if username != "" {
-			where += " AND username = ?"
-			args = append(args, username)
-		}
+	}
+	if username != "" {
+		where += " AND username = ?"
+		args = append(args, username)
 	}
 
 	var total int64
@@ -158,22 +129,7 @@ func (s *Server) adminLoginLogs(w http.ResponseWriter, r *http.Request) {
 		methodNotAllowed(w)
 		return
 	}
-	user := s.currentAdmin(r)
-	if user == nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或账号已停用"})
-		return
-	}
-	if !user.IsSuper && !user.hasPermission("login_logs") {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此操作权限"})
-		return
-	}
-	query := `SELECT id, username, success, ip, created_at FROM gocms_admin_login ORDER BY id DESC LIMIT 100`
-	args := []any{}
-	if !user.IsSuper {
-		query = `SELECT id, username, success, ip, created_at FROM gocms_admin_login WHERE username = ? ORDER BY id DESC LIMIT 100`
-		args = append(args, user.Username)
-	}
-	rows, err := s.database.QueryContext(r.Context(), query, args...)
+	rows, err := s.database.QueryContext(r.Context(), `SELECT id, username, success, ip, created_at FROM gocms_admin_login ORDER BY id DESC LIMIT 100`)
 	if err != nil {
 		accountError(w, err)
 		return

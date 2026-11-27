@@ -127,6 +127,9 @@ export type Site = {
   updated_at: string
 }
 
+export type SiteOption = Pick<Site, "id" | "name" | "domain" | "public_origin" | "is_default" | "status">
+
+export const getSiteOptions = () => request<SiteOption[]>("/api/admin/site-options")
 export const getSites = () => request<Site[]>("/api/admin/sites")
 export const getSite = (id: number) => request<Site>(`/api/admin/sites/${id}`)
 export const saveSite = (input: Partial<Site> & { id?: number }) =>
@@ -1082,6 +1085,19 @@ export function markAdminNotificationsRead(payload: { ids?: number[]; all?: bool
     method: "POST",
     body: JSON.stringify(payload),
   })
+}
+
+export type ContentEditorModel = Pick<SystemModel, "id" | "name" | "table_id" | "entry_fields" | "must_fields">
+export type CategoryModelOption = Pick<SystemModel, "id" | "name" | "table_id" | "table_name">
+
+export function getContentEditorSchema() {
+  return request<{ models: ContentEditorModel[]; fields: ModelField[] }>("/api/admin/content/editor-schema")
+}
+
+export function getCategoryEditorOptions() {
+  return request<Pick<ThemeFiles, "template_files" | "template_groups"> & {
+    models: CategoryModelOption[]
+  }>("/api/admin/categories/editor-options")
 }
 
 // Model Tables, Fields, Models

@@ -265,10 +265,10 @@ func TestSecurityPermissionsAndPlatformBoundary(t *testing.T) {
 		method, path, scope, body string
 		want                      int
 	}{
-		{"GET", "/api/admin/security/entries", "1", "", 200},
+		{"GET", "/api/admin/security/entries", "1", "", 403},
 		{"GET", "/api/admin/security/entries?scope=global&include_sites=true", "2", "", 403},
 		{"POST", "/api/admin/security/entries", "1", `{"network":"203.0.113.8","kind":"deny","reason":"test"}`, 403},
-		{"POST", "/api/admin/security/entries", "2", `{"network":"203.0.113.8","kind":"deny","reason":"test"}`, 201},
+		{"POST", "/api/admin/security/entries", "2", `{"network":"203.0.113.8","kind":"deny","reason":"test"}`, 403},
 		{"GET", "/api/admin/security/entries", "999", "", 403},
 		{"GET", "/api/admin/security/platform", "1", "", 403},
 		{"GET", "/api/admin/SECURITY/PLATFORM", "2", "", 403},
@@ -309,8 +309,8 @@ func TestSecurityPermissionsAndPlatformBoundary(t *testing.T) {
 	if w := siteAdminRequest(s, root, "PUT", "/api/admin/security/policy", "2", string(raw)); w.Code != 200 {
 		t.Fatalf("super admin site policy: %d %s", w.Code, w.Body.String())
 	}
-	if w := siteAdminRequest(s, token, "PUT", "/api/admin/security/policy", "2", string(raw)); w.Code != 200 {
-		t.Fatalf("site editor site policy: %d %s", w.Code, w.Body.String())
+	if w := siteAdminRequest(s, token, "PUT", "/api/admin/security/policy", "2", string(raw)); w.Code != 403 {
+		t.Fatalf("site editor modified the site policy: %d %s", w.Code, w.Body.String())
 	}
 	if w := siteAdminRequest(s, "", "GET", "/api/admin/security/entries", "1", ""); w.Code != 401 {
 		t.Fatal("anonymous security access")

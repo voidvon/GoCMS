@@ -142,7 +142,8 @@ function MediaDetails({ asset, open, onOpenChangeComplete, onClose, onDeleted }:
 }
 
 export function MediaPage({ canMigrate }: { canMigrate: boolean }) {
-  const { activeSite } = useSite()
+  const { activeSite, managedSites } = useSite()
+  const migrationSite = managedSites.find((site) => site.id === activeSite?.id)
   const [storageOperation, setStorageOperation] = useState<{ site: Site; cleanup: boolean } | null>(null)
   const [kind, setKind] = useState<MediaKind>("image")
   const [language, setLanguage] = useState("")
@@ -240,12 +241,12 @@ export function MediaPage({ canMigrate }: { canMigrate: boolean }) {
           </div>
         ) : null}
         <Button size="sm" disabled={uploading || (kind === "pdf" && !language.trim())} onClick={() => fileInput.current?.click()}>{uploading ? <LoaderCircle className="animate-spin" /> : <Upload />}{uploading ? "上传中…" : kind === "pdf" ? "上传 PDF" : "上传图片"}</Button>
-        {kind === "image" && canMigrate && activeSite && (
+        {kind === "image" && canMigrate && migrationSite && (
           <>
-            <Button size="sm" variant="outline" disabled={uploading} onClick={() => setStorageOperation({ site: activeSite, cleanup: false })}>
+            <Button size="sm" variant="outline" disabled={uploading} onClick={() => setStorageOperation({ site: migrationSite, cleanup: false })}>
               <CloudUpload />迁移到 R2
             </Button>
-            <Button size="sm" variant="outline" disabled={uploading} onClick={() => setStorageOperation({ site: activeSite, cleanup: true })}>
+            <Button size="sm" variant="outline" disabled={uploading} onClick={() => setStorageOperation({ site: migrationSite, cleanup: true })}>
               <Trash2 />清理本地副本
             </Button>
           </>

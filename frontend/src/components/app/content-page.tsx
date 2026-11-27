@@ -9,8 +9,7 @@ import {
   getCategories,
   getContent,
   getContentItem,
-  getModelFields,
-  getSystemModels,
+  getContentEditorSchema,
   publishContent,
   uploadMedia,
   type CategoryItem,
@@ -23,7 +22,7 @@ import {
   type MediaAsset,
   type ModelField,
   type SaveResponse,
-  type SystemModel,
+  type ContentEditorModel,
   updateContent,
 } from "@/lib/api"
 import { usePublication } from "@/lib/publication-context"
@@ -699,7 +698,7 @@ function ContentEditor({
   canManageCommerce: boolean
   content: ContentInput
   categories: CategoryItem[]
-  models: SystemModel[]
+  models: ContentEditorModel[]
   modelFields: ModelField[]
   onSave: (content: ContentInput, action: ContentSaveAction) => void | Promise<void>
   onCancel: () => void
@@ -1379,7 +1378,7 @@ export function ContentPage({ user }: { user: AdminUser }) {
   const canEditItem = (item: ContentListItem) => allowed("content.edit") && (!item.visible || canReview)
   const [items, setItems] = useState<ContentListItem[]>([])
   const [categories, setCategories] = useState<CategoryItem[]>([])
-  const [models, setModels] = useState<SystemModel[]>([])
+  const [models, setModels] = useState<ContentEditorModel[]>([])
   const [modelFields, setModelFields] = useState<ModelField[]>([])
   const [query, setQuery] = useState("")
   const [appliedQuery, setAppliedQuery] = useState("")
@@ -1407,8 +1406,13 @@ export function ContentPage({ user }: { user: AdminUser }) {
 
   useEffect(() => {
     getCategories(activeLang).then(setCategories).catch(() => setCategories([]))
-    getSystemModels().then(setModels).catch(() => setModels([]))
-    getModelFields().then(setModelFields).catch(() => setModelFields([]))
+    getContentEditorSchema().then(({ models, fields }) => {
+      setModels(models)
+      setModelFields(fields)
+    }).catch(() => {
+      setModels([])
+      setModelFields([])
+    })
   }, [activeLang])
 
   useEffect(() => {

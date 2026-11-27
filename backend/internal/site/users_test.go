@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 
 	"gocms/internal/apikey"
@@ -77,6 +80,84 @@ func TestAdminAccountLifecycleAndPermissions(t *testing.T) {
 	call(root, "PUT", "/api/admin/users", fmt.Sprintf(`{"id":%d,"username":"gocms","is_super":true,"disabled":true}`, rootID), 400)
 	call(root, "POST", "/api/admin/groups", `{"name":"Bad","permissions":["users"]}`, 400)
 	call(root, "POST", "/api/admin/users", `{"username":"bad","password":"test-password","group_id":99999}`, 400)
+}
+
+func TestPlatformAdminRequiresSuperAdministrator(t *testing.T) {
+	s, database, root := newCategoryTestServer(t)
+	if _, err := database.Exec(`
+		INSERT INTO gocms_site (id, name, code) VALUES (2, 'Other site', 'other');
+		INSERT INTO gocms_admin_group (name, permissions, site_permissions) VALUES
+			('Legacy editor', '["content","models","logs","login_logs","security","security.manage"]',
+				'{"1":["content","categories","models","logs","login_logs","security","security.manage"],"2":["content"]}'),
+			('Wildcard editor', '["*"]', '{"1":["*"]}');
+		INSERT INTO gocms_admin_user (username, group_id)
+			SELECT name, id FROM gocms_admin_group WHERE name IN ('Legacy editor','Wildcard editor')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, username := range []string{"Legacy editor", "Wildcard editor"} {
+		t.Run(username, func(t *testing.T) {
+			token, err := s.createSession(username)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := apiKeyForTest(t, s, username)
+			for _, tc := range []struct{ method, route string }{
+				{"GET", "security/policy"}, {"GET", "SECURITY/nginx/config"}, {"POST", "security/entries"},
+				{"GET", "models"}, {"POST", "models"}, {"GET", "model-fields"}, {"PUT", "model-fields/1"},
+				{"GET", "model-tables"}, {"DELETE", "model-tables/1"}, {"GET", "logs"}, {"GET", "logins"},
+				{"POST", "logs/clear"}, {"GET", "sites"}, {"GET", "sites/1"}, {"GET", "site-settings"},
+				{"PUT", "site-settings"}, {"GET", "mail"}, {"GET", "member-login"}, {"GET", "geography"},
+				{"GET", "database-backup/objects/download"}, {"GET", "users"}, {"GET", "groups"}, {"GET", "api-keys"},
+			} {
+				path := "/api/admin/" + tc.route
+				for _, result := range []*httptest.ResponseRecorder{
+					siteAdminRequest(s, token, tc.method, path, "1", "{}"),
+					apiKeyRequest(t, s, key.Key, tc.method, path, "{}"),
+				} {
+					if result.Code != http.StatusForbidden {
+						t.Errorf("%s %s: got %d: %s", tc.method, path, result.Code, result.Body)
+					}
+				}
+			}
+		})
+	}
+	token, err := s.createSession("Legacy editor")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		route    string
+		siteID   string
+		want     int
+		contains string
+	}{
+		{"site-options", "999", 200, `"name":"Other site"`},
+		{"content/editor-schema", "1", 200, `"entry_fields"`},
+		{"content/editor-schema", "2", 200, `"field_name"`},
+		{"categories/editor-options", "1", 200, `"template_files"`},
+		{"categories/editor-options", "2", 403, ""},
+	} {
+		result := siteAdminRequest(s, token, "GET", "/api/admin/"+tc.route, tc.siteID, "")
+		if result.Code != tc.want || !strings.Contains(result.Body.String(), tc.contains) {
+			t.Errorf("%s for site %s: got %d: %s", tc.route, tc.siteID, result.Code, result.Body)
+		}
+	}
+
+	session := categoryRequest(t, s, token, "GET", "/api/admin/session", "")
+	var identity struct{ User AdminUser }
+	if err := json.Unmarshal(session.Body.Bytes(), &identity); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(identity.User.Permissions, []string{"content"}) ||
+		!slices.Equal(identity.User.SitePermissions[1], []string{"content", "categories"}) {
+		t.Fatalf("unexpected session permissions: %+v", identity.User)
+	}
+	groups := categoryRequest(t, s, root, "GET", "/api/admin/groups", "")
+	for _, key := range []string{"models", "logs", "login_logs", "security", "security.manage"} {
+		if strings.Contains(groups.Body.String(), `"`+key+`"`) {
+			t.Errorf("retired permission %q returned: %s", key, groups.Body)
+		}
+	}
 }
 
 func TestDeletedSessionUserCannotAuthenticate(t *testing.T) {
@@ -235,8 +316,8 @@ func TestAdminAccountSitePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 1. Check GET /api/admin/sites: user should only see Site 2
-	sitesResp := call(editorToken, "GET", "/api/admin/sites", "", 200)
+	// 1. The site switcher should only show Site 2.
+	sitesResp := call(editorToken, "GET", "/api/admin/site-options", "", 200)
 	var siteList []struct {
 		ID int64 `json:"id"`
 	}
@@ -267,7 +348,7 @@ func TestAdminAccountSitePermissions(t *testing.T) {
 	}
 
 	// Now editor should see both sites
-	sitesRespAll := call(editorToken, "GET", "/api/admin/sites", "", 200)
+	sitesRespAll := call(editorToken, "GET", "/api/admin/site-options", "", 200)
 	var allSitesList []struct {
 		ID int64 `json:"id"`
 	}
@@ -314,7 +395,7 @@ func TestAdminGroupSitePermissions(t *testing.T) {
 	}
 
 	// Editor should only see Site 2
-	sitesResp := call(editorToken, "GET", "/api/admin/sites", "", 200)
+	sitesResp := call(editorToken, "GET", "/api/admin/site-options", "", 200)
 	var siteList []struct {
 		ID int64 `json:"id"`
 	}
@@ -332,7 +413,7 @@ func TestAdminGroupSitePermissions(t *testing.T) {
 	call(root, "PUT", "/api/admin/groups", fmt.Sprintf(`{"id":%d,"name":"Site2Group","permissions":["content","categories"],"site_ids":[1,2]}`, groupID), 200)
 
 	// Editor now has access to both sites
-	sitesRespAll := call(editorToken, "GET", "/api/admin/sites", "", 200)
+	sitesRespAll := call(editorToken, "GET", "/api/admin/site-options", "", 200)
 	var allSitesList []struct {
 		ID int64 `json:"id"`
 	}
@@ -388,7 +469,7 @@ func TestAdminGroupPerSiteModulePermissions(t *testing.T) {
 	}
 
 	// 3. Check sites: user should only see Site 1 and Site 2 (not Site 3)
-	sitesResp := call(userToken, "GET", "/api/admin/sites", "", 200)
+	sitesResp := call(userToken, "GET", "/api/admin/site-options", "", 200)
 	var siteList []struct {
 		ID int64 `json:"id"`
 	}
@@ -411,4 +492,3 @@ func TestAdminGroupPerSiteModulePermissions(t *testing.T) {
 	// 7. Site 3 is completely inaccessible -> 403 Forbidden
 	call(userToken, "GET", "/api/admin/content?site_id=3", "", 403)
 }
-

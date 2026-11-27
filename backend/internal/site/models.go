@@ -1,6 +1,7 @@
 package site
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -21,16 +22,16 @@ type ModelTableItem struct {
 }
 
 type ModelFieldItem struct {
-	ID           int64  `json:"id"`
-	TableID      int64  `json:"table_id"`
-	FieldName    string `json:"field_name"`
-	FieldLabel   string `json:"field_label"`
-	FieldType    string `json:"field_type"`
-	FieldOptions string `json:"field_options"`
-	Description  string `json:"description"`
-	SortOrder    int    `json:"sort_order"`
-	IsSystem     int    `json:"is_system"`
-	IsTranslatable int  `json:"is_translatable"`
+	ID             int64  `json:"id"`
+	TableID        int64  `json:"table_id"`
+	FieldName      string `json:"field_name"`
+	FieldLabel     string `json:"field_label"`
+	FieldType      string `json:"field_type"`
+	FieldOptions   string `json:"field_options"`
+	Description    string `json:"description"`
+	SortOrder      int    `json:"sort_order"`
+	IsSystem       int    `json:"is_system"`
+	IsTranslatable int    `json:"is_translatable"`
 }
 
 type SystemModelItem struct {
@@ -44,6 +45,79 @@ type SystemModelItem struct {
 	IsDefault   int             `json:"is_default"`
 	SortOrder   int             `json:"sort_order"`
 	CreatedAt   string          `json:"created_at"`
+}
+
+const (
+	contentEditorSchemaRoute   = "/api/admin/content/editor-schema"
+	categoryEditorOptionsRoute = "/api/admin/categories/editor-options"
+)
+
+func (s *Server) adminContentEditorSchema(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	models, err := s.listSystemModels(r.Context())
+	if err != nil {
+		accountError(w, err)
+		return
+	}
+	fields, err := s.listModelFields(r.Context(), 0)
+	if err != nil {
+		accountError(w, err)
+		return
+	}
+	type editorModel struct {
+		ID          int64           `json:"id"`
+		Name        string          `json:"name"`
+		TableID     int64           `json:"table_id"`
+		EntryFields json.RawMessage `json:"entry_fields"`
+		MustFields  json.RawMessage `json:"must_fields"`
+	}
+	items := make([]editorModel, 0, len(models))
+	for _, model := range models {
+		items = append(items, editorModel{model.ID, model.Name, model.TableID, model.EntryFields, model.MustFields})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"models": items, "fields": fields})
+}
+
+func (s *Server) adminCategoryEditorOptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	siteID, err := s.resolveSiteID(r, s.currentAdmin(r))
+	if err != nil {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+		return
+	}
+	themeRoot, templateRoot, _, _, _ := s.siteThemePaths(r.Context(), siteID)
+	if themeRoot == "" || templateRoot == "" {
+		_, templateRoot = s.themePaths()
+	}
+	templates, err := listThemeFiles(templateRoot, ".html")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "读取 HTML 模板失败"})
+		return
+	}
+	models, err := s.listSystemModels(r.Context())
+	if err != nil {
+		accountError(w, err)
+		return
+	}
+	type modelOption struct {
+		ID        int64  `json:"id"`
+		Name      string `json:"name"`
+		TableID   int64  `json:"table_id"`
+		TableName string `json:"table_name"`
+	}
+	items := make([]modelOption, 0, len(models))
+	for _, model := range models {
+		items = append(items, modelOption{model.ID, model.Name, model.TableID, model.TableName})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"models": items, "template_files": templates, "template_groups": s.themeTemplateGroups(templates, siteID),
+	})
 }
 
 // Model Tables
@@ -168,6 +242,31 @@ func (s *Server) adminModelTableItem(response http.ResponseWriter, request *http
 
 // Model Fields
 
+func (s *Server) listModelFields(ctx context.Context, tableID int64) ([]ModelFieldItem, error) {
+	query := `SELECT "id", "table_id", "field_name", "field_label", "field_type", "field_options", "description", "sort_order", "is_system", "is_translatable"
+	          FROM "` + db.ModelFieldTable + `"`
+	var args []any
+	if tableID > 0 {
+		query += ` WHERE "table_id" = ?`
+		args = append(args, tableID)
+	}
+	query += ` ORDER BY "sort_order" ASC, "id" ASC`
+	rows, err := s.database.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]ModelFieldItem, 0)
+	for rows.Next() {
+		var item ModelFieldItem
+		if err := rows.Scan(&item.ID, &item.TableID, &item.FieldName, &item.FieldLabel, &item.FieldType, &item.FieldOptions, &item.Description, &item.SortOrder, &item.IsSystem, &item.IsTranslatable); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Server) adminModelFields(response http.ResponseWriter, request *http.Request) {
 	if !s.requireAdmin(response, request) {
 		return
@@ -175,29 +274,10 @@ func (s *Server) adminModelFields(response http.ResponseWriter, request *http.Re
 	switch request.Method {
 	case http.MethodGet:
 		tableID := parseIntOrZero(request.URL.Query().Get("table_id"))
-		query := `SELECT "id", "table_id", "field_name", "field_label", "field_type", "field_options", "description", "sort_order", "is_system", "is_translatable"
-		          FROM "` + db.ModelFieldTable + `"`
-		var args []any
-		if tableID > 0 {
-			query += ` WHERE "table_id" = ?`
-			args = append(args, tableID)
-		}
-		query += ` ORDER BY "sort_order" ASC, "id" ASC`
-
-		rows, err := s.database.QueryContext(request.Context(), query, args...)
+		items, err := s.listModelFields(request.Context(), tableID)
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
-		}
-		defer rows.Close()
-		items := make([]ModelFieldItem, 0)
-		for rows.Next() {
-			var item ModelFieldItem
-			if err := rows.Scan(&item.ID, &item.TableID, &item.FieldName, &item.FieldLabel, &item.FieldType, &item.FieldOptions, &item.Description, &item.SortOrder, &item.IsSystem, &item.IsTranslatable); err != nil {
-				http.Error(response, "database error", http.StatusInternalServerError)
-				return
-			}
-			items = append(items, item)
 		}
 		writeJSON(response, http.StatusOK, items)
 
@@ -302,34 +382,41 @@ func (s *Server) adminModelFieldItem(response http.ResponseWriter, request *http
 
 // System Models
 
+func (s *Server) listSystemModels(ctx context.Context) ([]SystemModelItem, error) {
+	rows, err := s.database.QueryContext(ctx, `
+		SELECT m."id", m."name", m."table_id", COALESCE(t."name", '') as table_name, m."description",
+		       m."entry_fields", m."must_fields", m."is_default", m."sort_order", m."created_at"
+		FROM "`+db.ModelTable+`" m
+		LEFT JOIN "`+db.ModelTableTable+`" t ON t."id" = m."table_id"
+		ORDER BY m."is_default" DESC, m."sort_order" ASC, m."id" ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]SystemModelItem, 0)
+	for rows.Next() {
+		var item SystemModelItem
+		var entryJSON, mustJSON string
+		if err := rows.Scan(&item.ID, &item.Name, &item.TableID, &item.TableName, &item.Description, &entryJSON, &mustJSON, &item.IsDefault, &item.SortOrder, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		item.EntryFields = json.RawMessage(entryJSON)
+		item.MustFields = json.RawMessage(mustJSON)
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Server) adminModels(response http.ResponseWriter, request *http.Request) {
 	if !s.requireAdmin(response, request) {
 		return
 	}
 	switch request.Method {
 	case http.MethodGet:
-		rows, err := s.database.QueryContext(request.Context(), `
-			SELECT m."id", m."name", m."table_id", COALESCE(t."name", '') as table_name, m."description",
-			       m."entry_fields", m."must_fields", m."is_default", m."sort_order", m."created_at"
-			FROM "`+db.ModelTable+`" m
-			LEFT JOIN "`+db.ModelTableTable+`" t ON t."id" = m."table_id"
-			ORDER BY m."is_default" DESC, m."sort_order" ASC, m."id" ASC`)
+		items, err := s.listSystemModels(request.Context())
 		if err != nil {
 			http.Error(response, "database error", http.StatusInternalServerError)
 			return
-		}
-		defer rows.Close()
-		items := make([]SystemModelItem, 0)
-		for rows.Next() {
-			var item SystemModelItem
-			var entryJSON, mustJSON string
-			if err := rows.Scan(&item.ID, &item.Name, &item.TableID, &item.TableName, &item.Description, &entryJSON, &mustJSON, &item.IsDefault, &item.SortOrder, &item.CreatedAt); err != nil {
-				http.Error(response, "database error", http.StatusInternalServerError)
-				return
-			}
-			item.EntryFields = json.RawMessage(entryJSON)
-			item.MustFields = json.RawMessage(mustJSON)
-			items = append(items, item)
 		}
 		writeJSON(response, http.StatusOK, items)
 

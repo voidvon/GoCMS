@@ -3,7 +3,7 @@ import { Copy, Plus, RefreshCw, ShieldCheck, ShieldOff, Unplug } from "lucide-re
 import {
   addSecurityEntry, getSecurityEntries, getSecurityEvents, getSecurityNginx,
   getSecurityPlatform, getSecurityPolicy, revokeSecurityEntry, saveSecurityPlatform, saveSecurityPolicy, syncSecurityNginx,
-  type AdminUser, type SecurityEntry, type SecurityEvent, type SecurityNginx, type SecurityPlatform, type SecurityPolicy,
+  type SecurityEntry, type SecurityEvent, type SecurityNginx, type SecurityPlatform, type SecurityPolicy,
 } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
 import { Badge } from "@/components/ui/badge"
@@ -31,14 +31,11 @@ function Field({ label, id, hint, children }: { label: string; id: string; hint?
   return <div className="space-y-2"><Label htmlFor={id}>{label}</Label>{children}{hint && <p className="text-xs leading-5 text-muted-foreground">{hint}</p>}</div>
 }
 
-export function SecurityPage({ user }: { user: AdminUser }) {
-  const { activeSite, activeSiteId, sites } = useSite()
-  const permissions = user.site_permissions?.[activeSiteId] ?? user.permissions
-  const canManage = user.is_super || permissions.includes("*") || permissions.includes("security.manage")
-  const [scope, setScope] = useState(user.is_super ? "global" : "site")
+export function SecurityPage() {
+  const { activeSite, sites } = useSite()
+  const [scope, setScope] = useState("global")
   const [tab, setTab] = useState("entries")
   const [policy, setPolicy] = useState<SecurityPolicy | null>(null)
-  const canManagePolicy = canManage && (user.is_super || policy?.ban_scope === "site")
   const [pathText, setPathText] = useState("")
   const [platform, setPlatform] = useState<SecurityPlatform | null>(null)
   const [savedPlatform, setSavedPlatform] = useState<SecurityPlatform | null>(null)
@@ -93,19 +90,16 @@ export function SecurityPage({ user }: { user: AdminUser }) {
     mounted.current = true
     void getSecurityPolicy().then(value => {
       if (mounted.current) {
-        setPolicy(!user.is_super && !value.enabled && value.ban_scope === "global" ? { ...value, ban_scope: "site" } : value)
+        setPolicy(value)
         setPathText(value.paths.join("\n"))
       }
     }).catch(error => { if (mounted.current) showError(error) })
-    if (user.is_super) {
-      void getSecurityPlatform().then(value => { if (mounted.current) { setPlatform(value); setSavedPlatform(value); setProxyText(value.trusted_proxies.join("\n")) } }).catch(error => { if (mounted.current) showError(error) })
-      const poll = () => { void getSecurityNginx().then(value => { if (mounted.current) setNginx(value) }).catch(error => { if (mounted.current) showError(error) }) }
-      poll()
-      const timer = window.setInterval(poll, 15000)
-      return () => { mounted.current = false; window.clearInterval(timer) }
-    }
-    return () => { mounted.current = false }
-  }, [user.is_super])
+    void getSecurityPlatform().then(value => { if (mounted.current) { setPlatform(value); setSavedPlatform(value); setProxyText(value.trusted_proxies.join("\n")) } }).catch(error => { if (mounted.current) showError(error) })
+    const poll = () => { void getSecurityNginx().then(value => { if (mounted.current) setNginx(value) }).catch(error => { if (mounted.current) showError(error) }) }
+    poll()
+    const timer = window.setInterval(poll, 15000)
+    return () => { mounted.current = false; window.clearInterval(timer) }
+  }, [])
   useEffect(() => { void refreshLists() }, [refreshLists])
 
   async function act(operation: () => Promise<unknown>, message: string) {
@@ -117,11 +111,12 @@ export function SecurityPage({ user }: { user: AdminUser }) {
       showSuccess(message)
       setLoading(true)
       await refreshLists()
-      if (user.is_super) { const value = await getSecurityNginx(); if (mounted.current) setNginx(value) }
+      const value = await getSecurityNginx()
+      if (mounted.current) setNginx(value)
     } catch (error) {
       if (mounted.current) {
         showError(error)
-        if (user.is_super) void getSecurityNginx().then(value => { if (mounted.current) setNginx(value) }).catch(() => {})
+        void getSecurityNginx().then(value => { if (mounted.current) setNginx(value) }).catch(() => {})
       }
     }
     finally { if (mounted.current) setPending(false) }
@@ -178,20 +173,20 @@ export function SecurityPage({ user }: { user: AdminUser }) {
           <ShieldCheck className="size-5 text-muted-foreground" />
           <Select value={scope} onValueChange={chooseScope} disabled={pending}>
             <SelectTrigger className="w-56" aria-label="安全规则范围"><SelectValue>{scope === "global" ? "全平台" : activeSite?.name ?? "当前站点"}</SelectValue></SelectTrigger>
-            <SelectContent>{user.is_super && <SelectItem value="global">全平台</SelectItem>}<SelectItem value="site">{activeSite?.name ?? "当前站点"}</SelectItem></SelectContent>
+            <SelectContent><SelectItem value="global">全平台</SelectItem><SelectItem value="site">{activeSite?.name ?? "当前站点"}</SelectItem></SelectContent>
           </Select>
           {nginx && <Badge variant={nginx.status.state === "failed" ? "destructive" : "outline"}>Nginx · {syncLabels[nginx.status.state]}</Badge>}
         </div>
         <Button variant="outline" disabled={loading || pending} onClick={() => { setLoading(true); void refreshLists() }}><RefreshCw className="size-4" />{tab === "events" ? "刷新日志" : "刷新记录"}</Button>
       </div>
       <Tabs value={tab} onValueChange={value => setTab(String(value))}>
-        <ScrollArea orientation="horizontal" className="w-full"><TabsList><TabsTrigger value="entries">黑白名单</TabsTrigger><TabsTrigger value="policy">扫描防护</TabsTrigger><TabsTrigger value="events">安全日志</TabsTrigger>{user.is_super && <TabsTrigger value="nginx">Nginx 接入</TabsTrigger>}</TabsList></ScrollArea>
+        <ScrollArea orientation="horizontal" className="w-full"><TabsList><TabsTrigger value="entries">黑白名单</TabsTrigger><TabsTrigger value="policy">扫描防护</TabsTrigger><TabsTrigger value="events">安全日志</TabsTrigger><TabsTrigger value="nginx">Nginx 接入</TabsTrigger></TabsList></ScrollArea>
       </Tabs>
 
       {tab === "entries" && <section className="space-y-4" aria-label="IP 黑白名单">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2"><Switch id="security-history" checked={history} onCheckedChange={value => { setHistory(value); setPage(1); setLoading(true) }} /><Label htmlFor="security-history">显示到期和已移除记录</Label></div>
-          {canManage && <Button disabled={pending || loading || failed} onClick={() => { setDraft(emptyEntry()); setDialog(true) }}><Plus className="size-4" />{scope === "global" ? "添加全平台规则" : "添加 IP / 网段"}</Button>}
+          <Button disabled={pending || loading || failed} onClick={() => { setDraft(emptyEntry()); setDialog(true) }}><Plus className="size-4" />{scope === "global" ? "添加全平台规则" : "添加 IP / 网段"}</Button>
         </div>
         <ScrollArea orientation="horizontal" className="w-full rounded-xl border bg-card">
           <Table aria-label="IP 黑白名单" containerClassName="overflow-visible" className="min-w-[920px]">
@@ -205,13 +200,13 @@ export function SecurityPage({ user }: { user: AdminUser }) {
                 <TableHead>原因</TableHead>
                 <TableHead>添加时间</TableHead>
                 <TableHead>到期时间</TableHead>
-                {canManage && <TableHead className="pe-4 text-end">操作</TableHead>}
+                <TableHead className="pe-4 text-end">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loadingState || !entries.length ? (
                 <TableRow>
-                  <TableCell colSpan={canManage ? 9 : 8} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
                     <span role="status">{loadingState || "当前范围暂无名单记录"}</span>
                   </TableCell>
                 </TableRow>
@@ -229,11 +224,11 @@ export function SecurityPage({ user }: { user: AdminUser }) {
                     <TableCell className="w-full min-w-36 whitespace-normal wrap-anywhere">{entry.reason}</TableCell>
                     <TableCell className="text-xs text-muted-foreground"><TimeText value={entry.created_at} /></TableCell>
                     <TableCell className="text-xs text-muted-foreground">{entry.expires_at ? <TimeText value={entry.expires_at} /> : "长期有效"}</TableCell>
-                    {canManage && <TableCell className="pe-4 text-end">
+                    <TableCell className="pe-4 text-end">
                       {!inactive && <Button variant="outline" size="sm" disabled={pending} onClick={() => setRemoving(entry)}>
                         <ShieldOff className="size-4" />{allow ? "移除白名单" : "解封"}
                       </Button>}
-                    </TableCell>}
+                    </TableCell>
                   </TableRow>
                 )
               })}
@@ -244,16 +239,16 @@ export function SecurityPage({ user }: { user: AdminUser }) {
       </section>}
 
       {tab === "policy" && <section className="max-w-3xl space-y-4" aria-label="扫描防护设置">
-        {!policy ? <p role="status" className="text-sm text-muted-foreground">防护设置尚未加载，重新进入页面可重试。</p> : <form onSubmit={savePolicy} className="space-y-5"><fieldset disabled={!canManagePolicy || pending} className="space-y-5">
+        {!policy ? <p role="status" className="text-sm text-muted-foreground">防护设置尚未加载，重新进入页面可重试。</p> : <form onSubmit={savePolicy} className="space-y-5"><fieldset disabled={pending} className="space-y-5">
           <div className="flex items-center justify-between gap-4 rounded-xl border bg-card p-4"><div><Label htmlFor="security-enabled">启用{activeSite?.name ?? "当前站点"}扫描防护</Label><p className="mt-1 text-xs leading-5 text-muted-foreground">命中扫描路径立即拒绝，达到阈值后封禁 IP。普通 404 不计入阈值。</p></div><Switch id="security-enabled" checked={policy.enabled} onCheckedChange={enabled => setPolicy({ ...policy, enabled })} /></div>
-          <Field label="自动封禁范围" id="security-ban-scope"><Select value={policy.ban_scope} onValueChange={ban_scope => { if (ban_scope === "global" || ban_scope === "site") setPolicy({ ...policy, ban_scope }) }}><SelectTrigger id="security-ban-scope" className="w-full"><SelectValue>{policy.ban_scope === "global" ? "全平台" : activeSite?.name ?? "当前站点"}</SelectValue></SelectTrigger><SelectContent>{(user.is_super || policy.ban_scope === "global") && <SelectItem value="global">全平台</SelectItem>}<SelectItem value="site">{activeSite?.name ?? "当前站点"}</SelectItem></SelectContent></Select></Field>
+          <Field label="自动封禁范围" id="security-ban-scope"><Select value={policy.ban_scope} onValueChange={ban_scope => { if (ban_scope === "global" || ban_scope === "site") setPolicy({ ...policy, ban_scope }) }}><SelectTrigger id="security-ban-scope" className="w-full"><SelectValue>{policy.ban_scope === "global" ? "全平台" : activeSite?.name ?? "当前站点"}</SelectValue></SelectTrigger><SelectContent><SelectItem value="global">全平台</SelectItem><SelectItem value="site">{activeSite?.name ?? "当前站点"}</SelectItem></SelectContent></Select></Field>
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label="检测窗口（秒）" id="security-window"><Input id="security-window" type="number" required min={10} max={86400} value={policy.window_seconds} onChange={e => setPolicy({ ...policy, window_seconds: Number(e.target.value) })} /></Field>
             <Field label="触发次数" id="security-threshold"><Input id="security-threshold" type="number" required min={2} max={1000} value={policy.threshold} onChange={e => setPolicy({ ...policy, threshold: Number(e.target.value) })} /></Field>
             <Field label="封禁有效期" id="security-permanent"><div className="flex h-9 items-center gap-2"><Switch id="security-permanent" checked={policy.ban_seconds === 0} onCheckedChange={permanent => setPolicy({ ...policy, ban_seconds: permanent ? 0 : 3600 })} /><span className="text-sm">长期有效</span></div>{policy.ban_seconds !== 0 && <Input aria-label="封禁时长（秒）" type="number" required min={60} max={2592000} value={policy.ban_seconds} onChange={e => setPolicy({ ...policy, ban_seconds: Number(e.target.value) })} />}</Field>
           </div>
           <Field label="扫描路径" id="security-paths" hint="每行一条，忽略大小写；末尾 * 表示前缀匹配。仅添加确认不属于正常业务的路径；不能覆盖后台、API 或证书验证路径。"><Textarea id="security-paths" className="font-mono" rows={9} required value={pathText} onChange={e => setPathText(e.target.value)} /></Field>
-        </fieldset>{!user.is_super && policy.ban_scope === "global" && <p className="text-xs text-muted-foreground">全平台自动封禁由超级管理员管理。</p>}{canManagePolicy && <Button type="submit" disabled={pending}>{pending ? "保存中…" : "保存站点防护"}</Button>}</form>}
+        </fieldset><Button type="submit" disabled={pending}>{pending ? "保存中…" : "保存站点防护"}</Button></form>}
       </section>}
 
       {tab === "events" && <section className="space-y-4" aria-label="安全日志">
@@ -293,7 +288,7 @@ export function SecurityPage({ user }: { user: AdminUser }) {
         {!loading && !failed && eventTotal > 0 && <TablePagination page={eventPage} totalPages={Math.max(1, Math.ceil(eventTotal / 50))} total={eventTotal} pageSize={50} onPageChange={value => { setEventPage(value); setLoading(true) }} />}
       </section>}
 
-      {tab === "nginx" && user.is_super && <section className="max-w-4xl space-y-5" aria-label="Nginx 接入设置">
+      {tab === "nginx" && <section className="max-w-4xl space-y-5" aria-label="Nginx 接入设置">
         <div className="space-y-3 rounded-xl border bg-card p-4">
           <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><Unplug className="size-4" /><span className="font-medium">同步状态</span><Badge variant={nginx?.status.state === "failed" ? "destructive" : "outline"}>{nginx ? syncLabels[nginx.status.state] : "读取中"}</Badge></div><Button variant="outline" disabled={pending || !platform || (!platform.nginx_enabled && nginx?.status.state === "disabled")} onClick={syncNginx}><RefreshCw className="size-4" />{platformDirty ? "保存并同步" : "立即同步"}</Button></div>
           {platformDirty && <p className="text-xs leading-5 text-muted-foreground">接入设置已修改，将先保存当前配置再同步；更改配置路径或运行用户后需要重新执行初始化命令。</p>}
@@ -319,7 +314,6 @@ export function SecurityPage({ user }: { user: AdminUser }) {
         <div className="flex flex-wrap items-center gap-3"><NginxConfigDialog /><p className="text-xs text-muted-foreground">查看已保存接入设置对应的实际文件。</p></div>
         {nginx && <details className="rounded-xl border p-4"><summary className="cursor-pointer text-sm">查看待同步配置</summary><ScrollArea orientation="both" className="mt-3 max-h-80" contentClassName="p-1"><pre className="text-xs leading-5">{nginx.http_config}{"\n"}{nginx.server_config}</pre></ScrollArea></details>}
       </section>}
-      {!canManage && <p className="text-xs text-muted-foreground">当前为只读。修改本站设置与名单需要“管理站点安全防护”权限。</p>}
     </ScrollArea>
 
     <Dialog open={dialog} onOpenChange={open => { if (!pending) setDialog(open) }}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>添加{scope === "global" ? "全平台" : "本站"} IP 规则</DialogTitle><DialogDescription>支持 IPv4、IPv6 和 CIDR 网段。白名单可豁免扫描检测和相应范围的封禁。</DialogDescription></DialogHeader><ScrollArea className="max-h-[60dvh]" contentClassName="p-1"><form id="security-entry-form" onSubmit={add}><fieldset disabled={pending} className="space-y-4">

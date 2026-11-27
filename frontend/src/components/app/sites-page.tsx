@@ -52,7 +52,7 @@ import { ConsentSettingsDialog } from "@/components/app/consent-settings-dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 
 export function SitesPage() {
-  const { sites, refreshSites, loading, activeSiteId, setActiveSite } = useSite()
+  const { managedSites: sites, refreshSites, loading, activeSiteId, setActiveSite } = useSite()
   const [error, setError] = useState("")
   const [privacySite, setPrivacySite] = useState<Site | null>(null)
 

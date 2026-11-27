@@ -11,7 +11,7 @@ import {
   type AdminAccount,
   type AdminGroup,
   type CategoryItem,
-  type Site,
+  type SiteOption,
 } from "@/lib/api"
 import { useSite } from "@/lib/site-context"
 import { Button } from "@/components/ui/button"
@@ -28,13 +28,13 @@ import {
 import { ConfirmDialog, InlineAlert } from "@/components/app/app-ui"
 import { cn } from "@/lib/utils"
 
-function renderGroupSites(grp: AdminGroup | undefined, allSites: Site[]) {
+function renderGroupSites(grp: AdminGroup | undefined, allSites: SiteOption[]) {
   if (!grp) {
     return <span className="text-xs text-muted-foreground">未分配</span>
   }
   if (grp.site_permissions && Object.keys(grp.site_permissions).length > 0) {
     const siteIds = Object.keys(grp.site_permissions).map(Number)
-    const matched = siteIds.map((id) => allSites.find((s) => s.id === id)).filter(Boolean) as Site[]
+    const matched = siteIds.map((id) => allSites.find((s) => s.id === id)).filter((site) => site !== undefined)
     if (matched.length === 0) {
       return <span className="text-xs text-muted-foreground">{siteIds.length} 个站点</span>
     }
@@ -56,7 +56,7 @@ function renderGroupSites(grp: AdminGroup | undefined, allSites: Site[]) {
   }
   const matched = grp.site_ids
     .map((id) => allSites.find((s) => s.id === id))
-    .filter(Boolean) as Site[]
+    .filter((site) => site !== undefined)
   return (
     <div className="flex flex-wrap gap-1 max-w-xs">
       {matched.map((s) => (
@@ -68,7 +68,7 @@ function renderGroupSites(grp: AdminGroup | undefined, allSites: Site[]) {
   )
 }
 
-function renderAccountSites(item: AdminAccount, groups: AdminGroup[], allSites: Site[]) {
+function renderAccountSites(item: AdminAccount, groups: AdminGroup[], allSites: SiteOption[]) {
   if (item.is_super) {
     return <span className="text-xs text-muted-foreground">全部站点（超管）</span>
   }
@@ -79,7 +79,7 @@ function renderAccountSites(item: AdminAccount, groups: AdminGroup[], allSites: 
 function renderActiveSitePerms(
   item: AdminAccount,
   groups: AdminGroup[],
-  activeSite: Site | undefined,
+  activeSite: SiteOption | undefined,
   allPermissions: { key: string; label: string }[]
 ) {
   if (item.is_super) {
@@ -113,7 +113,7 @@ function renderActiveSitePerms(
 }
 
 export function UsersPage({ currentUserID }: { currentUserID: number }) {
-  const { sites, activeSite } = useSite()
+  const { managedSites: sites, activeSite } = useSite()
   const [accounts, setAccounts] = useState<AdminAccount[]>([])
   const [categories, setCategories] = useState<CategoryItem[]>([])
   const [groups, setGroups] = useState<AdminGroup[]>([])

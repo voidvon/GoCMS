@@ -140,13 +140,16 @@ const platformNavItems: NavigationItem[] = [
   { id: "logs", label: "操作日志", icon: ScrollText },
 ]
 
+function isPlatformView(view: AdminView) {
+  return platformNavItems.some((item) => item.id === view)
+}
+
 function canView(user: AdminUser, view: AdminView, activeSiteId?: number) {
-  if (view === "mail" || view === "member-login" || view === "geography" || view === "database-backup" || view === "sites" || view === "users") return user.is_super
   if (user.is_super) return true
+  if (isPlatformView(view)) return false
   if (activeSiteId && user.site_ids && user.site_ids.length > 0 && !user.site_ids.includes(activeSiteId)) {
     return false
   }
-  if (view === "logs") return user.permissions.includes("logs") || user.permissions.includes("login_logs")
   if (view === "overview") return true
   const permission = view === "commerce-dimensions" ? "payments" : view
   if (activeSiteId && user.site_permissions && user.site_permissions[activeSiteId]) {
@@ -159,8 +162,7 @@ function canView(user: AdminUser, view: AdminView, activeSiteId?: number) {
 function Navigation({ activeView, onNavigate, onClose, collapsed = false, user }: NavigationProps) {
   const { activeSite } = useSite()
   const visibleMainItems = mainNavItems.filter((item) => canView(user, item.id, activeSite?.id))
-  const visiblePlatformItems = platformNavItems.filter((item) => canView(user, item.id, activeSite?.id))
-  const isPlatformActive = visiblePlatformItems.some((item) => item.id === activeView)
+  const isPlatformActive = user.is_super && isPlatformView(activeView)
 
   const [platformOpen, setPlatformOpen] = useState(true)
 
@@ -201,7 +203,7 @@ function Navigation({ activeView, onNavigate, onClose, collapsed = false, user }
         )
       })}
 
-      {visiblePlatformItems.length > 0 && (
+      {user.is_super && (
         <div className="pt-2">
           {collapsed ? (
             <DropdownMenu>
@@ -222,7 +224,7 @@ function Navigation({ activeView, onNavigate, onClose, collapsed = false, user }
                   <DropdownMenuLabel>平台管理</DropdownMenuLabel>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
-                {visiblePlatformItems.map((item) => {
+                {platformNavItems.map((item) => {
                   const Icon = item.icon
                   const active = activeView === item.id
                   return (
@@ -267,7 +269,7 @@ function Navigation({ activeView, onNavigate, onClose, collapsed = false, user }
               </Button>
               {platformOpen && (
                 <div className="ml-4 pl-3 border-l border-border/60 space-y-1 pt-0.5">
-                  {visiblePlatformItems.map((item) => {
+                  {platformNavItems.map((item) => {
                     const Icon = item.icon
                     const active = activeView === item.id
                     return (
@@ -364,7 +366,7 @@ function Sidebar({ activeView, onNavigate, user, onLogout, adminName, collapsed 
           </div>}
         </div>
         <div className={cn("mt-3 shrink-0", collapsed ? "flex justify-center" : "px-1")}>
-          <SiteControls onNavigate={onNavigate} collapsed={collapsed} />
+          <SiteControls onNavigate={onNavigate} canManageSites={user.is_super} collapsed={collapsed} />
         </div>
         <ScrollArea className="mt-3 min-h-0 flex-1" contentClassName="pb-4">
           <Navigation user={user} activeView={activeView} onNavigate={onNavigate} collapsed={collapsed} />
@@ -381,7 +383,7 @@ function Sidebar({ activeView, onNavigate, user, onLogout, adminName, collapsed 
   )
 }
 
-function viewMeta(view: AdminView): { parent?: string; title: string; description: string } {
+function viewMeta(view: AdminView): { parent?: string; title: string; description?: string } {
   switch (view) {
     case "security":
       return { parent: "平台管理", title: "安全防护", description: "管理站点扫描防护、IP 黑白名单与 Nginx 同步" }
@@ -436,10 +438,12 @@ function viewMeta(view: AdminView): { parent?: string; title: string; descriptio
 
 function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
   const { activeSite } = useSite()
-  if (!canView(user, view, activeSite?.id)) return <p className="text-sm text-muted-foreground">当前用户组没有此模块的管理权限。</p>
+  if (!canView(user, view, activeSite?.id)) {
+    return <p className="text-sm text-muted-foreground">{isPlatformView(view) ? "平台管理仅限超级管理员。" : "当前用户组没有此模块的管理权限。"}</p>
+  }
   switch (view) {
     case "security":
-      return <SecurityPage user={user} key={activeSite?.id} />
+      return <SecurityPage key={activeSite?.id} />
     case "commerce-dimensions":
       return <CommerceDimensionsPage user={user} key={activeSite?.id} />
     case "mail":
@@ -457,7 +461,7 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
     case "sites":
       return <SitesPage />
     case "logs":
-      return <LogsPage user={user} />
+      return <LogsPage />
     case "traffic":
       return <TrafficPage user={user} />
     case "redirects":
@@ -492,7 +496,7 @@ function ViewContent({ view, user }: { view: AdminView; user: AdminUser }) {
 export function AdminShell({ user, onLogout }: AdminShellProps) {
   return (
     <AdminSettingsProvider>
-      <SiteProvider>
+      <SiteProvider canManageSites={user.is_super}>
         <LanguageProvider>
           <HeaderActionsProvider>
             <SitePublicationShell user={user} onLogout={onLogout} />
@@ -549,7 +553,9 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
       window.removeEventListener("keydown", onKeyDown)
     }
   }, [])
-  const meta = viewMeta(activeView)
+  const meta: ReturnType<typeof viewMeta> = !user.is_super && isPlatformView(activeView)
+    ? { title: "访问受限" }
+    : viewMeta(activeView)
 
   async function handleLogout() {
     await logout().catch(() => undefined)
@@ -603,6 +609,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
                 </SheetHeader>
                 <div className="mt-3 px-2">
                   <SiteControls
+                    canManageSites={user.is_super}
                     onNavigate={(view) => {
                       navigate(view)
                       setMobileOpen(false)
@@ -627,7 +634,7 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
                 {meta.parent && <span className="text-muted-foreground font-normal">{meta.parent} / </span>}
                 {meta.title}
               </h1>
-              <p className="hidden text-xs text-muted-foreground sm:block">{meta.description}</p>
+              {meta.description && <p className="hidden text-xs text-muted-foreground sm:block">{meta.description}</p>}
             </div>
           </div>
           <div className="ml-auto flex max-w-full flex-wrap items-center justify-end gap-2">
@@ -660,27 +667,29 @@ function AdminShellInner({ user, onLogout }: AdminShellProps) {
 // longer switched here — that happens on the 多语言 page.
 function SiteControls({
   onNavigate,
+  canManageSites,
   collapsed = false,
   panelSide = "right",
 }: {
   onNavigate: (view: AdminView) => void
+  canManageSites: boolean
   collapsed?: boolean
   panelSide?: "bottom" | "right"
 }) {
   const { activeSiteId } = useSite()
   return (
     <div className={cn("flex min-w-0 items-center gap-1", collapsed && "flex-col")}>
-      <SiteSwitcher onNavigate={onNavigate} collapsed={collapsed} />
+      <SiteSwitcher onManageSites={canManageSites ? () => onNavigate("sites") : undefined} collapsed={collapsed} />
       <NotificationBell siteId={activeSiteId} onNavigate={onNavigate} panelSide={panelSide} />
     </div>
   )
 }
 
 function SiteSwitcher({
-  onNavigate,
+  onManageSites,
   collapsed = false,
 }: {
-  onNavigate: (view: AdminView) => void
+  onManageSites?: () => void
   collapsed?: boolean
 }) {
   const { sites, activeSite, setActiveSite } = useSite()
@@ -729,13 +738,14 @@ function SiteSwitcher({
             </DropdownMenuItem>
           ))}
         </DropdownMenuGroup>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          className="text-xs text-primary cursor-pointer"
-          onClick={() => onNavigate("sites")}
-        >
-          多站点管理...
-        </DropdownMenuItem>
+        {onManageSites && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="text-xs text-primary cursor-pointer" onClick={onManageSites}>
+              多站点管理...
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   )

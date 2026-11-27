@@ -137,6 +137,36 @@ func siteForAdmin(site db.Site) adminSiteView {
 	return adminSiteView{Site: site, PublicOrigin: db.PublicOrigin(site.Domain)}
 }
 
+const siteOptionsRoute = "/api/admin/site-options"
+
+func (s *Server) adminSiteOptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		methodNotAllowed(w)
+		return
+	}
+	user := s.currentAdmin(r)
+	sites, err := db.ListSites(r.Context(), s.database)
+	if err != nil {
+		accountError(w, err)
+		return
+	}
+	type option struct {
+		ID           int64  `json:"id"`
+		Name         string `json:"name"`
+		Domain       string `json:"domain"`
+		PublicOrigin string `json:"public_origin"`
+		IsDefault    bool   `json:"is_default"`
+		Status       string `json:"status"`
+	}
+	items := make([]option, 0, len(sites))
+	for _, site := range sites {
+		if user.CanManageSite(site.ID) {
+			items = append(items, option{site.ID, site.Name, site.Domain, db.PublicOrigin(site.Domain), site.IsDefault, site.Status})
+		}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 func (s *Server) adminSites(w http.ResponseWriter, r *http.Request) {
 	user := s.currentAdmin(r)
 	if user == nil {

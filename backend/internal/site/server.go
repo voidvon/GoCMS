@@ -269,7 +269,7 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminMail(response, request)
 		return
 	}
-	if strings.HasPrefix(lowerAdminPath, "/api/admin/member-login") {
+	if lowerAdminPath == "/api/admin/member-login" || strings.HasPrefix(lowerAdminPath, "/api/admin/member-login/") {
 		s.adminMemberLogin(response, request)
 		return
 	}
@@ -340,6 +340,8 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminContent(response, request)
 	case "/api/admin/content/image-preview":
 		s.adminContentImagePreview(response, request)
+	case contentEditorSchemaRoute:
+		s.adminContentEditorSchema(response, request)
 	case "/api/admin/media":
 		s.adminMedia(response, request)
 	case mediaCleanupRoute:
@@ -372,8 +374,12 @@ func (s *Server) serveHTTP(response http.ResponseWriter, request *http.Request) 
 		s.adminModels(response, request)
 	case "/api/admin/categories":
 		s.adminCategories(response, request)
+	case categoryEditorOptionsRoute:
+		s.adminCategoryEditorOptions(response, request)
 	case "/api/admin/sites":
 		s.adminSites(response, request)
+	case siteOptionsRoute:
+		s.adminSiteOptions(response, request)
 	case "/api/admin/site-settings":
 		s.adminSiteSettings(response, request)
 	case "/api/admin/languages":

@@ -20,24 +20,6 @@ func (s *Server) StartSecurityMaintenance(ctx context.Context) {
 	}
 }
 
-func (s *Server) authorizeSecurity(w http.ResponseWriter, r *http.Request, u *AdminUser) bool {
-	route := strings.ToLower(r.URL.Path)
-	platform := strings.HasPrefix(route, "/api/admin/security/platform") || strings.HasPrefix(route, "/api/admin/security/nginx") || r.URL.Query().Get("scope") == "global"
-	if platform {
-		if u.IsSuper {
-			return true
-		}
-		writeJSON(w, 403, map[string]string{"error": "平台安全设置和全局名单需要超级管理员权限"})
-		return false
-	}
-	siteID, err := s.resolveSiteID(r, u)
-	if err == nil && u.HasPermissionInSite(siteID, "security") && (r.Method == http.MethodGet || u.HasPermissionInSite(siteID, "security.manage")) {
-		return true
-	}
-	writeJSON(w, 403, map[string]string{"error": "当前用户没有此站点的安全防护权限"})
-	return false
-}
-
 func (s *Server) securityScope(r *http.Request) (int64, error) {
 	switch r.URL.Query().Get("scope") {
 	case "global":
@@ -176,15 +158,6 @@ func (s *Server) adminSecurity(w http.ResponseWriter, r *http.Request) {
 			}
 			if err := security.ValidatePolicy(&p); err != nil {
 				accountInputError(w, err.Error())
-				return
-			}
-			old, err := security.LoadPolicy(r.Context(), s.database, scope)
-			if err != nil {
-				accountError(w, err)
-				return
-			}
-			if u := s.currentAdmin(r); u == nil || (!u.IsSuper && (p.BanScope == "global" || (old.Enabled && old.BanScope == "global"))) {
-				writeJSON(w, 403, map[string]string{"error": "全平台自动封禁需由超级管理员配置"})
 				return
 			}
 			if err := security.SaveConfig(r.Context(), s.database, scope, p); err != nil {

@@ -14,8 +14,7 @@ import {
   createCategory,
   deleteCategory,
   getCategories,
-  getSystemModels,
-  getThemeFiles,
+  getCategoryEditorOptions,
   updateCategory,
   type AdminUser,
   type CategoryInput,
@@ -23,7 +22,7 @@ import {
   type CategoryTranslationItem,
   type Language,
   type SaveResponse,
-  type SystemModel,
+  type CategoryModelOption,
   type ThemeFile,
   type ThemeTemplateGroup,
 } from "@/lib/api"
@@ -301,7 +300,7 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
   const permissions = user.site_permissions?.[activeSiteId] ?? user.permissions
   const canManageCommerce = user.is_super || permissions.includes("*") || permissions.includes("payments")
   const [categories, setCategories] = useState<CategoryItem[]>([])
-  const [models, setModels] = useState<SystemModel[]>([])
+  const [models, setModels] = useState<CategoryModelOption[]>([])
   const [templateFiles, setTemplateFiles] = useState<ThemeFile[]>([])
   const [templateGroups, setTemplateGroups] = useState<ThemeTemplateGroup[]>([])
   const [loading, setLoading] = useState(true)
@@ -377,19 +376,19 @@ export function CategoriesPage({ user }: { user: AdminUser }) {
 
   useEffect(() => {
     let active = true
-    Promise.all([getCategories(activeLang), getThemeFiles(), getSystemModels()])
-      .then(([nextCategories, theme, nextModels]) => {
+    Promise.all([getCategories(activeLang), getCategoryEditorOptions()])
+      .then(([nextCategories, { models, template_files, template_groups }]) => {
         if (!active) return
         setCategories(nextCategories)
-        setModels(nextModels)
-        setTemplateFiles(theme.template_files)
-        setTemplateGroups(theme.template_groups)
+        setModels(models)
+        setTemplateFiles(template_files)
+        setTemplateGroups(template_groups)
         setError("")
         setEditing((prevEditing) => {
           if (prevEditing) {
             const updated = nextCategories.find((category) => category.id === prevEditing.id)
             if (updated) {
-              setForm(categoryInput(updated, theme.template_groups, theme.template_files))
+              setForm(categoryInput(updated, template_groups, template_files))
               setTranslations(buildInitialCategoryTranslations(updated, defaultLang, enabledLanguages))
               return updated
             }

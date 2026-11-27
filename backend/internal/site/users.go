@@ -6,14 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
 	"gocms/internal/auth"
 )
 
-// Module permissions follow EmpireCMS's user-group model. Account/group
-// administration and executable updates remain exclusive to super administrators.
+// User groups grant site permissions. Platform administration uses IsSuper.
 var adminPermissions = []struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
@@ -28,14 +28,35 @@ var adminPermissions = []struct {
 	{"payments.configure", "配置支付账户"},
 	{"payments.refund", "发起支付退款"},
 	{"payments.fulfill", "处理订单交付"},
-	{"models", "系统模型"}, {"theme", "模板管理"},
+	{"theme", "模板管理"},
 	{"publish", "网站发布"}, {"languages", "语言配置"},
-	{"logs", "查看操作日志"},
-	{"login_logs", "查看登录日志"},
 	{"traffic", "访问统计"},
 	{"traffic.clear", "清空访问日志"},
-	{"security", "查看站点安全防护"}, {"security.manage", "管理站点安全防护"},
 	{"redirects", "查看重定向规则"}, {"redirects.manage", "管理重定向规则"},
+}
+
+func isPlatformAdminModule(module string) bool {
+	switch module {
+	case "security", "mail", "member-login", "geography", "database-backup",
+		"sites", "site-settings", "users", "groups", "models", "model-tables", "model-fields",
+		"api-keys", "logs", "logins", "update", "media-storage":
+		return true
+	}
+	return false
+}
+
+// Older groups could delegate these platform permissions.
+func withoutRetiredPermissions(permissions []string) []string {
+	if permissions == nil {
+		return []string{}
+	}
+	return slices.DeleteFunc(permissions, func(key string) bool {
+		switch key {
+		case "models", "logs", "login_logs", "security", "security.manage":
+			return true
+		}
+		return false
+	})
 }
 
 func (u *AdminUser) hasPermission(key string) bool {
@@ -70,6 +91,7 @@ func (s *Server) loadAdmin(ctx context.Context, username string) (*AdminUser, er
 			return nil, err
 		}
 	}
+	user.Permissions = withoutRetiredPermissions(user.Permissions)
 	if categories.Valid && categories.String != "" && categories.String != "null" {
 		_ = json.Unmarshal([]byte(categories.String), &user.CategoryIDs)
 	}
@@ -80,7 +102,7 @@ func (s *Server) loadAdmin(ctx context.Context, username string) (*AdminUser, er
 			var derivedSiteIDs []int64
 			for k, v := range rawMap {
 				if id, err := strconv.ParseInt(k, 10, 64); err == nil {
-					user.SitePermissions[id] = v
+					user.SitePermissions[id] = withoutRetiredPermissions(v)
 					derivedSiteIDs = append(derivedSiteIDs, id)
 				}
 			}
@@ -140,14 +162,11 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "未登录或账号已停用"})
 		return false
 	}
-	module := strings.Split(strings.TrimPrefix(route, "/api/admin/"), "/")[0]
-	if module == "logins" {
-		module = "login_logs"
-	}
+	module, _, _ := strings.Cut(strings.TrimPrefix(route, "/api/admin/"), "/")
 	*r = *r.WithContext(context.WithValue(r.Context(), contentScopeKey{}, u))
 	// Identity and the list of accessible sites are independent of the last
 	// selected site. The browser uses them to recover an obsolete selection.
-	if module == "session" || (module == "sites" && r.Method == http.MethodGet) {
+	if module == "session" || (route == siteOptionsRoute && r.Method == http.MethodGet) {
 		return true
 	}
 	if route == adminSettingsRoute {
@@ -157,32 +176,12 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "只有超级管理员可以修改后台设置"})
 		return false
 	}
-	if module == "media-storage" {
+	if isPlatformAdminModule(module) {
 		if u.IsSuper {
 			return true
 		}
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "文件存储仅允许超级管理员配置"})
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "平台管理仅限超级管理员"})
 		return false
-	}
-	if module == "database-backup" {
-		if u.IsSuper {
-			return true
-		}
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "只有超级管理员可以管理备份"})
-		return false
-	}
-	if module == "geography" {
-		if u.IsSuper {
-			return true
-		}
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "地址数据仅允许超级管理员通过后台管理"})
-		return false
-	}
-	if module == "member-login" || module == "mail" {
-		return s.authorizeMemberLogin(w, u)
-	}
-	if module == "security" {
-		return s.authorizeSecurity(w, r, u)
 	}
 	if module == "orders" {
 		return s.authorizeOrders(w, r, u)
@@ -190,13 +189,7 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 	if module == "payments" {
 		return s.authorizePaymentOperation(w, r, u)
 	}
-	if module == "users" || module == "groups" || (module == "sites" && r.Method != http.MethodGet) {
-		if u.IsSuper {
-			return true
-		}
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "当前用户组没有此操作权限"})
-		return false
-	} else if u.IsSuper {
+	if u.IsSuper {
 		return true
 	} else {
 		siteID, err := s.resolveSiteID(r, u)
@@ -230,11 +223,11 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 			return true
 		}
 		switch module {
-		case "stats", "site-settings", "notifications":
+		case "stats", "notifications":
 			return true
-		case "languages", "categories", "models", "model-fields", "model-tables":
-			// Editor selectors require read-only site, model, language and category metadata.
-			if r.Method == http.MethodGet {
+		case "languages", "categories":
+			// The shell and content editor use the language and category lists.
+			if r.Method == http.MethodGet && route != categoryEditorOptionsRoute {
 				return true
 			}
 		}
@@ -249,8 +242,6 @@ func (s *Server) authorizeAdminRoute(w http.ResponseWriter, r *http.Request, rou
 			}
 		case "template", "templates":
 			module = "theme"
-		case "model-fields", "model-tables":
-			module = "models"
 		case "feedback", "feedback-classes", "feedback-fields":
 			module = "messages"
 		case "site-users", "member-groups":
@@ -300,6 +291,7 @@ func (s *Server) adminGroups(w http.ResponseWriter, r *http.Request) {
 				accountError(w, err)
 				return
 			}
+			item.Permissions = withoutRetiredPermissions(item.Permissions)
 			if rawSites.Valid && rawSites.String != "" && rawSites.String != "null" {
 				var sites []int64
 				if err := json.Unmarshal([]byte(rawSites.String), &sites); err == nil {
@@ -313,7 +305,7 @@ func (s *Server) adminGroups(w http.ResponseWriter, r *http.Request) {
 					var derivedSiteIDs []int64
 					for k, v := range rawMap {
 						if id, err := strconv.ParseInt(k, 10, 64); err == nil {
-							item.SitePermissions[id] = v
+							item.SitePermissions[id] = withoutRetiredPermissions(v)
 							derivedSiteIDs = append(derivedSiteIDs, id)
 						}
 					}
@@ -350,6 +342,7 @@ func (s *Server) adminGroups(w http.ResponseWriter, r *http.Request) {
 			accountInputError(w, "请输入用户组名称（最多 120 字节）")
 			return
 		}
+		input.Permissions = withoutRetiredPermissions(input.Permissions)
 		for _, key := range input.Permissions {
 			valid := false
 			for _, permission := range adminPermissions {
@@ -403,6 +396,7 @@ func (s *Server) adminGroups(w http.ResponseWriter, r *http.Request) {
 					accountInputError(w, "包含不存在的站点")
 					return
 				}
+				perms = withoutRetiredPermissions(perms)
 				for _, p := range perms {
 					valid := false
 					for _, ap := range adminPermissions {

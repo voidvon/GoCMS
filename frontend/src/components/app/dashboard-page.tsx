@@ -78,12 +78,7 @@ function statusTone(status: number) {
 export function DashboardPage({ user }: { user: AdminUser }) {
   const { activeSite } = useSite()
   const siteId = activeSite?.id
-  const permissions = user.site_permissions && Object.keys(user.site_permissions).length > 0
-    ? user.site_permissions[siteId ?? 0] ?? []
-    : user.permissions
-  const canBlockIP = user.is_super || permissions.includes("*") || (
-    permissions.includes("security") && permissions.includes("security.manage")
-  )
+  const canBlockIP = user.is_super
   const [timeWindow, setTimeWindow] = useState<DashboardWindow>("24h")
   const [errorSort, setErrorSort] = useState<ErrorSort>("recent")
   const [hideBlockedErrors, setHideBlockedErrors] = useState(false)

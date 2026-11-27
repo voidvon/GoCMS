@@ -816,7 +816,7 @@ func TestMultiSiteRound3AuditFixes(t *testing.T) {
 		t.Fatalf("expected 200 creating category on site 1 with site 1 template, got %d: %s", wCatS1Valid.Code, wCatS1Valid.Body.String())
 	}
 
-	// 7. Site-Specific content.review Permission & Subsite site-settings authorization
+	// 7. Site-specific content review and platform-only site settings.
 	if _, err := database.Exec(`
 		INSERT INTO gocms_admin_group (id, name, permissions, site_ids, site_permissions) VALUES (301, 'S2 Editor Group', '["content", "content.add", "content.edit"]', '[2]', '{"2":["content","content.add","content.edit","content.review"]}');
 		INSERT INTO gocms_admin_user (username, group_id, site_ids) VALUES ('s2_reviewer', 301, '[2]');
@@ -825,10 +825,10 @@ func TestMultiSiteRound3AuditFixes(t *testing.T) {
 	}
 	s2ReviewerToken, _ := s.createSession("s2_reviewer")
 
-	// Verify s2_reviewer can edit site-settings for site 2
+	// Site access and content review do not grant management of site settings.
 	wS2Settings := categoryRequest(t, s, s2ReviewerToken, "POST", fmt.Sprintf("/api/admin/site-settings?site_id=%d", site2ID), `{"site_name":"S2 Custom Title"}`)
-	if wS2Settings.Code != 200 {
-		t.Fatalf("subsite admin cannot edit site-settings: %d %s", wS2Settings.Code, wS2Settings.Body.String())
+	if wS2Settings.Code != 403 {
+		t.Fatalf("subsite reviewer edited site-settings: %d %s", wS2Settings.Code, wS2Settings.Body.String())
 	}
 
 	// Verify s2_reviewer cannot edit site-settings for site 1 (403)

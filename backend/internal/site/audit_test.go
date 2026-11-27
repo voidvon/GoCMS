@@ -109,8 +109,8 @@ func TestOperationLogs(t *testing.T) {
 	if _, err := database.Exec(`INSERT INTO gocms_admin_group (name, permissions) VALUES ('Auditors', '["logs"]'); UPDATE gocms_admin_user SET group_id = (SELECT id FROM gocms_admin_group WHERE name = 'Auditors') WHERE username = 'reader'`); err != nil {
 		t.Fatal(err)
 	}
-	if r := categoryRequest(t, s, reader, "GET", "/api/admin/logs", ""); r.Code != 200 {
-		t.Fatalf("auditor denied: %d", r.Code)
+	if r := categoryRequest(t, s, reader, "GET", "/api/admin/logs", ""); r.Code != 403 {
+		t.Fatalf("legacy group permission granted access to platform logs: %d", r.Code)
 	}
 }
 
@@ -156,16 +156,10 @@ func TestMultiSiteAuditLogIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 4. Auditor 1 queries logs on Site 1 -> must only see site 1 ops
+	// 4. Old grants do not allow site administrators to read platform logs.
 	rLogsS1 := categoryRequest(t, s, s1AuditorToken, "GET", "/api/admin/logs?site_id=1", "")
-	if rLogsS1.Code != 200 {
-		t.Fatalf("auditor s1 logs failed: %d %s", rLogsS1.Code, rLogsS1.Body.String())
-	}
-	if !strings.Contains(rLogsS1.Body.String(), `"site_id":1`) {
-		t.Fatalf("expected site 1 logs, got: %s", rLogsS1.Body.String())
-	}
-	if strings.Contains(rLogsS1.Body.String(), fmt.Sprintf(`"site_id":%d`, site2ID)) {
-		t.Fatalf("site 2 logs leaked to site 1 auditor: %s", rLogsS1.Body.String())
+	if rLogsS1.Code != 403 {
+		t.Fatalf("site 1 logs accessible to non-super administrator: %d %s", rLogsS1.Code, rLogsS1.Body.String())
 	}
 
 	// 5. Auditor 1 tries to query logs for Site 2 -> must be 403 Forbidden
@@ -174,13 +168,10 @@ func TestMultiSiteAuditLogIsolation(t *testing.T) {
 		t.Fatalf("expected 403 for unauthorized site logs, got: %d", rLogsS2Forbidden.Code)
 	}
 
-	// 6. Auditor 1 queries login logs -> can only see their own logins, not superadmin's
+	// 6. Login logs are also restricted to super administrators.
 	rLoginLogs := categoryRequest(t, s, s1AuditorToken, "GET", "/api/admin/logins", "")
-	if rLoginLogs.Code != 200 {
-		t.Fatalf("auditor logins: %d", rLoginLogs.Code)
-	}
-	if strings.Contains(rLoginLogs.Body.String(), "gocms") {
-		t.Fatalf("superadmin logins leaked to subsite auditor: %s", rLoginLogs.Body.String())
+	if rLoginLogs.Code != 403 {
+		t.Fatalf("login logs accessible to non-super administrator: %d %s", rLoginLogs.Code, rLoginLogs.Body.String())
 	}
 
 	// 7. Superadmin can filter logs by site_id=2
